@@ -1,0 +1,18 @@
+# Força HTTPS (cadeado) — ative o SSL gratuito no cPanel antes
+RewriteEngine On
+RewriteCond %{HTTPS} off
+RewriteCond %{HTTP:X-Forwarded-Proto} !https
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+# Bloqueia acesso direto a arquivos sensíveis
+<FilesMatch "^(config\.php|config\.exemplo\.php|.*\.sqlite.*|.*\.md)$">
+  Require all denied
+</FilesMatch>
+
+Options -Indexes
+
+<IfModule mod_headers.c>
+  Header always set X-Frame-Options "DENY"
+  Header always set Referrer-Policy "same-origin"
+  Header always set Strict-Transport-Security "max-age=31536000"
+</IfModule>

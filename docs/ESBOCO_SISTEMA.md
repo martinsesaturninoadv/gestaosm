@@ -3,8 +3,8 @@
 Um sistema próprio que reúne num só lugar **clientes, processos, prazos, financeiro, captação e documentos**.
 Este documento descreve o que o sistema faz, como os dados se organizam e um caminho para tirá-lo do protótipo e colocá-lo em produção.
 
-> **Protótipo navegável:** `ms_gestao_escritorio_v4.html`. Abra no navegador, sem instalar nada.
-> Ele já vem com dados fictícios e guarda as alterações no próprio navegador (dá para exportar/importar backup em *Configurações*).
+> **Sistema:** pasta `sistema/`. Aberto direto no navegador, roda em modo demonstração (dados fictícios, salvos só naquele navegador).
+> Hospedado com PHP + MySQL (ex.: HostGator), vira multiusuário com login: veja `docs/HOSPEDAGEM.md`.
 
 ---
 
