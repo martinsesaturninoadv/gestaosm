@@ -293,7 +293,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--brand2)}
 <div id="page-clientes" class="hidden">
   <div class="topbar">
     <div class="ptitle">Clientes Ativos</div>
-    <div class="tactions"><button class="btn btn-gold btn-sm" onclick="openModal('modal-lead')">+ Novo Cliente</button></div>
+    <div class="tactions"><button class="btn btn-ghost btn-sm" onclick="exportClientesCSV()" title="Lista usada pela automação que organiza os arquivos por pasta">⤓ Exportar p/ automação</button><button class="btn btn-gold btn-sm" onclick="openModal('modal-lead')">+ Novo Cliente</button></div>
   </div>
   <div class="content">
     <div class="card"><div class="ctitle">Clientes em Andamento <small>Clique no nome para editar · Clique na linha para detalhes</small></div><div id="clientes-list"></div></div>
@@ -761,6 +761,16 @@ function renderClientes(){
     row.appendChild(av);row.appendChild(info);row.appendChild(p1);row.appendChild(p2);row.appendChild(detBtn);
     el.appendChild(row);
   });
+}
+
+// Gera o clientes.csv lido por automacao/organizar_clientes.py
+function exportClientesCSV(){
+  const esc=v=>(v||'').replace(/[;\r\n]+/g,' ').trim();
+  const linhas=['nome;cpf;apelidos'].concat(S.leads.map(l=>esc(l.nome)+';'+esc(l.cpf)+';'));
+  const blob=new Blob(['\ufeff'+linhas.join('\r\n')],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='clientes.csv';
+  document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(a.href);
+  toast('clientes.csv exportado ✓','var(--green)');
 }
 
 // ===== DETALHE =====
