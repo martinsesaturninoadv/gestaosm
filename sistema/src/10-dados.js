@@ -211,7 +211,7 @@ async function iniciar(){
       await entrar(s.usuario);return;
     }catch(e){
       if(e&&e.status===401){db=vazio();render();mostrarLogin();return;}
-      if(e&&e.status===503&&!e.naoApi){db=vazio();$('#view').innerHTML='<div class="card"><h3>Sistema ainda não configurado</h3><p>Crie o arquivo <b>config.php</b> a partir de <b>config.exemplo.php</b> com os dados do banco de dados e depois abra <b>instalar.php</b>. Veja o guia de hospedagem.</p></div>';return;}
+      if(e&&e.status===503&&!e.naoApi){db=vazio();$('#view').innerHTML='<div class="card"><h3>Sistema ainda não configurado</h3><p>Falta só um passo: <a href="instalar.php"><b>clique aqui para instalar</b></a> (cria o banco de dados e o seu acesso de administrador).</p></div>';return;}
       if(e&&e.status===500&&!e.naoApi){db=vazio();$('#view').innerHTML='<div class="card"><h3>Erro de conexão com o banco de dados</h3><p>Confira host, nome do banco, usuário e senha no <b>config.php</b>.</p></div>';return;}
     }
   }

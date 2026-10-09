@@ -39,44 +39,30 @@ Na hospedagem, tudo fica num **banco de dados MySQL** do escritório, e não mai
 cPanel → **Domínios** (ou "Subdomínios") → crie `sistema.seudominio.com.br`.
 O cPanel cria uma pasta para ele, por exemplo `public_html/sistema`.
 
-### 3. Criar o banco de dados
-cPanel → **Bancos de dados MySQL**:
-1. **Criar novo banco**: ex. `gestao` (ele vira algo como `usuariocpanel_gestao`).
-2. **Adicionar novo usuário**: ex. `app`, com uma **senha forte** (use o gerador). Ele vira `usuariocpanel_app`.
-3. **Adicionar usuário ao banco**: escolha o usuário e o banco e marque **TODOS OS PRIVILÉGIOS**.
-4. Anote o nome completo do banco, do usuário e a senha.
+### 3. Enviar os arquivos
+1. Baixe o pacote **sistema-gestao-hostgator.zip**, que traz `index.html`, `api.php`, `instalar.php`, `config.exemplo.php` e `.htaccess`. Também dá para montar o pacote com esses arquivos da pasta `sistema` do GitHub.
+2. cPanel → **Gerenciador de Arquivos** → entre na pasta do subdomínio (ex.: `gestao.seudominio.com.br`).
+3. Clique em **Carregar**, envie o zip, volte para a pasta, clique com o botão direito no zip e escolha **Extract** (extrair). Depois apague o zip.
 
-### 4. Enviar os arquivos
-1. No GitHub, baixe o projeto (**Code → Download ZIP**) e abra a pasta `sistema`.
-2. cPanel → **Gerenciador de Arquivos** → entre na pasta do subdomínio (ex.: `public_html/sistema`).
-3. Clique em **Carregar** e envie os arquivos da pasta `sistema`:
-   - `index.html`: o sistema;
-   - `api.php`: conversa com o banco de dados;
-   - `instalar.php`: cria o primeiro acesso;
-   - `config.exemplo.php`: modelo de configuração;
-   - `.htaccess`: segurança (força o cadeado https e bloqueia arquivos sensíveis). Para vê-lo no Gerenciador, ative **Configurações → Mostrar arquivos ocultos**.
+### 4. Ativar o cadeado (SSL)
+cPanel → **SSL/TLS Status** → marque o subdomínio → **Run AutoSSL**. Isso só funciona depois que o DNS do domínio já aponta para a HostGator. O sistema exige `https://`.
 
-   A pasta `src` e o `build.py` **não** precisam ir para a hospedagem: são só o código-fonte usado para gerar o `index.html`.
+### 5. Instalar (tudo pelo navegador)
+1. Abra `https://gestao.seudominio.com.br/instalar.php`.
+2. Preencha **seu nome, e-mail e senha** e clique em **Instalar**.
+3. Pronto. O instalador:
+   - cria o banco de dados sozinho, num arquivo guardado **fora** da pasta pública do site;
+   - grava a configuração (`config.php`);
+   - cria o seu acesso de administrador;
+   - **apaga a si mesmo**.
 
-### 5. Configurar o acesso ao banco
-1. No Gerenciador de Arquivos, **copie** `config.exemplo.php` com o nome `config.php`.
-2. Clique com o botão direito em `config.php` → **Editar** e preencha:
-   ```php
-   'driver'  => 'mysql',
-   'host'    => 'localhost',
-   'banco'   => 'usuariocpanel_gestao',
-   'usuario' => 'usuariocpanel_app',
-   'senha'   => 'a senha forte do passo 3',
-   ```
-3. Salve.
+> Não é preciso criar banco MySQL no cPanel nem editar arquivo nenhum. Se preferir usar MySQL, abra "Banco de dados" no instalador e informe um banco criado em **cPanel → Bancos de dados MySQL**.
 
-### 6. Versão do PHP
+### 6. Versão do PHP (só se der erro)
 cPanel → **Selecionar versão do PHP** (ou "MultiPHP Manager"): escolha **PHP 8.1 ou mais novo** (mínimo 7.4).
 
-### 7. Instalar
-1. Abra `https://sistema.seudominio.com.br/instalar.php`.
-2. Cadastre o **administrador** (seu nome, e-mail e senha).
-3. **Apague o arquivo `instalar.php`** no Gerenciador de Arquivos. Ele também se bloqueia sozinho depois do primeiro cadastro, mas é melhor não deixá-lo lá.
+### 7. Entrar no sistema
+Abra `https://gestao.seudominio.com.br` e entre com o e-mail e a senha que você cadastrou.
 
 ### 8. Primeiro uso
 1. Abra `https://sistema.seudominio.com.br` e entre com o administrador.
@@ -106,7 +92,7 @@ Substitua só `index.html` e `api.php`. O `config.php` e o banco de dados contin
 ## Problemas comuns
 | Mensagem | O que fazer |
 |---|---|
-| "Sistema ainda não configurado" | Falta o `config.php` (passo 5). |
+| "Sistema ainda não configurado" | Abra `instalar.php` (passo 5). |
 | "Erro de conexão com o banco de dados" | Confira no `config.php` o nome **completo** do banco e do usuário (com o prefixo do cPanel) e a senha, e se o usuário foi adicionado ao banco com todos os privilégios. |
 | Página em branco ou "500" | Verifique a versão do PHP (passo 6). |
 | Abre sem cadeado | Ative o SSL/AutoSSL no cPanel e aguarde alguns minutos. |

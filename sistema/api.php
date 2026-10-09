@@ -75,7 +75,7 @@ function agoraMs(): int
 
 $arqConfig = __DIR__ . '/config.php';
 if (!is_file($arqConfig)) {
-    erro('Sistema não configurado: crie o arquivo config.php a partir de config.exemplo.php.', 503);
+    erro('Sistema não instalado: abra instalar.php neste mesmo endereço para instalar.', 503);
 }
 $cfg = require $arqConfig;
 
