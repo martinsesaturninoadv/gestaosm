@@ -304,15 +304,14 @@ table.ind td.cel:hover{background:var(--blue-l)}
 table.ind td.editado{font-style:italic;color:var(--brand2)}
 /* documentos */
 .folha-wrap{background:var(--gray-l);border-radius:12px;padding:18px;overflow:auto;min-width:0}
-.folha{background:#fff;color:#111;max-width:780px;margin:0 auto;padding:48px 56px;box-shadow:0 4px 18px rgba(0,0,0,.12);font-family:'Times New Roman',Times,serif;font-size:14.5px;line-height:1.6;outline:none;min-height:600px}
-.folha .doc-cab{display:flex;align-items:center;gap:14px;border-bottom:2px solid #C8A84B;padding-bottom:10px;margin-bottom:22px}
-.folha .doc-logo{width:60px;height:60px;object-fit:contain}
-.folha .doc-esc{font-size:18px;font-weight:bold;color:#1B3A5C;font-family:Georgia,serif}
-.folha .doc-sub{font-size:11px;color:#666}
-.folha .doc-tit{font-size:15px;text-align:center;margin:0 0 18px;font-family:inherit}
+/* folha A4 (210 x 297 mm): margens de 2,54 cm, Arial 11, como o modelo do escritório */
+.folha{--W:780px;background:#fff no-repeat;background-size:100% calc(var(--W) * 1.41428);background-repeat:repeat-y;color:#111;width:100%;max-width:var(--W);margin:0 auto;
+  padding:calc(var(--W) * .0605) calc(var(--W) * .121) calc(var(--W) * .121);box-shadow:0 4px 18px rgba(0,0,0,.12);font-family:Arial,Helvetica,sans-serif;font-size:14.4px;line-height:1.38;outline:none;min-height:calc(var(--W) * 1.41428)}
+.folha .doc-cab{margin:0 0 calc(var(--W) * .045);user-select:none}
+.folha .doc-logo{width:calc(var(--W) * .2648);height:auto;display:block;margin-left:calc(var(--W) * .0321)}
+.folha .doc-tit{font-size:15.7px;text-align:center;margin:0 0 18px;font-family:inherit;font-weight:bold}
 .folha p{text-align:justify;margin:0 0 10px}
 .folha .doc-ass{text-align:center;margin-top:26px}
-.folha .doc-rod{border-top:1px solid #ddd;margin-top:30px;padding-top:6px;font-size:10.5px;color:#777;text-align:center}
 .exp-btns{display:grid;gap:8px;margin-top:14px}
 .logo-cfg{display:flex;gap:12px;align-items:center;margin-bottom:12px}
 .logo-cfg img{width:64px;height:64px;object-fit:contain;border-radius:10px;background:var(--gray-l)}
@@ -326,9 +325,26 @@ table.ind td.editado{font-style:italic;color:var(--brand2)}
 .chipf.on{background:var(--brand);border-color:var(--brand);color:#fff}.chipf.on span{color:rgba(255,255,255,.7)}
 .script-txt{white-space:pre-wrap;font-size:12.5px;color:var(--text2);background:var(--hover);border-radius:8px;padding:10px;max-height:220px;overflow:auto}
 @media print{
-  body.imprimindo *{visibility:hidden}
-  body.imprimindo #doc-preview,body.imprimindo #doc-preview *{visibility:visible}
-  body.imprimindo #doc-preview{position:absolute;left:0;top:0;box-shadow:none;padding:0;max-width:none;width:100%}
+  @page{size:A4;margin:0}
+  body.imprimindo>*:not(#print-doc){display:none!important}
+  body.imprimindo{background:#fff}
+  body.imprimindo #print-doc{display:block}
+  #print-doc .pd-marca{position:fixed;left:0;top:0;width:210mm;height:297mm;z-index:0}
+  #print-doc .pd-tab{position:relative;z-index:1;width:210mm;border-collapse:collapse}
+  #print-doc td{padding:0 25.4mm;border:0}
+  #print-doc .pd-cab{height:50mm;padding-top:12.7mm;box-sizing:border-box}
+  #print-doc .pd-cab img{width:55.6mm;height:auto;margin-left:6.75mm}
+  #print-doc .pd-rod{height:25.4mm}
+  #print-doc .pd-corpo{font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.38;color:#000}
+  #print-doc .pd-corpo p{text-align:justify;margin:0 0 8pt;orphans:3;widows:3}
+  #print-doc .pd-corpo .doc-tit{font-size:12pt;text-align:center;margin:0 0 12pt}
+  #print-doc .pd-corpo .doc-ass{text-align:center;margin-top:18pt;break-inside:avoid}
 }
 @media (max-width:860px){.podio{grid-template-columns:1fr 1fr 1fr}.hero{padding:16px}.hchip{min-width:0;flex:1 1 40%}.folha{padding:24px 18px}.ldemo{grid-template-columns:1fr}}
 .rank td,.rank th{padding:8px 6px}
+#print-doc{display:none}
+.timbrado-cfg{display:flex;gap:16px;align-items:flex-start}
+.tb-mini{width:120px;height:170px;flex-shrink:0;background:#fff no-repeat;background-size:100% 100%;border:1px solid var(--border2);border-radius:4px;padding:8px 14px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.tb-mini img{width:44px;display:block;margin-bottom:12px}
+.tb-mini i{display:block;height:3px;background:#ddd;border-radius:2px;margin:6px 0}
+.tb-mini i:nth-child(2){width:60%;margin-left:20%}

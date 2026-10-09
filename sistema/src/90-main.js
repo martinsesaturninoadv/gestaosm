@@ -27,7 +27,7 @@ function badges(){
   n('nb-fin',podeFin()?db.lancamentos.filter(l=>l.tipo==='receita'&&lancStatus(l)==='Atrasado').length:0);
   n('nb-docs',db.documentos.filter(d=>!d.recebido).length);
   n('nb-sm',guiasPendentes(7).length);
-  $('#brand-nome').textContent=(db.escritorio.nome||'Escritório').replace(/\s+Advocacia$/i,'');
+  $('#brand-nome').textContent=(db.escritorio.nome||'Escritório').replace(/\s+Advocacia(\s+e\s+Consultoria)?$/i,'');
 }
 function userBox(){
   const box=$('#suser');
@@ -90,14 +90,13 @@ const A={
 
   modeloCli:id=>{ui.tabDoc='gerador';ui.f.doc={...(ui.f.doc||{}),mcli:id,mproc:db.processos.find(p=>p.clienteId===id)?.id||'',mctr:''};location.hash='documentos';render();},
   tabDoc:k=>{ui.tabDoc=k;render();},
-  docWord:()=>{const h=$('#doc-preview').innerHTML;const m=db.modelos.find(x=>x.id===ui.f.doc.modelo);const nome=(m?.nome||'documento').replace(/[^\wÀ-ú -]+/g,'').replace(/\s+/g,'_')+(ui.f.doc.mcli?'_'+nomeCli(ui.f.doc.mcli).split(' ')[0]:'');
-    if(dlNs){download(nome+'.html',docCompleto(h),'text/html');return;}download(nome+'.doc','﻿'+docCompleto(h),'application/msword');},
-  docPrint:()=>{document.body.classList.add('imprimindo');setTimeout(()=>{window.print();setTimeout(()=>document.body.classList.remove('imprimindo'),400);},50);},
+  docWord:async()=>{try{toast('Gerando o Word…');const b=await gerarDocx();await download(nomeArquivoDoc()+'.docx',b);}catch(e){toast(e.message||'Falha ao gerar o Word',1);}},
+  docPrint:()=>imprimirDocumento(),
   docCopiar:()=>{const t=$('#doc-preview').innerText;(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast('Texto copiado ✓')).catch(()=>{const r=document.createRange();r.selectNodeContents($('#doc-preview'));const s=getSelection();s.removeAllRanges();s.addRange(r);document.execCommand('copy');s.removeAllRanges();toast('Texto copiado ✓');});},
-  docGoogle:async()=>{const f=ui.f.doc;const m=db.modelos.find(x=>x.id===f.modelo);const nome=(m?.nome||'Documento')+(f.mcli?' — '+nomeCli(f.mcli):'');
-    try{toast('Criando no Google Docs…');const pasta=f.mcli?await drivePastaCliente(f.mcli):await drivePastaRaiz();
-      const r=await driveUpload(new Blob([docCompleto($('#doc-preview').innerHTML)],{type:'text/html'}),nome,pasta,'application/vnd.google-apps.document');
-      abrirLinkModal('Documento criado no Google Docs',r.webViewLink,'O documento foi salvo'+(f.mcli?' na pasta do cliente':'')+' no Google Drive e pode ser editado e compartilhado.');}catch(e){gErro(e);}},
+  docGoogle:async()=>{const f=ui.f.doc;const m=gIndisponivel();if(m){gErro(new Error(m));return;}
+    try{toast('Criando no Google Docs…');const docx=await gerarDocx();const pasta=f.mcli?await drivePastaCliente(f.mcli):await drivePastaRaiz();
+      const r=await driveUpload(docx,nomeArquivoDoc(),pasta,'application/vnd.google-apps.document');
+      abrirLinkModal('Documento criado no Google Docs',r.webViewLink,'O documento foi salvo no papel timbrado'+(f.mcli?', na pasta do cliente,':'')+' no Google Drive e pode ser editado e compartilhado.');}catch(e){gErro(e);}},
   novoModelo:()=>editModelo(),editModelo:id=>editModelo(id),
   usarModelo:id=>{ui.tabDoc='gerador';ui.f.doc={...(ui.f.doc||{}),modelo:id};render();},
   duplicarModelo:id=>{const m=db.modelos.find(x=>x.id===id);db.modelos.push({...m,id:uid(),nome:m.nome+' (cópia)',padrao:false});save();render();toast('Modelo duplicado');},
@@ -126,7 +125,10 @@ const A={
   ics:()=>exportarICS(!ui.f.agenda?.resp?false:true),
   gConectar:async()=>{try{await gToken();toast('Google conectado ✓');render();}catch(e){gErro(e);}},
   salvarGoogle:()=>{if($('#g-client')){db.escritorio.googleClientId=$('#g-client').value.trim();save();}try{localStorage.setItem('gcal_cal',$('#g-cal').value.trim()||'primary');}catch(e){}render();toast('Integrações salvas ✓');},
-  logoUp:()=>$('#file-logo').click(),logoDel:()=>{db.escritorio.logo='';save();render();},
+  logoUp:()=>$('#file-logo').click(),logoDel:()=>{db.escritorio.logo='';save();render();toast('Logotipo padrão restaurado');},
+  marcaUp:()=>$('#file-marca').click(),marcaPadrao:()=>{db.escritorio.marcaDagua='';db.escritorio.semMarca=false;save();render();toast("Marca d'água padrão restaurada");},
+  marcaSem:()=>{db.escritorio.semMarca=!db.escritorio.semMarca;save();render();},
+  verTimbrado:()=>{ui.tabDoc='gerador';location.hash='documentos';render();},
   addTipo:()=>{lerTipos();db.tiposEvento.push({nome:'Novo tipo',cor:corNova()});render();},
   delTipo:i=>{lerTipos();db.tiposEvento.splice(+i,1);render();},
   salvarTipos:()=>{lerTipos();db.tiposEvento=db.tiposEvento.filter(t=>t.nome.trim());save();render();toast('Tipos de compromisso salvos ✓');},
@@ -203,9 +205,8 @@ $('#file-import').addEventListener('change',e=>{const f=e.target.files[0];if(!f)
 $('#file-anexo').addEventListener('change',async e=>{const f=e.target.files[0];const id=e.target.dataset.doc;e.target.value='';if(!f)return;const d=db.documentos.find(x=>x.id===id);if(!d)return;
   try{toast('Enviando para o Google Drive…');const pasta=await drivePastaCliente(d.clienteId);const r=await driveUpload(f,d.nome+' — '+f.name,pasta);
     Object.assign(d,{link:r.webViewLink,arquivo:f.name,recebido:true,data:d.data||today()});save();render();toast('Arquivo anexado ao Google Drive ✓');}catch(err){gErro(err);}});
-$('#file-logo').addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(!f)return;const rd=new FileReader();rd.onload=()=>{const img=new Image();img.onload=()=>{
-  const k=Math.min(1,320/Math.max(img.width,img.height));const cv=document.createElement('canvas');cv.width=Math.round(img.width*k);cv.height=Math.round(img.height*k);cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
-  db.escritorio.logo=cv.toDataURL('image/png');save();render();toast('Logotipo atualizado ✓');};img.onerror=()=>toast('Imagem inválida',1);img.src=rd.result;};rd.readAsDataURL(f);});
+$('#file-logo').addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(!f)return;lerImagem(f,900).then(u=>{db.escritorio.logo=u;save();render();toast('Logotipo atualizado ✓');}).catch(err=>toast(err.message,1));});
+$('#file-marca').addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(!f)return;lerImagem(f,1414).then(u=>{db.escritorio.marcaDagua=u;db.escritorio.semMarca=false;save();render();toast("Marca d'água atualizada ✓");}).catch(err=>toast(err.message,1));});
 document.addEventListener('click',e=>{const b=e.target.closest('[data-login]');if(b){$('#l-email').value=b.dataset.login;$('#l-senha').value='demo1234';$('#login-form').requestSubmit();}});
 $('#file-xlsx').addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)iniciarImportacao(f);});
 $('#login-form').addEventListener('submit',e=>{e.preventDefault();$('#l-err').textContent='';

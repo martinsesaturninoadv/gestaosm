@@ -15,12 +15,12 @@ const COLS_PARC=['clientes','processos','eventos','tarefas','leads','documentos'
 const COLS_LIVRES_PARC=['usuarios','scripts','modelos'];
 const CONFIG_PARC=['escritorio','produtos','tiposEvento'];
 
-function vazio(){return {versao:6,escritorio:{nome:'Martins & Saturnino Advocacia',cnpj:'',oab:'',email:'',tel:'',endereco:'',cidade:'',saldoInicial:0,saldoInicialData:'',logo:'',googleClientId:'',salarioMinimo:1518},
+function vazio(){return {versao:6,escritorio:{nome:'Martins & Saturnino Advocacia e Consultoria',cnpj:'',oab:'',email:'',tel:'',endereco:'',cidade:'',saldoInicial:0,saldoInicialData:'',logo:'',googleClientId:'',salarioMinimo:1518},
   metas:{...METAS_PADRAO},produtos:PRODUTOS_PADRAO.slice(),tiposEvento:TIPOS_EVT_PADRAO.map(([nome,cor])=>({nome,cor})),indAjustes:{},indExtras:[],
   usuarioAtual:'',usuarios:[],clientes:[],processos:[],eventos:[],tarefas:[],leads:[],lancamentos:[],documentos:[],notas:[],contratos:[],despesasFixas:[],sm:[],scripts:[],modelos:[]};}
 function migrar(d){
   const v=vazio();for(const k in v)if(d[k]===undefined||d[k]===null)d[k]=v[k];
-  d.escritorio={...v.escritorio,...d.escritorio};d.metas={...METAS_PADRAO,...d.metas};
+  d.escritorio={...v.escritorio,...d.escritorio};if(d.escritorio.nome==='Martins & Saturnino Advocacia')d.escritorio.nome=v.escritorio.nome;d.metas={...METAS_PADRAO,...d.metas};
   if(!Array.isArray(d.produtos))d.produtos=PRODUTOS_PADRAO.slice();
   if(!Array.isArray(d.tiposEvento)||!d.tiposEvento.length)d.tiposEvento=v.tiposEvento;
   if(typeof d.indAjustes!=='object'||Array.isArray(d.indAjustes))d.indAjustes={};

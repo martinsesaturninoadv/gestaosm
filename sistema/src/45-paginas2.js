@@ -235,11 +235,6 @@ function docList(docs){
   return docs.map(d=>`<div class="ev"><input type="checkbox" data-act="toggleDoc" data-id="${d.id}"${d.recebido?' checked':''} aria-label="Recebido"><div class="body" data-act="editDoc" data-id="${d.id}"><div class="t">${esc(d.nome)}</div><div class="small muted">${d.recebido?'Recebido'+(d.data?' em '+fd(d.data):''):'Pendente'}${d.arquivo?' · 📎 '+esc(d.arquivo):''}${d.obs?' · '+esc(d.obs):''}</div></div>
     <div class="flx">${d.link?`<a class="btn btn-ghost btn-sm" href="${esc(d.link)}" target="_blank" rel="noopener" style="text-decoration:none">📎 Abrir</a>`:''}<button class="btn btn-ghost btn-sm" data-act="anexarDoc" data-id="${d.id}">${d.link?'Substituir':'Anexar'}</button>${d.recebido?pill('Recebido','p-green'):pill('Pendente','p-amber')}</div></div>`).join('');
 }
-function logoSrc(){
-  if(db.escritorio.logo)return db.escritorio.logo;
-  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#C8A84B"/><stop offset="1" stop-color="#1B3A5C"/></linearGradient></defs><rect width="120" height="120" rx="26" fill="url(#g)"/><text x="60" y="76" font-family="Georgia,serif" font-size="50" font-weight="700" text-anchor="middle" fill="#fff">${esc(initials(db.escritorio.nome||'MS'))}</text></svg>`;
-  return 'data:image/svg+xml;utf8,'+encodeURIComponent(svg);
-}
 function contextoModelo(cid,pid,kid,valorX,validade){
   const c=cli(cid)||{},p=proc(pid),e=db.escritorio;
   const k=ctr(kid)||db.contratos.filter(x=>x.clienteId===cid&&(!pid||x.processoId===pid)).sort((a,b)=>b.data.localeCompare(a.data))[0];
@@ -265,18 +260,6 @@ function corpoDocHTML(texto){
     if(/^_{5,}/.test(b.trim())||/^_{5,}/m.test(b))return `<p class="doc-ass">${linhas.map(esc).join('<br>')}</p>`;
     return `<p>${linhas.map(l=>{let h=esc(l);h=h.replace(/^(CLÁUSULA [^.—]+[—-][^.]+\.)/,'<b>$1</b>').replace(/^(CLÁUSULA [^.]+\.)/,'<b>$1</b>').replace(/^((?:CONTRATANTE|CONTRATADO|OUTORGANTE|OUTORGADOS|PODERES|NOTIFICANTE)\b:?)/,'<b>$1</b>').replace(/^(\d+\. [A-ZÇÃÕÁÉÍÓÚ ]+)$/,'<b>$1</b>');return h;}).join('<br>')}</p>`;}).join('');
 }
-function documentoHTML(corpo){
-  const e=db.escritorio;
-  return `<div class="doc-cab"><img src="${logoSrc()}" alt="" class="doc-logo"><div><div class="doc-esc">${esc(e.nome)}</div><div class="doc-sub">${[e.oab?'OAB '+e.oab:'',e.cnpj?'CNPJ '+e.cnpj:''].filter(Boolean).map(esc).join(' · ')}</div></div></div>
-    <div class="doc-corpo">${corpo}</div>
-    <div class="doc-rod">${[e.endereco,e.cidade,e.tel,e.email].filter(Boolean).map(esc).join(' · ')}</div>`;
-}
-const DOC_CSS=`body{font-family:'Times New Roman',Times,serif;font-size:12pt;line-height:1.55;color:#111;margin:2cm}
-.doc-cab{display:flex;align-items:center;gap:14px;border-bottom:2px solid #C8A84B;padding-bottom:10px;margin-bottom:22px}.doc-logo{width:64px;height:64px;object-fit:contain}
-.doc-esc{font-size:15pt;font-weight:bold;color:#1B3A5C}.doc-sub{font-size:9pt;color:#555}.doc-tit{font-size:13pt;text-align:center;margin:0 0 18px}
-p{text-align:justify;margin:0 0 10px}.doc-ass{text-align:center;margin-top:26px}.doc-rod{border-top:1px solid #ccc;margin-top:30px;padding-top:6px;font-size:8.5pt;color:#666;text-align:center}`;
-const docCompleto=html=>`<!doctype html><html><head><meta charset="utf-8"><title>Documento</title><style>${DOC_CSS}</style></head><body>${html}</body></html>`;
-
 V.documentos=()=>{
   const t=ui.tabDoc;
   const tabs=`<div class="tabs">${[['gerador','📝 Gerador de documentos'],['checklist','✅ Checklist de documentos'],['modelos','🗂️ Modelos (editar)']].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabDoc" data-id="${k}">${l}</button>`).join('')}</div>`;
@@ -308,14 +291,14 @@ V.documentos=()=>{
       <label>Valor (R$) — vazio usa o do contrato<input type="number" data-f="doc.valor" value="${esc(f.valor||'')}" step="0.01" min="0"></label>
       ${m&&/Proposta/.test(m.categoria)?`<label>Validade da proposta<input type="date" data-f="doc.validade" value="${esc(f.validade||addDays(7))}"></label>`:''}
     </div>
-    <div class="small muted" style="margin-top:10px">Logotipo e dados do cabeçalho: Configurações → Dados do escritório. Você pode editar o texto direto na folha ao lado antes de exportar.</div>
+    <div class="small muted" style="margin-top:10px">Os documentos saem no papel timbrado do escritório (logotipo + marca d'água), que pode ser trocado em Configurações → Papel timbrado. Edite o texto direto na folha ao lado antes de exportar.</div>
     <div class="exp-btns">
-      <button class="btn btn-brand" data-act="docWord">⬇ Baixar Word (.doc)</button>
+      <button class="btn btn-brand" data-act="docWord">⬇ Baixar Word (.docx)</button>
       <button class="btn btn-ghost" data-act="docPrint">🖨 Imprimir / salvar PDF</button>
       <button class="btn btn-ghost" data-act="docGoogle" title="${gOk?'Cria um Google Docs editável':esc(gIndisponivel())}">📄 Abrir no Google Docs</button>
       <button class="btn btn-ghost" data-act="docCopiar">Copiar texto</button>
     </div></div>
-    <div class="folha-wrap"><div class="folha" id="doc-preview" contenteditable="true" spellcheck="true">${m?documentoHTML(corpoDocHTML(preencher(m.texto,ctx))):'<div class="empty">Cadastre um modelo</div>'}</div></div>
+    <div class="folha-wrap"><div class="folha" id="doc-preview" contenteditable="true" spellcheck="true" style="${estiloFolha()}">${m?documentoHTML(corpoDocHTML(preencher(m.texto,ctx))):'<div class="empty">Cadastre um modelo</div>'}</div></div>
   </div>`;
 };
 
@@ -474,12 +457,20 @@ V.config=()=>{
   if(ehParceiro())return `<div class="grid g-2">${minhaSenha}${google}</div>`;
   return `<div class="grid g-2">
   <div class="card"><h3>🏢 Dados do escritório</h3>
-    <div class="logo-cfg"><img src="${logoSrc()}" alt="Logotipo"><div><div class="strong">Logotipo dos documentos</div><div class="small muted">PNG ou JPG, de preferência com fundo transparente.</div>
-      <div class="flx" style="margin-top:6px"><button class="btn btn-ghost btn-sm" data-act="logoUp">Enviar logotipo</button>${e.logo?'<button class="btn btn-sm lnk" data-act="logoDel">remover</button>':''}</div></div></div>
     <div class="fgrid">${[['nome','Nome do escritório',1],['cnpj','CNPJ'],['oab','Registro da sociedade na OAB'],['email','E-mail'],['tel','Telefone'],['cidade','Cidade/UF'],['endereco','Endereço',1]].map(([k,l,full])=>`<label${full?' class="full"':''}>${l}<input id="esc_${k}" value="${esc(e[k])}"></label>`).join('')}
     <label>Salário mínimo vigente (guias)<input id="esc_salarioMinimo" type="number" step="0.01" value="${esc(e.salarioMinimo)}"></label>
     ${podeFin()?`<label>Saldo inicial do caixa (R$)<input id="esc_saldoInicial" type="number" step="0.01" value="${esc(e.saldoInicial)}"></label><label>Saldo inicial a partir de<input id="esc_saldoInicialData" type="date" value="${esc(e.saldoInicialData)}"></label>`:''}
   </div><div class="mfoot"><button class="btn btn-brand" data-act="salvarEsc">Salvar</button></div></div>
+  <div class="card"><h3>🖋️ Papel timbrado dos documentos <button class="btn btn-ghost btn-sm" data-act="verTimbrado">Ver no gerador</button></h3>
+    <div class="timbrado-cfg">
+      <div class="tb-mini" style="${estiloFolha()}"><img src="${logoSrc()}" alt=""><i></i><i></i><i></i><i></i><i></i></div>
+      <div>
+        <div class="strong">Logotipo (cabeçalho)</div><div class="small muted">${e.logo?'Personalizado':'Padrão do escritório (Martins &amp; Saturnino)'}</div>
+        <div class="flx" style="margin:6px 0 14px"><button class="btn btn-ghost btn-sm" data-act="logoUp">Trocar logotipo</button>${e.logo?'<button class="btn btn-sm lnk" data-act="logoDel">voltar ao padrão</button>':''}</div>
+        <div class="strong">Marca d'água</div><div class="small muted">${e.semMarca?'Desativada':e.marcaDagua?'Personalizada (imagem de página inteira A4)':'Padrão do escritório (balança)'}</div>
+        <div class="flx" style="margin-top:6px"><button class="btn btn-ghost btn-sm" data-act="marcaUp">Trocar marca d'água</button><button class="btn btn-sm lnk" data-act="marcaSem">${e.semMarca?'ativar':'desativar'}</button>${e.marcaDagua||e.semMarca?'<button class="btn btn-sm lnk" data-act="marcaPadrao">voltar ao padrão</button>':''}</div>
+      </div></div>
+    <div class="small muted" style="margin-top:10px">Vale para todos os documentos: tela, impressão/PDF, Word (.docx) e Google Docs. Para trocar a marca d'água, use uma imagem do tamanho de uma página A4 em pé (como um papel timbrado), com fundo branco ou transparente.</div></div>
   ${ehAdmin()?`<div class="card"><h3>👥 Acessos ao sistema (login e senha) <button class="btn btn-gold btn-sm" data-act="novaConta">+ Acesso</button></h3>
     <div class="tbl"><table><thead><tr><th>Nome</th><th>E-mail (login)</th><th>Perfil</th><th></th></tr></thead><tbody>
     ${(contasCache||[]).map((c,i)=>`<tr data-act="editConta" data-id="${i}"><td class="strong">${esc(c.nome)}</td><td>${esc(c.email)}</td><td class="small">${esc(papelNome(c.papel))}</td><td>${c.ativo?pill('Ativo','p-green'):pill('Desativado','p-gray')}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">Carregando…</td></tr>'}</tbody></table></div>

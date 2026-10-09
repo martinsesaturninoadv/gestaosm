@@ -5,7 +5,13 @@ import glob, os
 D = os.path.dirname(os.path.abspath(__file__))
 S = os.path.join(D, 'src')
 def ler(n): return open(os.path.join(S, n), encoding='utf-8').read()
-js = ''.join(ler(os.path.basename(f)) for f in sorted(glob.glob(os.path.join(S, '*.js'))))
+import base64
+def b64(n): return base64.b64encode(open(os.path.join(S, 'assets', n), 'rb').read()).decode()
+# imagens e modelo do papel timbrado embutidos no arquivo único
+assets = ("const ASSET_LOGO='data:image/png;base64," + b64('logo-ms.png') + "';\n"
+          "const ASSET_MARCA='data:image/png;base64," + b64('marca-dagua-a4.png') + "';\n"
+          "const ASSET_DOCX='" + b64('modelo-timbrado.docx') + "';\n")
+js = assets + ''.join(ler(os.path.basename(f)) for f in sorted(glob.glob(os.path.join(S, '*.js'))))
 html = ('<!doctype html>\n<html lang="pt-BR">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>Gestão do Escritório</title>\n'
         '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
