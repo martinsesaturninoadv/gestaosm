@@ -5,7 +5,7 @@ RewriteCond %{HTTP:X-Forwarded-Proto} !https
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
 # Bloqueia acesso direto a arquivos sensíveis
-<FilesMatch "^(config\.php|config\.exemplo\.php|.*\.sqlite.*|.*\.md)$">
+<FilesMatch "^(config\.php|config\.exemplo\.php|.*\.sqlite.*|.*\.md|build\.py)$">
   Require all denied
 </FilesMatch>
 

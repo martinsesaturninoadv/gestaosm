@@ -1,40 +1,65 @@
 # Gestão SM: sistema de gestão do escritório
 
-Sistema próprio de gestão do escritório Martins & Saturnino Advocacia: clientes, CRM, processos, prazos, documentos, financeiro, contratos e metas, e indicadores mensais. Reproduz e automatiza as planilhas **CRM interno** e **Controle financeiro**.
+Sistema próprio de gestão do escritório Martins & Saturnino Advocacia, com login individual para cada pessoa da equipe.
 
 | Pasta / arquivo | Descrição |
 |---|---|
-| `sistema/` | **O sistema.** É esta pasta que vai para a hospedagem |
-| `sistema/index.html` | Telas do sistema. Aberto direto no navegador, funciona em modo demonstração |
-| `sistema/api.php` | Guarda os dados no banco MySQL e controla o login da equipe |
-| `sistema/instalar.php` | Cria o primeiro administrador (apagar depois de usar) |
-| `sistema/config.exemplo.php` | Modelo do `config.php` com os dados do banco |
-| `docs/HOSPEDAGEM.md` | **Passo a passo para colocar no ar** (HostGator ou similar) e como os dados ficam salvos |
-| `docs/ESBOCO_SISTEMA.md` | Visão geral: módulos, modelo de dados e próximos passos |
-| `ms_advocacia_saas_v3.html` | Protótipo antigo (salário-maternidade) |
+| `sistema/index.html` | **O sistema** (arquivo único). Aberto direto no navegador, roda em modo demonstração |
+| `sistema/api.php`, `instalar.php`, `config.exemplo.php`, `.htaccess` | Servidor: login, permissões e banco de dados MySQL (vão para a hospedagem junto com o `index.html`) |
+| `sistema/src/` + `sistema/build.py` | Código-fonte do sistema, separado por partes. Após editar, rode `python3 sistema/build.py` para gerar o `index.html` |
+| `docs/HOSPEDAGEM.md` | **Passo a passo para colocar no ar** (HostGator ou similar) |
+| `docs/GOOGLE.md` | Como conectar Google Agenda, Drive e Docs |
+| `docs/ESBOCO_SISTEMA.md` | Visão geral e próximos passos |
 
 ## Módulos
 
-- **Atendimentos (CRM)**: funil de novos contatos, com origem, produto/nicho, proposta, perfil, "em recuperação", "encaminhado a parceiro" e conversão em cliente.
-- **Clientes** e **Registro histórico**: as mesmas colunas da aba *Registro histórico* da planilha, exportáveis para Excel.
-- **Processos**, **Agenda e prazos**, **Tarefas**, **Documentos e modelos** (procuração, contrato, declaração, recibo).
+- **Painel**: visível a todos e sem dados financeiros. Mostra:
+  - compromissos de hoje e da semana;
+  - pendências (prazos vencidos, tarefas atrasadas, exigências, guias, atendimentos sem retorno, documentos);
+  - **metas da equipe** com anéis de progresso, prêmio e comemoração animada quando a meta é batida;
+  - **ranking de produtividade** com pontos e pins;
+  - aniversariantes e partos previstos.
+- **Agenda e compromissos**: tipos de compromisso/serviço **editáveis**, com cor; tarefas na agenda; **Google Agenda** (link por item, sincronização completa e arquivo .ics).
+- **Atendimentos (CRM)**, **Clientes**, **Registro histórico** (colunas da planilha CRM) e **Scripts de atendimento** editáveis: primeiro contato, objeções, fechamento, pós-venda, indicação, aniversário, cobrança.
+- **Contencioso e administrativo**:
+  - contencioso: vara, comarca, instância e polo;
+  - administrativo: órgão, protocolo, DER e dias em análise;
+  - lista ou quadro por fase.
+- **Salário-maternidade**:
+  - quadro de casos: categoria da segurada, estratégia, carência, DPP/parto, qualidade de segurada, NB/DER;
+  - **controle de guias** GPS/DAS: geração em lote, emitida, paga, vencida;
+  - documentos padrão.
+- **Documentos e modelos**:
+  - gerador com **logotipo**;
+  - contratos por área (salário-maternidade, previdenciário, trabalhista, cível/consumidor, família, **direito digital**, empresarial), **proposta de honorários**, procuração, declaração, recibo e notificação;
+  - todos editáveis;
+  - exporta para Word e PDF e cria no **Google Docs**;
+  - checklist com anexos no **Google Drive**.
+- **Parcerias**: perfil **parceiro**, que vê só os casos da parceria e a parte dele nos honorários; registro de repasses.
 - **Financeiro**:
   - contas a receber e a pagar;
-  - **contratos de honorários**, que geram entrada e parcelas sozinhos;
-  - **previsão de recebimentos** (dias 10/20/30);
-  - **despesas fixas** (previsto × real);
-  - **fluxo de caixa** (saldo anterior, entradas, saídas, distribuição de lucros e saldo transportado);
-  - **contratos e metas** (batida / não batida).
-- **Indicadores mensais**: o *Questionário geral* e os blocos por nicho, calculados automaticamente (faturamento, inadimplência, CAC, conversões por origem, tickets médios, perfil dos novos clientes…).
-- **Importação das planilhas Excel** atuais e exportação para Excel.
+  - contratos com parcelas;
+  - **previsão de recebimentos visual**;
+  - despesas fixas (previsto × real);
+  - fluxo de caixa;
+  - contratos e metas.
+- **Indicadores mensais**: gráficos, preenchimento automático, **valores editáveis** e indicadores manuais. Relatórios.
+- Importação e exportação das planilhas Excel.
 
-## Dois modos de uso
+## Perfis de acesso
 
-| | Modo demonstração | Modo escritório (hospedado) |
-|---|---|---|
-| Como abrir | Abrir `sistema/index.html` no navegador | Endereço próprio, ex.: `https://sistema.seudominio.com.br` |
-| Onde ficam os dados | Só naquele navegador | No banco MySQL da hospedagem |
-| Equipe | Uma pessoa | Cada pessoa com login; todos veem os mesmos dados |
-| Login e permissões | Não | Sim (o estagiário não vê o financeiro) e histórico de alterações |
+| Perfil | Vê |
+|---|---|
+| Administrador(a) | Tudo, e cria os acessos da equipe |
+| Advogado(a) | Tudo, inclusive o financeiro |
+| Financeiro / administrativo | Tudo, inclusive o financeiro |
+| Estagiário(a) | Tudo, menos o financeiro |
+| Parceiro | Somente os clientes, processos, prazos e honorários da parceria |
 
-Para colocar no ar, siga **[docs/HOSPEDAGEM.md](docs/HOSPEDAGEM.md)**.
+As regras são aplicadas também no servidor (`api.php`), e não só na tela.
+
+## Demonstração
+
+Abra `sistema/index.html` no navegador (ou o link publicado). Entre com um dos acessos de exemplo; a senha de todos é **demo1234**. Os dados da demonstração ficam só naquele navegador.
+
+Para o escritório usar de verdade, com os dados compartilhados entre todos, siga **[docs/HOSPEDAGEM.md](docs/HOSPEDAGEM.md)**.

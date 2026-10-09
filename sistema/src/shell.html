@@ -1,0 +1,70 @@
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="logo">MS</div>
+      <div><div class="b1" id="brand-nome">Martins &amp; Saturnino</div><div class="b2">Gestão do escritório</div></div>
+    </div>
+    <nav id="nav">
+      <div class="ns">Principal</div>
+      <a class="ni" href="#painel"><span class="ic">◼</span>Painel</a>
+      <a class="ni" href="#agenda"><span class="ic">◷</span>Agenda e compromissos<span class="nb" id="nb-agenda"></span></a>
+      <a class="ni" href="#tarefas"><span class="ic">☑</span>Tarefas<span class="nb" id="nb-tarefas"></span></a>
+      <div class="ns">Clientes</div>
+      <a class="ni" href="#atendimentos"><span class="ic">◈</span>Atendimentos (CRM)</a>
+      <a class="ni" href="#clientes"><span class="ic">◉</span>Clientes</a>
+      <a class="ni" href="#registro" data-noparc><span class="ic">☰</span>Registro histórico</a>
+      <a class="ni" href="#scripts"><span class="ic">✉</span>Scripts de atendimento</a>
+      <div class="ns">Jurídico</div>
+      <a class="ni" href="#processos"><span class="ic">⚖</span>Contencioso e administrativo</a>
+      <a class="ni" href="#sm"><span class="ic">♡</span>Salário-maternidade<span class="nb" id="nb-sm"></span></a>
+      <a class="ni" href="#documentos"><span class="ic">▤</span>Documentos e modelos<span class="nb" id="nb-docs"></span></a>
+      <a class="ni" href="#parcerias" data-parc><span class="ic">⇄</span>Parcerias</a>
+      <div class="ns" data-fin>Financeiro</div>
+      <a class="ni" href="#financeiro" data-fin><span class="ic">$</span>Contas a receber e pagar<span class="nb" id="nb-fin"></span></a>
+      <a class="ni" href="#previsao" data-fin><span class="ic">▦</span>Previsão de recebimentos</a>
+      <a class="ni" href="#fixas" data-fin><span class="ic">≡</span>Despesas fixas</a>
+      <a class="ni" href="#fluxo" data-fin><span class="ic">⇅</span>Fluxo de caixa</a>
+      <a class="ni" href="#contratos" data-fin><span class="ic">✎</span>Contratos e metas</a>
+      <div class="ns" data-fin>Gestão</div>
+      <a class="ni" href="#indicadores" data-fin><span class="ic">▲</span>Indicadores mensais</a>
+      <a class="ni" href="#relatorios" data-fin><span class="ic">◔</span>Relatórios</a>
+      <a class="ni" href="#config"><span class="ic">⚙</span>Configurações</a>
+    </nav>
+    <div class="suser" id="suser"></div>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <div class="main">
+    <header class="topbar">
+      <button class="menu-btn" id="menu-btn" aria-label="Menu">☰</button>
+      <div class="ptitle" id="ptitle">Painel</div>
+      <span class="sync" id="sync"></span>
+      <div class="search">
+        <input id="q" placeholder="Buscar cliente, processo, CPF…" autocomplete="off">
+        <div class="sres" id="sres"></div>
+      </div>
+      <button class="btn btn-gold" data-act="quickAdd">+ Novo</button>
+    </header>
+    <main class="content" id="view"></main>
+  </div>
+</div>
+
+<div class="login" id="login" hidden>
+  <form class="lcard" id="login-form">
+    <div class="flx"><div class="logo" style="color:#fff">MS</div><div><h1>Gestão do Escritório</h1><div class="small muted">Acesso restrito — cada pessoa com seu login</div></div></div>
+    <label>E-mail<input id="l-email" type="email" autocomplete="username" required></label>
+    <label>Senha<input id="l-senha" type="password" autocomplete="current-password" required></label>
+    <div class="lerr" id="l-err"></div>
+    <button class="btn btn-brand" type="submit">Entrar</button>
+    <div id="l-demo"></div>
+  </form>
+</div>
+
+<div class="mbg" id="mbg"><div class="modal" role="dialog" aria-modal="true"><h2 id="m-title"></h2><div id="m-body"></div><div class="mfoot" id="m-foot"></div></div></div>
+<div class="cbg" id="cbg"><div class="cmodal" role="alertdialog" aria-modal="true"><p id="c-msg"></p><div class="mfoot"><button class="btn btn-ghost" id="c-no">Cancelar</button><button class="btn btn-danger-solid" id="c-ok">Confirmar</button></div></div></div>
+<div class="toast" id="toast"></div>
+<input type="file" id="file-import" accept="application/json" hidden>
+<input type="file" id="file-xlsx" accept=".xlsx,.xls,.xlsm,.csv" hidden>
+<input type="file" id="file-anexo" hidden>
+<input type="file" id="file-logo" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>

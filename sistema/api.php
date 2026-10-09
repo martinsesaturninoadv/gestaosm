@@ -21,10 +21,40 @@ header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
 
 const COLECOES = ['clientes', 'processos', 'eventos', 'tarefas', 'leads', 'lancamentos', 'documentos',
-    'notas', 'contratos', 'despesasFixas', 'usuarios', 'config'];
+    'notas', 'contratos', 'despesasFixas', 'usuarios', 'sm', 'scripts', 'modelos', 'config'];
+const CONFIG_IDS = ['escritorio', 'metas', 'produtos', 'tiposEvento', 'indAjustes', 'indExtras'];
 // Coleções que o perfil "estagiario" não pode ver nem alterar
 const COLECOES_FINANCEIRAS = ['lancamentos', 'contratos', 'despesasFixas'];
-const PAPEIS = ['admin', 'advogado', 'estagiario', 'financeiro'];
+// Perfil "parceiro": só vê os registros marcados com o e-mail dele no campo "parceiro"
+const COLECOES_PARCERIA = ['clientes', 'processos', 'eventos', 'tarefas', 'leads', 'documentos', 'notas', 'contratos', 'lancamentos', 'sm'];
+const COLECOES_LIVRES_PARCEIRO = ['usuarios', 'scripts', 'modelos'];
+const CONFIG_PARCEIRO = ['escritorio', 'produtos', 'tiposEvento'];
+const PAPEIS = ['admin', 'advogado', 'estagiario', 'financeiro', 'parceiro'];
+
+function minusculo(?string $s): string { return mb_strtolower(trim((string) $s)); }
+function podeLer(array $u, string $col, string $id, $dados): bool
+{
+    if ($u['papel'] === 'estagiario' && in_array($col, COLECOES_FINANCEIRAS, true)) return false;
+    if ($u['papel'] === 'parceiro') {
+        if ($col === 'config') return in_array($id, CONFIG_PARCEIRO, true);
+        if (in_array($col, COLECOES_LIVRES_PARCEIRO, true)) return true;
+        if (in_array($col, COLECOES_PARCERIA, true)) return is_array($dados) && minusculo($dados['parceiro'] ?? '') === minusculo($u['email']);
+        return false;
+    }
+    return true;
+}
+function podeGravar(array $u, string $col, string $id, $novo, $antigo): bool
+{
+    if (!in_array($col, COLECOES, true)) return false;
+    if ($col === 'config' && !in_array($id, CONFIG_IDS, true)) return false;
+    if ($u['papel'] === 'estagiario' && (in_array($col, COLECOES_FINANCEIRAS, true) || ($col === 'config' && $id === 'metas'))) return false;
+    if ($u['papel'] === 'parceiro') {
+        if (!in_array($col, COLECOES_PARCERIA, true) || $col === 'contratos' || $col === 'lancamentos') return false;
+        $dele = fn($d) => is_array($d) && minusculo($d['parceiro'] ?? '') === minusculo($u['email']);
+        return ($novo === null || $dele($novo)) && ($antigo === null || $dele($antigo));
+    }
+    return true;
+}
 
 function responder(array $dados, int $status = 200): void
 {
@@ -185,9 +215,10 @@ switch ($acao) {
         $st->execute([$desde]);
         $out = [];
         foreach ($st as $r) {
-            if ($u['papel'] === 'estagiario' && in_array($r['colecao'], COLECOES_FINANCEIRAS, true)) continue;
+            $dados = json_decode((string) $r['dados'], true);
+            if (!podeLer($u, $r['colecao'], $r['id'], $dados)) continue;
             $out[] = ['colecao' => $r['colecao'], 'id' => $r['id'], 'excluido' => (int) $r['excluido'] === 1,
-                'dados' => (int) $r['excluido'] === 1 ? null : json_decode((string) $r['dados'], true)];
+                'dados' => (int) $r['excluido'] === 1 ? null : $dados];
         }
         responder(['ok' => true, 'agora' => $agora, 'registros' => $out]);
 
@@ -197,10 +228,11 @@ switch ($acao) {
         $uid = (int) $u['id'];
         $b = corpo();
         $agora = agoraMs();
-        $permitida = function (string $col) use ($u): bool {
-            if (!in_array($col, COLECOES, true)) return false;
-            if ($u['papel'] === 'estagiario' && in_array($col, COLECOES_FINANCEIRAS, true)) return false;
-            return true;
+        $busca = $pdo->prepare('SELECT dados, excluido FROM registros WHERE colecao = ? AND id = ?');
+        $atual = function (string $col, string $id) use ($busca) {
+            $busca->execute([$col, $id]);
+            $r = $busca->fetch();
+            return $r ? ['dados' => json_decode((string) $r['dados'], true), 'excluido' => (int) $r['excluido'] === 1] : null;
         };
         $sqlUpsert = $mysql
             ? 'INSERT INTO registros (colecao, id, dados, excluido, atualizado_em, atualizado_por) VALUES (?,?,?,?,?,?)
@@ -214,7 +246,9 @@ switch ($acao) {
             foreach (($b['upserts'] ?? []) as $r) {
                 $col = (string) ($r['colecao'] ?? '');
                 $id = (string) ($r['id'] ?? '');
-                if (!$permitida($col) || $id === '' || strlen($id) > 60) continue;
+                if ($id === '' || strlen($id) > 60) continue;
+                $ant = $atual($col, $id);
+                if (!podeGravar($u, $col, $id, $r['dados'] ?? null, $ant && !$ant['excluido'] ? $ant['dados'] : null)) continue;
                 $st->execute([$col, $id, json_encode($r['dados'] ?? null, JSON_UNESCAPED_UNICODE), 0, $agora, $uid]);
                 registrar($pdo, $uid, 'salvar', $col, $id);
                 $n++;
@@ -222,8 +256,11 @@ switch ($acao) {
             foreach (($b['exclusoes'] ?? []) as $r) {
                 $col = (string) ($r['colecao'] ?? '');
                 $id = (string) ($r['id'] ?? '');
-                if (!$permitida($col) || $id === '') continue;
-                $st->execute([$col, $id, null, 1, $agora, $uid]);
+                if ($id === '') continue;
+                $ant = $atual($col, $id);
+                if (!$ant || $ant['excluido'] || !podeGravar($u, $col, $id, null, $ant['dados'])) continue;
+                // mantém os dados do registro excluído (para as regras de acesso), marcando-o como excluído
+                $st->execute([$col, $id, json_encode($ant['dados'], JSON_UNESCAPED_UNICODE), 1, $agora, $uid]);
                 registrar($pdo, $uid, 'excluir', $col, $id);
                 $n++;
             }

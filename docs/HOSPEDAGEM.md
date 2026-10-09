@@ -18,6 +18,7 @@ Na hospedagem, tudo fica num **banco de dados MySQL** do escritório, e não mai
 - funciona no computador e no celular, de qualquer lugar;
 - o sistema registra **quem alterou o quê e quando** (tabela `historico`);
 - o perfil **estagiário** não vê nada do financeiro, e o bloqueio é feito no servidor, não só na tela.
+- o perfil **parceiro** vê só os clientes, processos e honorários marcados para a parceria dele.
 
 > O link de demonstração no Claude e o arquivo aberto direto no computador são **modo demonstração**: os dados ficam só naquele navegador. Para trabalhar em equipe, é preciso hospedar (passo a passo abaixo).
 
@@ -55,6 +56,8 @@ cPanel → **Bancos de dados MySQL**:
    - `config.exemplo.php`: modelo de configuração;
    - `.htaccess`: segurança (força o cadeado https e bloqueia arquivos sensíveis). Para vê-lo no Gerenciador, ative **Configurações → Mostrar arquivos ocultos**.
 
+   A pasta `src` e o `build.py` **não** precisam ir para a hospedagem: são só o código-fonte usado para gerar o `index.html`.
+
 ### 5. Configurar o acesso ao banco
 1. No Gerenciador de Arquivos, **copie** `config.exemplo.php` com o nome `config.php`.
 2. Clique com o botão direito em `config.php` → **Editar** e preencha:
@@ -77,10 +80,13 @@ cPanel → **Selecionar versão do PHP** (ou "MultiPHP Manager"): escolha **PHP 
 
 ### 8. Primeiro uso
 1. Abra `https://sistema.seudominio.com.br` e entre com o administrador.
-2. **Configurações → Acessos ao sistema → + Acesso**: crie o acesso da **Dra. Vitória** (perfil *Advogado(a)* ou *Administrador(a)*) e de quem mais for usar. Envie a senha inicial por um canal seguro; cada pessoa troca a sua em **Configurações → Minha senha**.
+2. **Configurações → Acessos ao sistema → + Acesso**: crie o login e a senha de cada pessoa: a **Dra. Vitória** (perfil *Advogado(a)* ou *Administrador(a)*), a equipe e os **parceiros** (perfil *Parceiro*).
+   Em **Configurações → Equipe**, cadastre também cada pessoa com o **mesmo e-mail** do acesso (para parceiros, use a função *Parceiro*). Depois marque, no cadastro do cliente, a **Parceria** daquele caso. Envie a senha inicial por um canal seguro; cada pessoa troca a sua em **Configurações → Minha senha**.
 3. **Configurações → Dados do escritório**: preencha os dados e o **saldo inicial do caixa** (para o fluxo de caixa começar certo).
 4. **Configurações → Produtos / nichos**: ajuste a lista (ex.: DBA, AIC, BAR, Salário-maternidade…).
-5. **Configurações → Importar planilhas do Excel**: envie o `CRM INTERNO CLIENTE` e o `CONTROLE FINANCEIRO`. Confira o que foi encontrado e clique em **Importar**. Importar de novo não duplica.
+5. **Configurações → Dados do escritório**: envie o **logotipo** (sai nos contratos, propostas e procurações) e confira o salário mínimo usado nas guias.
+6. **Integrações Google** (opcional): siga o guia **[GOOGLE.md](GOOGLE.md)**.
+7. **Configurações → Importar planilhas do Excel**: envie o `CRM INTERNO CLIENTE` e o `CONTROLE FINANCEIRO`. Confira o que foi encontrado e clique em **Importar**. Importar de novo não duplica.
 
 ### 9. Backup
 - O plano da HostGator costuma ter backup próprio. Mesmo assim, uma vez por mês: cPanel → **Backup** → baixe o **backup do banco MySQL**.
