@@ -79,7 +79,7 @@ V.escritorio=()=>{
     <div class="esc-corpo">
       <div class="esc-mapa-wrap"><div class="esc-mapa" id="esc-mapa">
         ${SALAS_ORDEM.map(id=>{const[a,b,w,h]=SALA_GEO[id];return `<div class="esc-sala sala-${id}${podeSala(id)?'':' trancada'}" data-sala="${id}" style="left:${a}%;top:${b}%;width:${w}%;height:${h}%">
-          ${moveis(id)}<div class="esc-rot"><b data-nome-sala="${id}">${esc(salaNome(id))}</b><span class="esc-qtd" data-qtd="${id}"></span>${db.salas?.[id]?.meet?`<button class="esc-meet" data-act="escMeet" data-id="${id}" title="Entrar na chamada desta sala">🎥</button>`:''}</div>
+          ${moveis(id)}<div class="esc-rot"><b data-nome-sala="${id}">${esc(salaNome(id))}</b><span class="esc-qtd" data-qtd="${id}"></span>${db.salas?.[id]?.meet&&podeSala(id)?`<button class="esc-meet" data-act="escMeet" data-id="${id}" title="Entrar na chamada desta sala">🎥</button>`:''}</div>
           ${podeSala(id)?'':'<div class="esc-tranca">🔒</div>'}</div>`;}).join('')}
         <div id="esc-avs"></div><div class="esc-menu" id="esc-menu" hidden></div>
       </div><div class="small muted esc-dica">Clique numa sala (ou use as setas do teclado) para andar até lá. Clique num colega para conversar ou bater na porta.${ehParceiro()?' Como parceiro, você tem acesso à <b>Sala de Reunião</b>.':''}</div></div>
@@ -320,11 +320,16 @@ const ESC_ACOES={
   escAbrirDm:email=>{$('#esc-menu')&&($('#esc-menu').hidden=true);if(ui.page!=='escritorio')location.hash='escritorio';ESC.aba='dm';ESC.dm=norm(email);escRenderChat();setTimeout(()=>$('#esc-input')?.focus(),50);},
   escToc:email=>{$('#esc-menu')&&($('#esc-menu').hidden=true);escEnviar({canal:canalDm(meuEmailEsc(),email),texto:'🚪 bateu na porta',tipo:'toc'});toast('Você bateu na porta 🚪');},
   escIrAte:email=>{$('#esc-menu').hidden=true;escIrAte(email);},
-  escMeet:id=>{const l=db.salas?.[id]?.meet;if(l)window.open(l,'_blank','noopener');else toast('Esta sala ainda não tem link de chamada (Configurações → Escritório virtual)',1);},
+  escMeet:id=>{if(!podeSala(id))return toast('Sala fechada para parceiros 🔒',1);const l=db.salas?.[id]?.meet;if(l)window.open(l,'_blank','noopener');else toast('Esta sala ainda não tem link de chamada (Configurações → Escritório virtual)',1);},
   escVisual:()=>escEditarVisual(),
-  salvarSalas:()=>{SALAS_ORDEM.forEach(id=>{const n=$('#sala_n_'+id).value.trim(),m=$('#sala_m_'+id).value.trim();
-      if(m&&!/^https:\/\//i.test(m))return;db.salas[id]={nome:n||salasPadrao()[id].nome,meet:m};});
-    save();render();toast('Salas salvas ✓');},
+  salvarSalas:()=>{
+    const novas={};let erro='';
+    SALAS_ORDEM.forEach(id=>{const n=$('#sala_n_'+id).value.trim();let m=$('#sala_m_'+id).value.trim().replace(/^http:\/\//i,'https://');
+      if(m&&!/^https:\/\//i.test(m))m='https://'+m; // aceita "meet.google.com/abc-defg-hij" sem o https://
+      if(m&&!/^https:\/\/[\w.-]+\.[a-z]{2,}(\/\S*)?$/i.test(m)){erro=erro||salaNome(id);$('#sala_m_'+id).classList.add('err');return;}
+      novas[id]={nome:n||salasPadrao()[id].nome,meet:m};});
+    if(erro)return toast('Link inválido na sala "'+erro+'". Cole o endereço da chamada, ex.: https://meet.google.com/abc-defg-hij',1);
+    db.salas=novas;save();render();toast('Salas salvas ✓');},
 };
 function cardSalasConfig(){
   return `<div class="card"><h3>✦ Escritório virtual — salas</h3><div class="small muted" style="margin-bottom:8px">Renomeie as salas e cole um link fixo do <b>Google Meet</b> para cada uma (em meet.google.com → "Criar uma reunião para depois"). O botão 🎥 da sala abre a chamada. O parceiro só entra na <b>${esc(salaNome(SALA_PARCEIRO))}</b>.</div>
