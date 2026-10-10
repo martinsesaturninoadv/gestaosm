@@ -9,7 +9,7 @@ function kanban(cols,items,kind,cardFn){
     ${its.map(i=>`<div class="kcard" draggable="true" data-drag="${kind}:${i.id}">${cardFn(i)}<div class="kmove">${ci>0?`<button data-act="kmove" data-id="${kind}:${i.id}:${esc(cols[ci-1][0])}" aria-label="Mover para a esquerda">◀</button>`:'<span></span>'}${ci<cols.length-1?`<button data-act="kmove" data-id="${kind}:${i.id}:${esc(cols[ci+1][0])}" aria-label="Mover para a direita">▶</button>`:''}</div></div>`).join('')}</div>`;}).join('')}</div>`;
 }
 function moveCard(kind,id,col){
-  if(kind==='tarefa'){const t=db.tarefas.find(x=>x.id===id);if(t){if(col==='done'&&t.status!=='done'){t.concluidoEm=today();t.concluidoPor=t.responsavelId||db.usuarioAtual;toast('Tarefa concluída! +'+PONTOS.tarefa+' pontos 🎉');}if(col!=='done')t.concluidoEm='';t.status=col;}}
+  if(kind==='tarefa'){const t=db.tarefas.find(x=>x.id===id);if(t){if(col==='done'&&t.status!=='done'){t.concluidoEm=today();t.concluidoPor=quemConclui(t);toast('Tarefa concluída! +'+PONTOS.tarefa+' pontos 🎉');}if(col!=='done')t.concluidoEm='';t.status=col;}}
   if(kind==='proc'){const p=proc(id);if(p)p.fase=col;}
   if(kind==='sm'){const c=db.sm.find(x=>x.id===id);if(c)c.status=col;}
   if(kind==='lead'){const l=db.leads.find(x=>x.id===id);if(l){l.etapa=col;l.ultimoContato=today();if(col==='Fechado'&&!l.convertido)setTimeout(()=>toast('Negócio fechado! Use "Converter em cliente" no card.'),300);}}
@@ -17,12 +17,12 @@ function moveCard(kind,id,col){
 }
 V.tarefas=()=>{
   const f=ui.f.tarefas||(ui.f.tarefas={resp:''});
-  const items=db.tarefas.filter(t=>!f.resp||t.responsavelId===f.resp).map(t=>({...t,_col:t.status})).sort((a,b)=>(a.prazo||'9').localeCompare(b.prazo||'9'));
+  const items=db.tarefas.filter(t=>!f.resp||ehResp(t,f.resp)).map(t=>({...t,_col:t.status})).sort((a,b)=>(a.prazo||'9').localeCompare(b.prazo||'9'));
   return `<div class="toolbar"><select data-f="tarefas.resp"><option value="">Todos os responsáveis</option>${db.usuarios.map(u=>`<option value="${u.id}"${f.resp===u.id?' selected':''}>${esc(u.nome)}</option>`).join('')}</select>
     <span class="grow"></span><button class="btn btn-gold" data-act="novaTar">+ Tarefa</button></div>
     <div class="hint">Arraste os cards entre as colunas (ou use ◀ ▶). Clique no card para editar.</div>
     ${kanban(TSTATUS,items,'tarefa',t=>`<div class="t" data-act="editTar" data-id="${t.id}" style="cursor:pointer">${esc(t.titulo)}</div>
-      <div class="meta">${pPrior(t.prioridade)} <span>${esc(nomeUsr(t.responsavelId))}</span>${t.prazo?' · '+(t.status==='done'?fd(t.prazo):prazoTxt(t.prazo)):''}</div>
+      <div class="meta">${pPrior(t.prioridade)} <span>${esc(nomesResp(t))}</span>${t.prazo?' · '+(t.status==='done'?fd(t.prazo):prazoTxt(t.prazo)):''}</div>
       ${t.processoId&&proc(t.processoId)?`<div class="small muted" style="margin-top:3px">${esc(proc(t.processoId).numero)}</div>`:''}`)}`;
 };
 
@@ -324,8 +324,8 @@ V.relatorios=()=>{
   const resultados={};db.processos.filter(p=>p.status!=='Em andamento').forEach(p=>resultados[p.status]=(resultados[p.status]||0)+1);
   const origem={};db.clientes.forEach(c=>origem[c.origem||'—']=(origem[c.origem||'—']||0)+1);
   const prod=db.usuarios.map(u=>({u,proc:db.processos.filter(p=>p.responsavelId===u.id&&p.status==='Em andamento').length,
-    tdone:db.tarefas.filter(t=>t.responsavelId===u.id&&t.status==='done').length,topen:db.tarefas.filter(t=>t.responsavelId===u.id&&t.status!=='done').length,
-    ev:db.eventos.filter(e=>e.responsavelId===u.id&&!e.feito).length,venc:db.eventos.filter(e=>e.responsavelId===u.id&&!e.feito&&diff(e.data)<0).length}));
+    tdone:db.tarefas.filter(t=>ehResp(t,u.id)&&t.status==='done').length,topen:db.tarefas.filter(t=>ehResp(t,u.id)&&t.status!=='done').length,
+    ev:db.eventos.filter(e=>ehResp(e,u.id)&&!e.feito).length,venc:db.eventos.filter(e=>ehResp(e,u.id)&&!e.feito&&diff(e.data)<0).length}));
   const nCli=new Set(rp.filter(l=>l.clienteId).map(l=>l.clienteId)).size;
   return `<div class="grid g-kpi">${kpi('Receita '+y,brl(tR))}${kpi('Despesa '+y,brl(tD))}${kpi('Resultado '+y,brl(tR-tD),tR?'margem '+Math.round((tR-tD)/tR*100)+'%':'',tR-tD>=0?'good':'bad')}${kpi('Ticket médio por cliente',brl(nCli?tR/nCli:0))}</div>
   <div class="grid g-2">

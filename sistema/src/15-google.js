@@ -50,7 +50,7 @@ function descItem(o){const p=proc(o.processoId);return [o.tipo?'Tipo: '+o.tipo:'
 const linkGcalEvento=e=>gcalLink((e.tipo?e.tipo+': ':'')+e.titulo,e.data,e.hora,descItem(e));
 const linkGcalTarefa=t=>gcalLink('Tarefa: '+t.titulo,t.prazo,'',descItem(t));
 function itensAgenda(todos){
-  const meu=x=>todos||x.responsavelId===db.usuarioAtual;
+  const meu=x=>todos||ehResp(x,db.usuarioAtual);
   return db.eventos.filter(e=>meu(e)&&e.data>=addDays(-7)).map(o=>['evento',o]).concat(db.tarefas.filter(t=>meu(t)&&t.prazo&&t.prazo>=addDays(-7)).map(o=>['tarefa',o]));
 }
 function corpoGcal(tipo,o){

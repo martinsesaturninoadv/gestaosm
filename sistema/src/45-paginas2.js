@@ -22,7 +22,7 @@ V.painel=()=>{
   const semana=evs.filter(e=>diff(e.data)>=0&&diff(e.data)<=7).sort((a,b)=>(a.data+(a.hora||'')).localeCompare(b.data+(b.hora||'')));
   const aud=semana.filter(e=>/audi|per[ií]cia/i.test(e.tipo));
   const tAtras=db.tarefas.filter(t=>t.status!=='done'&&t.prazo&&diff(t.prazo)<0);
-  const minhas=db.tarefas.filter(t=>t.status!=='done'&&t.responsavelId===me);
+  const minhas=db.tarefas.filter(t=>t.status!=='done'&&ehResp(t,me));
   const nome=sessao?sessao.nome:nomeUsr(me);const h=new Date().getHours();
   const frase=FRASES[new Date().getDate()%FRASES.length];
   const chip=(n,l,href,cls)=>`<a class="hchip ${cls||''}" href="${href}"><b>${n}</b><span>${l}</span></a>`;
@@ -30,11 +30,11 @@ V.painel=()=>{
   const grupos={};semana.forEach(e=>(grupos[e.data]=grupos[e.data]||[]).push(e));
   const rotDia=d=>{const n=diff(d);return n===0?'Hoje':n===1?'Amanhã':fdw(d);};
   const agenda=Object.keys(grupos).length?Object.entries(grupos).map(([d,l])=>`<div class="tl-dia"><div class="tl-rot ${diff(d)===0?'hoje':''}">${rotDia(d)}</div>${l.map(e=>`<div class="tl-ev" data-act="editEv" data-id="${e.id}" style="border-left-color:${corTipo(e.tipo)}">
-      <div class="tl-hora">${esc(e.hora||'—')}</div><div class="tl-txt"><div class="strong">${esc(e.titulo)}</div><div class="small muted">${tagTipo(e.tipo)} ${esc(nomeCli(e.clienteId))} · ${esc(nomeUsr(e.responsavelId))}</div></div></div>`).join('')}</div>`).join(''):'<div class="empty">Nenhum compromisso nos próximos 7 dias</div>';
+      <div class="tl-hora">${esc(e.hora||'—')}</div><div class="tl-txt"><div class="strong">${esc(e.titulo)}</div><div class="small muted">${tagTipo(e.tipo)} ${esc(nomeCli(e.clienteId))} · ${esc(nomesResp(e))}</div></div></div>`).join('')}</div>`).join(''):'<div class="empty">Nenhum compromisso nos próximos 7 dias</div>';
   // pendências
   const pend=[];
   atrasE.forEach(e=>pend.push(['r','⏰',`Prazo vencido: ${e.titulo}`,nomeCli(e.clienteId),`editEv`,e.id]));
-  tAtras.forEach(t=>pend.push(['r','☑',`Tarefa atrasada: ${t.titulo}`,nomeUsr(t.responsavelId),'editTar',t.id]));
+  tAtras.forEach(t=>pend.push(['r','☑',`Tarefa atrasada: ${t.titulo}`,nomesResp(t),'editTar',t.id]));
   db.processos.filter(p=>p.status==='Em andamento'&&p.fase==='Em exigência').forEach(p=>pend.push(['a','⚑',`Exigência em aberto: ${p.numero}`,nomeCli(p.clienteId),'go','processo/'+p.id]));
   db.processos.filter(p=>p.status==='Em andamento'&&p.tipo==='Administrativo'&&p.prazoAnalise&&diff(p.prazoAnalise)<0&&/análise/.test(p.fase)).forEach(p=>pend.push(['a','⌛',`Análise do INSS passou do prazo: ${p.numero}`,nomeCli(p.clienteId),'go','processo/'+p.id]));
   guiasPendentes(10).forEach(({c,g,st})=>pend.push([st==='Vencida'?'r':'a','₲',`Guia ${mLabel(g.competencia)} ${st==='Vencida'?'VENCIDA':st==='A emitir'?'a emitir':'aguardando pagamento'} — vence ${fd(g.venc)}`,nomeCli(c.clienteId),'go','sm/'+c.id]));
@@ -92,8 +92,8 @@ V.agenda=()=>{
     <button class="btn btn-ghost" data-act="gcalSync" title="${gOk?'Envia seus compromissos e tarefas para o seu Google Agenda':esc(gIndisponivel())}">↻ Google Agenda</button>
     <button class="btn btn-ghost" data-act="ics" title="Arquivo para importar em qualquer agenda (Google, Outlook, celular)">Exportar .ics</button>
     <button class="btn btn-gold" data-act="novoEv">+ Compromisso</button></div>`;
-  let evs=db.eventos.filter(e=>(!f.resp||e.responsavelId===f.resp)&&(!f.tipo||e.tipo===f.tipo));
-  const tars=f.tarefas&&!f.tipo?db.tarefas.filter(t=>t.prazo&&(!f.resp||t.responsavelId===f.resp)&&(f.feitos||t.status!=='done')):[];
+  let evs=db.eventos.filter(e=>(!f.resp||ehResp(e,f.resp))&&(!f.tipo||e.tipo===f.tipo));
+  const tars=f.tarefas&&!f.tipo?db.tarefas.filter(t=>t.prazo&&(!f.resp||ehResp(t,f.resp))&&(f.feitos||t.status!=='done')):[];
   if(ui.agendaView==='mes'){
     const [y,m]=ui.agendaMes.split('-').map(Number);const first=new Date(y,m-1,1);const start=first.getDay();const days=new Date(y,m,0).getDate();
     let cells=['dom','seg','ter','qua','qui','sex','sáb'].map(d=>`<div class="hd">${d}</div>`).join('');
@@ -111,7 +111,7 @@ V.agenda=()=>{
   const groups={};rest.forEach(e=>(groups[e.data]=groups[e.data]||{e:[],t:[]}).e.push(e));
   tars.filter(t=>t.status==='done'||diff(t.prazo)>=0).forEach(t=>(groups[t.prazo]=groups[t.prazo]||{e:[],t:[]}).t.push(t));
   const tAtr=tars.filter(t=>t.status!=='done'&&diff(t.prazo)<0);
-  const tItem=t=>`<div class="ev${t.status==='done'?' done':''}"><span class="pic" style="width:16px">☑</span><div class="body" data-act="editTar" data-id="${t.id}"><div class="t">${esc(t.titulo)}</div><div class="small muted">Tarefa · ${esc(TSTATUS.find(s=>s[0]===t.status)[1])} · ${esc(nomeUsr(t.responsavelId))}</div></div><div class="small" style="text-align:right">${prazoTxt(t.prazo)}${t.status==='done'?'':`<br><a class="gcal" href="${esc(linkGcalTarefa(t))}" target="_blank" rel="noopener">+ Google Agenda</a>`}</div></div>`;
+  const tItem=t=>`<div class="ev${t.status==='done'?' done':''}"><span class="pic" style="width:16px">☑</span><div class="body" data-act="editTar" data-id="${t.id}"><div class="t">${esc(t.titulo)}</div><div class="small muted">Tarefa · ${esc(TSTATUS.find(s=>s[0]===t.status)[1])} · ${esc(nomesResp(t))}</div></div><div class="small" style="text-align:right">${prazoTxt(t.prazo)}${t.status==='done'?'':`<br><a class="gcal" href="${esc(linkGcalTarefa(t))}" target="_blank" rel="noopener">+ Google Agenda</a>`}</div></div>`;
   return head+`<div class="hint">Os links <b>+ Google Agenda</b> funcionam sem configuração. O botão <b>↻ Google Agenda</b> sincroniza tudo de uma vez (exige conectar o Google; veja Configurações).</div>
   ${venc.length||tAtr.length?`<div class="card" style="border-color:var(--red);margin-bottom:14px"><h3 style="color:var(--red)">Vencidos e não cumpridos (${venc.length+tAtr.length})</h3>${venc.map(e=>evItem(e)).join('')}${tAtr.map(tItem).join('')}</div>`:''}
   <div class="card">${Object.keys(groups).length?Object.entries(groups).sort((a,b)=>a[0].localeCompare(b[0])).map(([d,g])=>`<div class="dgroup">${fdw(d)}${d===today()?' — hoje':''}</div>${g.e.map(e=>evItem(e)).join('')}${g.t.map(tItem).join('')}`).join(''):'<div class="empty">Nenhum compromisso</div>'}</div>`;
@@ -170,7 +170,7 @@ V.processo=()=>{
     <div class="card"><h3>Andamentos <button class="btn btn-gold btn-sm" data-act="novoAnd" data-id="${p.id}">+ Andamento</button></h3>
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"><input type="date" id="and-data" value="${today()}"><input id="and-txt" style="flex:1;min-width:160px" placeholder="Registro rápido de andamento…"><button class="btn btn-brand" data-act="addAnd" data-id="${p.id}">Adicionar</button></div>
       <div class="tl">${and.map(a=>`<div class="tli"><div class="d">${fd(a.data)}${a.autor?' · '+esc(nomeUsr(a.autor)):''} <button class="btn btn-sm lnk" data-act="editAnd" data-id="${p.id}|${a.id}">editar</button></div><div>${esc(a.texto)}</div></div>`).join('')||'<div class="empty">Nenhum andamento</div>'}</div></div>
-    <div class="card"><h3>Tarefas <button class="btn btn-ghost btn-sm" data-act="novaTarProc" data-id="${p.id}">+ Tarefa</button></h3>${ts.length?ts.map(t=>`<div class="ev"><div class="body" data-act="editTar" data-id="${t.id}"><div class="t" style="${t.status==='done'?'text-decoration:line-through;color:var(--text3)':''}">${esc(t.titulo)}</div><div class="small muted">${esc(TSTATUS.find(s=>s[0]===t.status)[1])} · ${esc(nomeUsr(t.responsavelId))}</div></div><div class="small">${t.prazo?fd(t.prazo):''}</div></div>`).join(''):'<div class="empty">Nenhuma tarefa</div>'}
+    <div class="card"><h3>Tarefas <button class="btn btn-ghost btn-sm" data-act="novaTarProc" data-id="${p.id}">+ Tarefa</button></h3>${ts.length?ts.map(t=>`<div class="ev"><div class="body" data-act="editTar" data-id="${t.id}"><div class="t" style="${t.status==='done'?'text-decoration:line-through;color:var(--text3)':''}">${esc(t.titulo)}</div><div class="small muted">${esc(TSTATUS.find(s=>s[0]===t.status)[1])} · ${esc(nomesResp(t))}</div></div><div class="small">${t.prazo?fd(t.prazo):''}</div></div>`).join(''):'<div class="empty">Nenhuma tarefa</div>'}
       ${podeFin()?`<h3 style="margin-top:18px">Financeiro do processo <button class="btn btn-ghost btn-sm" data-act="ctrProc" data-id="${p.id}">Novo contrato</button></h3>${lancTable(ls,false)}`:''}</div>
   </div>`;
 };

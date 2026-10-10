@@ -15,7 +15,7 @@ function evItem(e,showProc=true){
   const p=proc(e.processoId);
   return `<div class="ev${e.feito?' done':''}"><input type="checkbox" data-act="toggleEv" data-id="${e.id}"${e.feito?' checked':''} aria-label="Marcar como cumprido">
     <div class="body" data-act="editEv" data-id="${e.id}"><div class="t">${esc(e.titulo)}</div>
-    <div class="small muted">${pTipoEvt(e.tipo)} ${e.hora?esc(e.hora)+' · ':''}${showProc&&p?esc(p.numero)+' · ':''}${esc(nomeCli(e.clienteId))} · ${esc(nomeUsr(e.responsavelId))}</div></div>
+    <div class="small muted">${pTipoEvt(e.tipo)} ${e.hora?esc(e.hora)+' · ':''}${showProc&&p?esc(p.numero)+' · ':''}${esc(nomeCli(e.clienteId))} · ${esc(nomesResp(e))}</div></div>
     <div class="small" style="text-align:right;white-space:nowrap">${fd(e.data)}<br>${e.feito?'<span class="muted">cumprido</span>':prazoTxt(e.data)}${e.feito?'':`<br><a class="gcal" href="${esc(linkGcalEvento(e))}" target="_blank" rel="noopener" title="Adicionar ao Google Agenda">+ Google Agenda</a>`}</div></div>`;
 }
 function fluxo6(){
@@ -66,7 +66,7 @@ function produtividade(ym){
     const contratos=db.contratos.filter(k=>k.responsavelId===u.id&&no(k.data)).length;
     const atend=db.leads.filter(l=>l.criadoPor===u.id&&no(l.primeiroContato||l.criado)).length+db.clientes.filter(c=>c.criadoPor===u.id&&!c.leadId&&no(c.criado)).length;
     const andam=sumBy(db.processos,p=>(p.andamentos||[]).filter(a=>a.autor===u.id&&no(a.data)).length);
-    const atrasados=db.eventos.filter(e=>!e.feito&&e.responsavelId===u.id&&diff(e.data)<0).length+db.tarefas.filter(t=>t.status!=='done'&&t.responsavelId===u.id&&t.prazo&&diff(t.prazo)<0).length;
+    const atrasados=db.eventos.filter(e=>!e.feito&&ehResp(e,u.id)&&diff(e.data)<0).length+db.tarefas.filter(t=>t.status!=='done'&&ehResp(t,u.id)&&t.prazo&&diff(t.prazo)<0).length;
     const pontos=tarefas*PONTOS.tarefa+prazos*PONTOS.prazo+contratos*PONTOS.contrato+atend*PONTOS.atendimento+andam*PONTOS.andamento;
     return {u,tarefas,prazos,contratos,atend,andam,atrasados,pontos,pins:[]};
   }).sort((a,b)=>b.pontos-a.pontos);

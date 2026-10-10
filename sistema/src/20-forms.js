@@ -18,6 +18,8 @@ function form(title,fields,data,onSave,onDelete,nota){
     if(f.t==='select'){let os=normOpts(f.o);if(v!==''&&!os.some(([ov])=>String(ov)===String(v)))os=[[v,v]].concat(os);
       inp=`<select id="${id}">${f.req?'':'<option value="">—</option>'}${os.map(([ov,ol])=>`<option value="${esc(ov)}"${String(ov)===String(v)?' selected':''}>${esc(ol)}</option>`).join('')}</select>`;}
     else if(f.t==='textarea')inp=`<textarea id="${id}" rows="${f.rows||3}">${esc(v)}</textarea>`;
+    else if(f.t==='multi'){const sel=Array.isArray(v)?v:[];
+      inp=`<div class="multi" id="${id}">${normOpts(f.o).map(([ov,ol])=>`<label class="chk"><input type="checkbox" value="${esc(ov)}"${sel.includes(ov)?' checked':''}> ${esc(ol)}</label>`).join('')}</div>`;}
     else if(f.t==='check')return `<label class="chk${f.full?' full':''}"><input type="checkbox" id="${id}"${v?' checked':''}> ${esc(f.l)}</label>`;
     else inp=`<input id="${id}" type="${f.t||'text'}" value="${esc(v)}"${f.t==='number'?' step="any" min="0"':''}${f.ph?` placeholder="${esc(f.ph)}"`:''}${f.list?` list="dl_${f.k}"`:''}>${f.list?`<datalist id="dl_${f.k}">${normOpts(f.list).map(([o])=>`<option value="${esc(o)}">`).join('')}</datalist>`:''}`;
     return `<label${cls}>${esc(f.l)}${f.req?' *':''}${inp}${f.dica?`<span class="small muted" style="font-weight:400">${f.dica}</span>`:''}</label>`;
@@ -27,8 +29,8 @@ function form(title,fields,data,onSave,onDelete,nota){
   btns.push({l:'Cancelar',c:'btn-ghost',fn:closeModal});
   btns.push({l:'Salvar',c:'btn-brand',fn:()=>{
     const out={};let ok=true;
-    fields.forEach(f=>{if(f.t==='sec')return;const el=$('#f_'+f.k);let v=f.t==='check'?el.checked:f.t==='number'?(el.value===''?(f.vazio??0):parseFloat(el.value)||0):el.value.trim();
-      el.classList.remove('err');if(f.req&&(v===''||v===null)){el.classList.add('err');ok=false;}out[f.k]=v;});
+    fields.forEach(f=>{if(f.t==='sec')return;const el=$('#f_'+f.k);let v=f.t==='multi'?[...el.querySelectorAll('input:checked')].map(i=>i.value):f.t==='check'?el.checked:f.t==='number'?(el.value===''?(f.vazio??0):parseFloat(el.value)||0):el.value.trim();
+      el.classList.remove('err');if(f.req&&(v===''||v===null||(Array.isArray(v)&&!v.length))){el.classList.add('err');ok=false;}out[f.k]=v;});
     if(!ok){toast('Preencha os campos obrigatórios',1);return;}
     if(onSave(out)===false)return;
     closeModal();save();render();toast('Salvo ✓');
@@ -98,9 +100,10 @@ function editEvento(id,pre){
     {k:'tipo',l:'Tipo de compromisso / serviço',req:1,list:O.tipos,dica:'Escolha da lista ou digite um tipo novo — ele é adicionado automaticamente.'},{k:'titulo',l:'Descrição',req:1},
     {k:'data',l:'Data',t:'date',req:1},{k:'hora',l:'Hora',t:'time'},
     {k:'processoId',l:'Processo',t:'select',o:O.processos,full:1},
-    {k:'clienteId',l:'Cliente',t:'select',o:O.clientes},{k:'responsavelId',l:'Responsável',t:'select',o:O.usuarios},
+    {k:'clienteId',l:'Cliente',t:'select',o:O.clientes,full:1},
+    {k:'responsaveis',l:'Responsáveis (marque uma ou mais pessoas)',t:'multi',o:O.usuarios,full:1,req:1},
     {k:'obs',l:'Observações',t:'textarea',full:1,rows:2},{k:'feito',l:'Cumprido / realizado',t:'check',full:1}],
-    e,v=>{if(v.processoId&&!v.clienteId)v.clienteId=proc(v.processoId)?.clienteId||'';
+    {...e,responsaveis:respDe(e)},v=>{v.responsavelId=v.responsaveis[0]||'';if(v.processoId&&!v.clienteId)v.clienteId=proc(v.processoId)?.clienteId||'';
       if(!db.tiposEvento.some(t=>norm(t.nome)===norm(v.tipo)))db.tiposEvento.push({nome:v.tipo,cor:corNova()});
       else v.tipo=db.tiposEvento.find(t=>norm(t.nome)===norm(v.tipo)).nome;
       if(v.feito&&!e.feito){v.feitoEm=today();v.feitoPor=db.usuarioAtual;}if(!v.feito)v.feitoEm='';
@@ -108,13 +111,15 @@ function editEvento(id,pre){
     id&&(()=>{db.eventos=db.eventos.filter(x=>x.id!==id);}));
 }
 const corNova=()=>['#C0392B','#1E5FA8','#1A7A6E','#7B4FB0','#B26A10','#C84B6E','#2E7D4E','#0E7490','#6B6B6B'][db.tiposEvento.length%9];
+const quemConclui=x=>ehResp(x,db.usuarioAtual)?db.usuarioAtual:(x.responsavelId||db.usuarioAtual);
 function editTarefa(id,pre){
   const t=id?db.tarefas.find(x=>x.id===id):{status:'todo',prioridade:'Média',prazo:addDays(2),responsavelId:db.usuarioAtual,...pre};
   form(id?'Editar tarefa':'Nova tarefa',[
     {k:'titulo',l:'Tarefa',req:1,full:1},{k:'status',l:'Status',t:'select',o:TSTATUS,req:1},{k:'prioridade',l:'Prioridade',t:'select',o:PRIOR,req:1},
-    {k:'prazo',l:'Prazo',t:'date'},{k:'responsavelId',l:'Responsável',t:'select',o:O.usuarios},
-    {k:'clienteId',l:'Cliente',t:'select',o:O.clientes},{k:'processoId',l:'Processo',t:'select',o:O.processos},{k:'obs',l:'Detalhes',t:'textarea',full:1,rows:2}],
-    t,v=>{if(v.status==='done'&&t.status!=='done'){v.concluidoEm=today();v.concluidoPor=v.responsavelId||db.usuarioAtual;}if(v.status!=='done')v.concluidoEm='';upsert('tarefas',id,v);},id&&(()=>{db.tarefas=db.tarefas.filter(x=>x.id!==id);}));
+    {k:'prazo',l:'Prazo',t:'date'},{k:'clienteId',l:'Cliente',t:'select',o:O.clientes},
+    {k:'responsaveis',l:'Responsáveis (marque uma ou mais pessoas)',t:'multi',o:O.usuarios,full:1,req:1},
+    {k:'processoId',l:'Processo',t:'select',o:O.processos,full:1},{k:'obs',l:'Detalhes',t:'textarea',full:1,rows:2}],
+    {...t,responsaveis:respDe(t)},v=>{v.responsavelId=v.responsaveis[0]||'';if(v.status==='done'&&t.status!=='done'){v.concluidoEm=today();v.concluidoPor=quemConclui(v);}if(v.status!=='done')v.concluidoEm='';upsert('tarefas',id,v);},id&&(()=>{db.tarefas=db.tarefas.filter(x=>x.id!==id);}));
 }
 function editLead(id){
   const l=id?db.leads.find(x=>x.id===id):{etapa:'Novo contato',origem:'',primeiroContato:today(),ultimoContato:today()};

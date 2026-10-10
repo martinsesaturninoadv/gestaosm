@@ -233,6 +233,10 @@ const usr=id=>db.usuarios.find(u=>u.id===id);
 const ctr=id=>db.contratos.find(k=>k.id===id);
 const nomeCli=id=>cli(id)?.nome||'—';
 const nomeUsr=id=>usr(id)?.nome||'—';
+/* tarefas e compromissos aceitam vários responsáveis (responsaveis[]); responsavelId = o principal */
+const respDe=x=>x.responsaveis&&x.responsaveis.length?x.responsaveis:(x.responsavelId?[x.responsavelId]:[]);
+const ehResp=(x,u)=>respDe(x).includes(u);
+const nomesResp=x=>respDe(x).map(nomeUsr).join(', ')||'—';
 const cidadeUF=c=>[c?.cidade,c?.uf].filter(Boolean).join('/');
 function idadeDe(c){if(!c)return null;if(c.nascimento){const n=new Date(c.nascimento+'T00:00'),h=new Date();let a=h.getFullYear()-n.getFullYear();if(h<new Date(h.getFullYear(),n.getMonth(),n.getDate()))a--;return a;}return c.idade?+c.idade:null;}
 function lancStatus(l){return l.pago?'Pago':diff(l.venc)<0?'Atrasado':'Em aberto';}
