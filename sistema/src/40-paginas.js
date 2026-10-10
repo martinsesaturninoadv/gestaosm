@@ -139,16 +139,16 @@ V.registro=()=>{
 };
 
 V.atendimentos=()=>{
-  const f=ui.f.crm||(ui.f.crm={produto:''});
-  const ls=db.leads.filter(l=>!f.produto||(l.produto||l.area)===f.produto);const ativos=ls.filter(l=>!['Fechado','Perdido','Encaminhado a parceiro'].includes(l.etapa));
+  const f=ui.f.crm||(ui.f.crm={produto:'',canal:''});
+  const ls=db.leads.filter(l=>(!f.produto||(l.produto||l.area)===f.produto)&&(!f.canal||(l.canal||'')===f.canal));const ativos=ls.filter(l=>!['Fechado','Perdido','Encaminhado a parceiro'].includes(l.etapa));
   const fech=ls.filter(l=>l.etapa==='Fechado').length,perd=ls.filter(l=>l.etapa==='Perdido').length;
   const orig={};ls.forEach(l=>orig[l.origem||'—']=(orig[l.origem||'—']||0)+1);
   return `<div class="grid g-kpi">${kpi('Atendimentos em aberto',ativos.length,ls.filter(l=>l.etapa==='Em recuperação').length+' em recuperação')}${kpi('Valor em negociação',brl(sumBy(ativos,l=>l.valor)))}${kpi('Taxa de conversão',(fech+perd?Math.round(fech/(fech+perd)*100):0)+'%',fech+' fechados · '+perd+' perdidos')}${kpi('Principal origem',Object.entries(orig).sort((a,b)=>b[1]-a[1])[0]?.[0]||'—')}</div>
-  <div class="toolbar"><select data-f="crm.produto"><option value="">Todos os produtos</option>${db.produtos.map(p=>`<option${f.produto===p?' selected':''}>${esc(p)}</option>`).join('')}</select><span class="hint" style="margin:0">Funil de novos casos: do primeiro contato ao contrato assinado. Arraste para mudar de etapa.</span><span class="grow"></span><a class="btn btn-ghost" href="#registro" style="text-decoration:none">Registro histórico</a><button class="btn btn-gold" data-act="novoLead">+ Atendimento</button></div>
+  <div class="toolbar"><select data-f="crm.produto"><option value="">Todos os produtos</option>${db.produtos.map(p=>`<option${f.produto===p?' selected':''}>${esc(p)}</option>`).join('')}</select><select data-f="crm.canal"><option value="">Todos os canais</option>${CANAIS.map(c=>`<option${f.canal===c?' selected':''}>${esc(c)}</option>`).join('')}</select><span class="hint" style="margin:0">Funil de novos casos: do primeiro contato ao contrato assinado. Arraste para mudar de etapa.</span><span class="grow"></span><button class="btn btn-ghost" data-act="importarWa">⇪ Importar do WhatsApp</button><a class="btn btn-ghost" href="#registro" style="text-decoration:none">Registro histórico</a><button class="btn btn-gold" data-act="novoLead">+ Atendimento</button></div>
   ${kanban(ETAPAS.map(e=>[e,e]),ls.map(l=>({...l,_col:l.etapa})),'lead',l=>`<div class="t" data-act="editLead" data-id="${l.id}" style="cursor:pointer">${esc(l.nome)}</div>
-    <div class="meta">${(l.produto||l.area)?pill(l.produto||l.area,'p-blue'):''}<span>${esc(l.origem||'')}</span>${l.valor?'<span>· '+brl(l.valor)+'</span>':''}</div>
+    <div class="meta">${(l.produto||l.area)?pill(l.produto||l.area,'p-blue'):''}<span>${esc(l.origem||'')}</span>${l.canal?pill(ehCanalSm(l.canal)?'WhatsApp SM':'WhatsApp geral',ehCanalSm(l.canal)?'p-red':'p-green'):''}${l.valor?'<span>· '+brl(l.valor)+'</span>':''}</div>
     <div class="small muted" style="margin-top:3px">1º contato ${fd(l.primeiroContato||l.criado)}${l.ultimoContato?' · último '+fd(l.ultimoContato):''}</div>
-    ${l.obs?`<div class="small muted" style="margin-top:4px">${esc(l.obs)}</div>`:''}
+    ${l.etiquetas?`<div class="small" style="margin-top:4px">🏷 ${esc(l.etiquetas)}</div>`:''}${l.obs?`<div class="small muted" style="margin-top:4px">${esc(l.obs)}</div>`:''}
     <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${l.tel?`<a class="small" target="_blank" rel="noopener" href="${waLink(l.tel)}">WhatsApp</a>`:''}${l.etapa==='Fechado'&&!l.convertido?`<button class="btn btn-brand btn-sm" data-act="converter" data-id="${l.id}">Converter em cliente</button>`:''}${l.convertido?'<span class="small" style="color:var(--green)">✓ convertido</span>':''}</div>`)}`;
 };
 

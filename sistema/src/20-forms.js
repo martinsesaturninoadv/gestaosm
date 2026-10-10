@@ -126,7 +126,7 @@ function editLead(id){
   form(id?'Editar atendimento':'Novo atendimento',[
     {k:'nome',l:'Nome',req:1},{k:'tel',l:'WhatsApp / telefone'},{k:'email',l:'E-mail',t:'email'},
     {k:'origem',l:'Origem',t:'select',o:ORIGENS},{k:'produto',l:'Produto / nicho',t:'select',o:O.produtos},
-    {k:'etapa',l:'Status / etapa',t:'select',o:ETAPAS,req:1},
+    {k:'etapa',l:'Status / etapa',t:'select',o:ETAPAS,req:1},{k:'canal',l:'WhatsApp de entrada',t:'select',o:CANAIS},{k:'etiquetas',l:'Etiquetas (WaSpeed)'},
     {k:'primeiroContato',l:'Primeiro contato',t:'date'},{k:'ultimoContato',l:'Último contato',t:'date'},
     {k:'valor',l:'Honorários estimados (R$)',t:'number'},{k:'proposta',l:'Proposta enviada',t:'textarea',full:1,rows:2,},
     {k:'obs',l:'Resumo do caso',t:'textarea',full:1,rows:2},...campoParceiro(),...camposPerfil],
