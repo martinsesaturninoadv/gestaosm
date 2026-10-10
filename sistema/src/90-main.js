@@ -1,7 +1,7 @@
 /* =========================================================
    RENDER / ROTEAMENTO
    ========================================================= */
-const PAGINAS_PARCEIRO=['painel','tarefas','parcerias','config','cliente','processo'];
+const PAGINAS_PARCEIRO=['painel','escritorio','tarefas','parcerias','config','cliente','processo'];
 function render(){
   if(!db)return;
   const [page,id]=(location.hash.slice(1)||'painel').split('/');
@@ -13,7 +13,9 @@ function render(){
   if(ui.page==='sm'&&ui.id){const c=db.sm.find(x=>x.id===ui.id);if(c)title='Salário-maternidade — '+nomeCli(c.clienteId);}
   if(ehParceiro()&&ui.page==='painel')title='Painel da parceria';
   $('#ptitle').textContent=title;document.title=title+' · Gestão do Escritório';
-  $('#view').innerHTML=V[ui.page]();
+  // o escritório virtual se atualiza sozinho (animações e chat): não redesenha a página inteira
+  if(!(ui.page==='escritorio'&&$('#esc-root')))$('#view').innerHTML=V[ui.page]();
+  if(ui.page==='escritorio')escMontar();
   ['#cli-grid','#doc-grid'].forEach(s=>{const g=$(s);if(g&&innerWidth<860)g.style.gridTemplateColumns='minmax(0,1fr)';});
   const navKey={cliente:'clientes',processo:'processos'}[ui.page]||ui.page;
   document.querySelectorAll('.ni').forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+navKey));
@@ -28,7 +30,8 @@ function badges(){
   n('nb-tarefas',db.tarefas.filter(t=>t.status!=='done'&&t.prazo&&diff(t.prazo)<0).length);
   n('nb-fin',podeFin()?db.lancamentos.filter(l=>l.tipo==='receita'&&lancStatus(l)==='Atrasado').length:0);
   n('nb-docs',db.documentos.filter(d=>!d.recebido).length);
-  n('nb-sm',guiasPendentes(7).length);
+  n('nb-sm',ehParceiro()?0:guiasPendentes(7).length);
+  n('nb-esc',totalNaoLidas());
   $('#brand-nome').textContent=(db.escritorio.nome||'Escritório').replace(/\s+Advocacia(\s+e\s+Consultoria)?$/i,'');
 }
 function userBox(){
@@ -158,11 +161,12 @@ const A={
   novoUsr:()=>editUsuario(),editUsr:id=>editUsuario(id),
   novaConta:()=>editConta(),editConta:i=>editConta({...contasCache[+i],senha:''}),
   trocarSenha:()=>{api('senha',{atual:$('#s-atual').value,nova:$('#s-nova').value}).then(()=>{toast('Senha alterada ✓');$('#s-atual').value='';$('#s-nova').value='';}).catch(e=>toast(e.msg||'Não foi possível trocar a senha',1));},
-  sair:()=>{document.querySelectorAll('.confete').forEach(c=>c.remove());api('sair',{}).finally(()=>{clearInterval(tPuxar);sessao=null;G.token=null;db=vazio();contasCache=null;location.hash='painel';render();mostrarLogin();});},
+  sair:()=>{document.querySelectorAll('.confete').forEach(c=>c.remove());escParar();api('sair',{}).finally(()=>{clearInterval(tPuxar);sessao=null;G.token=null;db=vazio();contasCache=null;location.hash='painel';render();mostrarLogin();});},
   exportar:()=>download('backup-escritorio-'+today()+'.json',JSON.stringify({...db,usuarioAtual:undefined},null,1),'application/json'),
   importar:()=>$('#file-import').click(),
   importarXls:()=>$('#file-xlsx').click(),importarWa:()=>importarWhatsApp(),
 };
+Object.assign(A,ESC_ACOES);
 function lerTipos(){document.querySelectorAll('[data-tipo-nome]').forEach(el=>{const i=+el.dataset.tipoNome;if(db.tiposEvento[i])db.tiposEvento[i].nome=el.value.trim();});
   document.querySelectorAll('[data-tipo-cor]').forEach(el=>{const i=+el.dataset.tipoCor;if(db.tiposEvento[i])db.tiposEvento[i].cor=el.value;});}
 function lancarFixas(ym,ids){

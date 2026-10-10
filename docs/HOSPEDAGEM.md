@@ -74,6 +74,12 @@ Abra `https://gestao.seudominio.com.br` e entre com o e-mail e a senha que você
 6. **Integrações Google** (opcional): siga o guia **[GOOGLE.md](GOOGLE.md)**.
 7. **Configurações → Importar planilhas do Excel**: envie o `CRM INTERNO CLIENTE` e o `CONTROLE FINANCEIRO`. Confira o que foi encontrado e clique em **Importar**. Importar de novo não duplica.
 
+### Escritório virtual
+Menu **Escritório virtual**: planta do escritório com as salas (Recepção, Sala da Dra. Joyce, Sala da Dra. Vitória, Comercial, Sala de Reunião e Copa), um bonequinho animado para cada pessoa online, chat geral, chat por sala e conversas privadas.
+- Para ter **vídeo/voz** em cada sala: em <https://meet.google.com> → **Nova reunião → Criar uma reunião para depois**, copie o link e cole em **Configurações → Escritório virtual — salas**. O botão 🎥 da sala abre a chamada.
+- O **parceiro** só entra na Sala de Reunião e só vê o chat dela e as conversas privadas com ele.
+- As conversas privadas só são vistas pelas duas pessoas (regra do servidor).
+
 ### 9. Backup
 - O plano da HostGator costuma ter backup próprio. Mesmo assim, uma vez por mês: cPanel → **Backup** → baixe o **backup do banco MySQL**.
 - No próprio sistema: **Configurações → Exportar backup (.json)**.

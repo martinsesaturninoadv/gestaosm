@@ -9,17 +9,17 @@ let db;
 let modo='local',sessao=null;
 const ui={page:'painel',id:null,agendaView:'lista',agendaMes:today().slice(0,7),f:{},tabCli:'processos',tabProc:'Judicial',procView:'lista',tabSm:'casos',tabDoc:'gerador'};
 const COLS=['clientes','processos','eventos','tarefas','leads','lancamentos','documentos','notas','contratos','despesasFixas','usuarios','sm','scripts','modelos'];
-const SINGLES=['escritorio','metas','produtos','tiposEvento','indAjustes','indExtras'];
+const SINGLES=['escritorio','metas','produtos','tiposEvento','indAjustes','indExtras','salas'];
 const COLS_FIN=['lancamentos','contratos','despesasFixas'];
 /* parceiro: só a parceria (clientes, processos, prazos, tarefas e honorários) — sem CRM, salário-maternidade, documentos, modelos e scripts */
 const COLS_PARC=['clientes','processos','eventos','tarefas','notas','contratos','lancamentos'];
 const COLS_LIVRES_PARC=['usuarios'];
 /* registro é do parceiro se o caso é da parceria dele ou se ele foi marcado como responsável */
 const doParceiro=(x,email)=>!!x&&(norm(x.parceiro)===norm(email)||(Array.isArray(x.parceiros)&&x.parceiros.some(e=>norm(e)===norm(email))));
-const CONFIG_PARC=['escritorio','produtos','tiposEvento'];
+const CONFIG_PARC=['escritorio','produtos','tiposEvento','salas'];
 
 function vazio(){return {versao:6,escritorio:{nome:'Martins & Saturnino Advocacia e Consultoria',cnpj:'',oab:'',email:'',tel:'',endereco:'',cidade:'',saldoInicial:0,saldoInicialData:'',logo:'',googleClientId:'',salarioMinimo:1518},
-  metas:{...METAS_PADRAO},produtos:PRODUTOS_PADRAO.slice(),tiposEvento:TIPOS_EVT_PADRAO.map(([nome,cor])=>({nome,cor})),indAjustes:{},indExtras:[],
+  metas:{...METAS_PADRAO},produtos:PRODUTOS_PADRAO.slice(),tiposEvento:TIPOS_EVT_PADRAO.map(([nome,cor])=>({nome,cor})),indAjustes:{},indExtras:[],salas:salasPadrao(),
   usuarioAtual:'',usuarios:[],clientes:[],processos:[],eventos:[],tarefas:[],leads:[],lancamentos:[],documentos:[],notas:[],contratos:[],despesasFixas:[],sm:[],scripts:[],modelos:[]};}
 function migrar(d){
   const v=vazio();for(const k in v)if(d[k]===undefined||d[k]===null)d[k]=v[k];
@@ -28,6 +28,7 @@ function migrar(d){
   if(!Array.isArray(d.tiposEvento)||!d.tiposEvento.length)d.tiposEvento=v.tiposEvento;
   if(typeof d.indAjustes!=='object'||Array.isArray(d.indAjustes))d.indAjustes={};
   if(!Array.isArray(d.indExtras))d.indExtras=[];
+  {const sp=salasPadrao();const s=typeof d.salas==='object'&&d.salas&&!Array.isArray(d.salas)?d.salas:{};d.salas={};for(const k in sp)d.salas[k]={...sp[k],...(s[k]||{})};}
   const mapa={'Honorários contratuais':'H.O. iniciais','Honorários de êxito':'H.O. finais — êxito','Honorários mensais — partido':'Honorários mensais (partido)','Aluguel e condomínio':'Aluguel','Folha / pró-labore':'Folha de pagamento','Software e sistemas':'Sistemas','Marketing / tráfego pago':'Tráfego — Facebook/Instagram','Material e escritório':'Material de expediente'};
   d.lancamentos.forEach(l=>{if(mapa[l.categoria])l.categoria=mapa[l.categoria];if(!l.criado)l.criado=l.venc;});
   d.clientes.forEach(c=>{if(c.cidade&&!c.uf){const m=String(c.cidade).match(/^(.*)\/\s*([A-Za-z]{2})$/);if(m){c.cidade=m[1].trim();c.uf=m[2].toUpperCase();}}});
@@ -124,6 +125,7 @@ function fakeApiSync(acao,b,q){
       if(c){if(c.id===u.id&&(papel!=='admin'||!ativo))err(400,'Você não pode remover o seu próprio acesso de administrador.');Object.assign(c,{nome,email,papel,ativo});if(senha)c.senha=hashDemo(senha);}
       else{if(!senha)err(400,'Defina uma senha inicial.');c={id:Math.max(0,...S.contas.map(x=>x.id))+1,nome,email,papel,ativo,senha:hashDemo(senha)};S.contas.push(c);}
       demoSave();return {ok:true,id:c.id};}
+    case 'sala':return demoSala(precisa(),b);
   }
   err(404,'Ação desconhecida.');
 }
@@ -207,6 +209,7 @@ async function entrar(u){
     if(!db.produtos.some(p=>norm(p)==='direito digital'))db.produtos.push('Direito digital');}
   save();if(!location.hash)location.hash='painel';render();
   clearInterval(tPuxar);if(modo==='servidor')tPuxar=setInterval(()=>puxar(false),20000);
+  escIniciar();
   setTimeout(checarMetas,600);
 }
 async function iniciar(){

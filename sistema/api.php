@@ -13,6 +13,7 @@
  *   POST senha {atual,nova}   → troca a própria senha
  *   GET  contas               → lista de acessos (somente administrador)
  *   POST conta {id?,nome,email,papel,ativo,senha?} (somente administrador)
+ *   POST sala {presenca?,enviar?,desde} → escritório virtual: presença da equipe e chat
  */
 declare(strict_types=1);
 
@@ -22,7 +23,7 @@ header('X-Content-Type-Options: nosniff');
 
 const COLECOES = ['clientes', 'processos', 'eventos', 'tarefas', 'leads', 'lancamentos', 'documentos',
     'notas', 'contratos', 'despesasFixas', 'usuarios', 'sm', 'scripts', 'modelos', 'config'];
-const CONFIG_IDS = ['escritorio', 'metas', 'produtos', 'tiposEvento', 'indAjustes', 'indExtras'];
+const CONFIG_IDS = ['escritorio', 'metas', 'produtos', 'tiposEvento', 'indAjustes', 'indExtras', 'salas'];
 // Coleções que o perfil "estagiario" não pode ver nem alterar
 const COLECOES_FINANCEIRAS = ['lancamentos', 'contratos', 'despesasFixas'];
 // Perfil "parceiro": só vê a parceria — registros com o e-mail dele no campo "parceiro"
@@ -30,7 +31,11 @@ const COLECOES_FINANCEIRAS = ['lancamentos', 'contratos', 'despesasFixas'];
 // Não vê CRM, salário-maternidade, documentos, modelos nem scripts.
 const COLECOES_PARCERIA = ['clientes', 'processos', 'eventos', 'tarefas', 'notas', 'contratos', 'lancamentos'];
 const COLECOES_LIVRES_PARCEIRO = ['usuarios'];
-const CONFIG_PARCEIRO = ['escritorio', 'produtos', 'tiposEvento'];
+const CONFIG_PARCEIRO = ['escritorio', 'produtos', 'tiposEvento', 'salas'];
+// Escritório virtual: salas fixas (os nomes são editáveis em Configurações). O parceiro só entra na sala de reunião.
+const SALAS = ['recepcao', 'joyce', 'vitoria', 'reuniao', 'copa', 'comercial'];
+const SALA_PARCEIRO = 'reuniao';
+const STATUS_SALA = ['disponivel', 'atendimento', 'ausente', 'foco'];
 const PAPEIS = ['admin', 'advogado', 'estagiario', 'financeiro', 'parceiro'];
 
 function minusculo(?string $s): string { return mb_strtolower(trim((string) $s)); }
@@ -63,6 +68,19 @@ function podeGravar(array $u, string $col, string $id, $novo, $antigo): bool
         return ($novo === null || $dele($novo)) && ($antigo === null || $dele($antigo));
     }
     return true;
+}
+
+/* chat: "geral", "sala:<id>" ou "dm:<email>|<email>" (conversa privada só é lida pelas duas pessoas) */
+function canalPermitido(array $u, string $canal): bool
+{
+    $parceiro = $u['papel'] === 'parceiro';
+    if ($canal === 'geral') return !$parceiro;
+    if (preg_match('/^sala:([a-z]+)$/', $canal, $m)) return in_array($m[1], SALAS, true) && (!$parceiro || $m[1] === SALA_PARCEIRO);
+    if (preg_match('/^dm:([^|]+)\|([^|]+)$/', $canal, $m)) {
+        $eu = minusculo($u['email']);
+        return $m[1] !== $m[2] && ($m[1] === $eu || $m[2] === $eu) && filter_var($m[1], FILTER_VALIDATE_EMAIL) && filter_var($m[2], FILTER_VALIDATE_EMAIL);
+    }
+    return false;
 }
 
 function responder(array $dados, int $status = 200): void
@@ -136,6 +154,18 @@ function criarTabelas(PDO $pdo, bool $mysql): void
         try { $pdo->exec('CREATE INDEX idx_reg_atualizado ON registros (atualizado_em)'); } catch (PDOException $e) { /* já existe */ }
     } else {
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_reg_atualizado ON registros (atualizado_em)');
+    }
+    // escritório virtual: presença (uma linha por pessoa) e mensagens do chat — fora do histórico de auditoria
+    $pdo->exec("CREATE TABLE IF NOT EXISTS presenca (
+        uid INT NOT NULL PRIMARY KEY, email VARCHAR(190) NOT NULL, nome VARCHAR(120) NOT NULL, papel VARCHAR(20) NOT NULL,
+        sala VARCHAR(20) NOT NULL, x DOUBLE NOT NULL, y DOUBLE NOT NULL, status VARCHAR(20) NOT NULL, visual VARCHAR(400), visto BIGINT NOT NULL)$fim");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS mensagens (
+        id $auto, canal VARCHAR(400) NOT NULL, de_uid INT NOT NULL, de_email VARCHAR(190) NOT NULL, de_nome VARCHAR(120) NOT NULL,
+        texto TEXT NOT NULL, tipo VARCHAR(10) NOT NULL, em BIGINT NOT NULL)$fim");
+    if ($mysql) {
+        try { $pdo->exec('CREATE INDEX idx_msg_em ON mensagens (em)'); } catch (PDOException $e) { /* já existe */ }
+    } else {
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_msg_em ON mensagens (em)');
     }
 }
 
@@ -211,7 +241,10 @@ switch ($acao) {
         responder(['ok' => true, 'usuario' => usuarioPublico($u), 'agora' => agoraMs()]);
 
     case 'sair':
-        if (!empty($_SESSION['uid'])) registrar($pdo, (int) $_SESSION['uid'], 'logout');
+        if (!empty($_SESSION['uid'])) {
+            registrar($pdo, (int) $_SESSION['uid'], 'logout');
+            $pdo->prepare('DELETE FROM presenca WHERE uid = ?')->execute([(int) $_SESSION['uid']]);
+        }
         $_SESSION = [];
         session_destroy();
         responder(['ok' => true]);
@@ -290,6 +323,56 @@ switch ($acao) {
         $pdo->prepare('UPDATE usuarios SET senha_hash = ? WHERE id = ?')->execute([password_hash($nova, PASSWORD_DEFAULT), $u['id']]);
         registrar($pdo, (int) $u['id'], 'troca_senha');
         responder(['ok' => true]);
+
+    case 'sala':
+        if ($metodo !== 'POST') erro('Método inválido.', 405);
+        $u = usuarioLogado($pdo);
+        $b = corpo();
+        $agora = agoraMs();
+        $parceiro = $u['papel'] === 'parceiro';
+        if (is_array($b['presenca'] ?? null)) {
+            $p = $b['presenca'];
+            $sala = in_array($p['sala'] ?? '', SALAS, true) ? $p['sala'] : 'recepcao';
+            if ($parceiro) $sala = SALA_PARCEIRO;
+            $num = fn($v) => max(0.0, min(100.0, (float) $v));
+            $status = in_array($p['status'] ?? '', STATUS_SALA, true) ? $p['status'] : 'disponivel';
+            $visual = [];
+            foreach ((array) ($p['visual'] ?? []) as $k => $v) {
+                if (in_array($k, ['pele', 'cabelo', 'corCabelo', 'roupa', 'oculos', 'gravata'], true) && is_scalar($v)) $visual[$k] = mb_substr((string) $v, 0, 20);
+            }
+            $pdo->prepare('DELETE FROM presenca WHERE uid = ?')->execute([(int) $u['id']]);
+            $pdo->prepare('INSERT INTO presenca (uid, email, nome, papel, sala, x, y, status, visual, visto) VALUES (?,?,?,?,?,?,?,?,?,?)')
+                ->execute([(int) $u['id'], minusculo($u['email']), $u['nome'], $u['papel'], $sala, $num($p['x'] ?? 50), $num($p['y'] ?? 50), $status, json_encode($visual), $agora]);
+        }
+        if (is_array($b['enviar'] ?? null)) {
+            $canal = (string) ($b['enviar']['canal'] ?? '');
+            $texto = trim(mb_substr((string) ($b['enviar']['texto'] ?? ''), 0, 2000));
+            $tipo = in_array($b['enviar']['tipo'] ?? 'msg', ['msg', 'toc', 'emote'], true) ? $b['enviar']['tipo'] : 'msg';
+            if ($texto === '' || !canalPermitido($u, $canal)) erro('Não foi possível enviar a mensagem.');
+            $pdo->prepare('INSERT INTO mensagens (canal, de_uid, de_email, de_nome, texto, tipo, em) VALUES (?,?,?,?,?,?,?)')
+                ->execute([$canal, (int) $u['id'], minusculo($u['email']), $u['nome'], $texto, $tipo, $agora]);
+        }
+        $desde = max(0, (int) ($b['desde'] ?? 0));
+        $st = $desde > 0
+            ? $pdo->prepare('SELECT * FROM mensagens WHERE em > ? ORDER BY id LIMIT 500')
+            : $pdo->prepare('SELECT * FROM mensagens WHERE em > ? ORDER BY id DESC LIMIT 1500');
+        $st->execute([$desde > 0 ? $desde : $agora - 30 * 86400000]);
+        $linhas = $st->fetchAll();
+        if ($desde === 0) $linhas = array_reverse($linhas);
+        $msgs = [];
+        foreach ($linhas as $m) {
+            if (!canalPermitido($u, $m['canal'])) continue;
+            $msgs[] = ['id' => (int) $m['id'], 'canal' => $m['canal'], 'de' => $m['de_email'], 'nome' => $m['de_nome'], 'texto' => $m['texto'], 'tipo' => $m['tipo'], 'em' => (int) $m['em']];
+        }
+        $st = $pdo->prepare('SELECT * FROM presenca WHERE visto > ?');
+        $st->execute([$agora - 600000]);
+        $pres = [];
+        foreach ($st->fetchAll() as $p) {
+            if ($parceiro && $p['sala'] !== SALA_PARCEIRO && (int) $p['uid'] !== (int) $u['id']) continue;
+            $pres[] = ['email' => $p['email'], 'nome' => $p['nome'], 'papel' => $p['papel'], 'sala' => $p['sala'], 'x' => (float) $p['x'], 'y' => (float) $p['y'],
+                'status' => $p['status'], 'visual' => json_decode((string) $p['visual'], true) ?: [], 'online' => (int) $p['visto'] > $agora - 45000];
+        }
+        responder(['ok' => true, 'agora' => $agora, 'presencas' => $pres, 'mensagens' => $msgs]);
 
     case 'contas':
         $u = usuarioLogado($pdo);
