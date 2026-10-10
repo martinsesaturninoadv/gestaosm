@@ -1591,7 +1591,10 @@ function editConta(c){
     {k:'nome',l:'Nome',req:1},{k:'email',l:'E-mail (login)',t:'email',req:1},
     {k:'papel',l:'Perfil',t:'select',o:PAPEIS,req:1},{k:'senha',l:c.id?'Nova senha (deixe vazio para manter)':'Senha inicial (mín. 8 caracteres)',t:'text'},
     {k:'ativo',l:'Acesso ativo',t:'check',full:1}],c,v=>{
-      api('conta',{...v,id:c.id||0}).then(()=>{contasCache=null;toast('Acesso salvo ✓');render();}).catch(e=>toast(e.msg||'Não foi possível salvar',1));
+      api('conta',{...v,id:c.id||0}).then(()=>{contasCache=null;
+        // quem ganha acesso entra também na Equipe (é o que o coloca na lista de responsáveis das tarefas)
+        if(!db.usuarios.some(u=>norm(u.email)===norm(v.email))){db.usuarios.push({id:uid(),nome:v.nome,papel:papelNome(v.papel).replace(/ —.*/,''),oab:'',email:v.email});save();}
+        toast('Acesso salvo ✓');render();}).catch(e=>toast(e.msg||'Não foi possível salvar',1));
     },null,'Cada pessoa da equipe deve ter o próprio acesso. Envie a senha inicial por um canal seguro e peça para a pessoa trocá-la em Configurações → Minha senha.');
 }
 
