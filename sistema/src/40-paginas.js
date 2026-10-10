@@ -12,7 +12,7 @@ function moveCard(kind,id,col){
   if(kind==='tarefa'){const t=db.tarefas.find(x=>x.id===id);if(t){if(col==='done'&&t.status!=='done'){t.concluidoEm=today();t.concluidoPor=quemConclui(t);toast('Tarefa concluída! +'+PONTOS.tarefa+' pontos 🎉');}if(col!=='done')t.concluidoEm='';t.status=col;}}
   if(kind==='proc'){const p=proc(id);if(p)p.fase=col;}
   if(kind==='sm'){const c=db.sm.find(x=>x.id===id);if(c)c.status=col;}
-  if(kind==='lead'){const l=db.leads.find(x=>x.id===id);if(l){l.etapa=col;l.ultimoContato=today();if(col==='Fechado'&&!l.convertido)setTimeout(()=>toast('Negócio fechado! Use "Converter em cliente" no card.'),300);}}
+  if(kind==='lead'){const l=db.leads.find(x=>x.id===id);if(l){l.etapa=col;l.ultimoContato=today();if(col==='Fechado'){if(!l.dataFechamento)l.dataFechamento=today();}else l.dataFechamento='';if(col==='Fechado'&&!l.convertido)setTimeout(()=>toast('Negócio fechado! Use "Converter em cliente" no card.'),300);}}
   save();render();
 }
 V.tarefas=()=>{
@@ -148,7 +148,7 @@ V.atendimentos=()=>{
   ${kanban(ETAPAS.map(e=>[e,e]),ls.map(l=>({...l,_col:l.etapa})),'lead',l=>`<div class="t" data-act="editLead" data-id="${l.id}" style="cursor:pointer">${esc(l.nome)}</div>
     <div class="meta">${(l.produto||l.area)?pill(l.produto||l.area,'p-blue'):''}<span>${esc(l.origem||'')}</span>${l.canal?pill(ehCanalSm(l.canal)?'WhatsApp SM':'WhatsApp geral',ehCanalSm(l.canal)?'p-red':'p-green'):''}${l.valor?'<span>· '+brl(l.valor)+'</span>':''}</div>
     <div class="small muted" style="margin-top:3px">1º contato ${fd(l.primeiroContato||l.criado)}${l.ultimoContato?' · último '+fd(l.ultimoContato):''}</div>
-    ${l.etiquetas?`<div class="small" style="margin-top:4px">🏷 ${esc(l.etiquetas)}</div>`:''}${l.obs?`<div class="small muted" style="margin-top:4px">${esc(l.obs)}</div>`:''}
+    ${l.campanha?`<div class="small muted" style="margin-top:3px">📣 ${esc(l.campanha)}</div>`:''}${l.etapa==='Fechado'&&l.dataFechamento?`<div class="small" style="margin-top:3px;color:var(--green)">✓ fechado em ${fd(l.dataFechamento)}${+l.valorFechado?' · '+brl(+l.valorFechado):''}</div>`:''}${l.etiquetas?`<div class="small" style="margin-top:4px">🏷 ${esc(l.etiquetas)}</div>`:''}${l.obs?`<div class="small muted" style="margin-top:4px">${esc(l.obs)}</div>`:''}
     <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${l.tel?`<a class="small" target="_blank" rel="noopener" href="${waLink(l.tel)}">WhatsApp</a>`:''}${l.etapa==='Fechado'&&!l.convertido?`<button class="btn btn-brand btn-sm" data-act="converter" data-id="${l.id}">Converter em cliente</button>`:''}${l.convertido?'<span class="small" style="color:var(--green)">✓ convertido</span>':''}</div>`)}`;
 };
 

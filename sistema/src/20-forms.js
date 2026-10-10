@@ -128,9 +128,11 @@ function editLead(id){
     {k:'origem',l:'Origem',t:'select',o:ORIGENS},{k:'produto',l:'Produto / nicho',t:'select',o:O.produtos},
     {k:'etapa',l:'Status / etapa',t:'select',o:ETAPAS,req:1},{k:'canal',l:'WhatsApp de entrada',t:'select',o:CANAIS},{k:'etiquetas',l:'Etiquetas (WaSpeed)'},
     {k:'primeiroContato',l:'Primeiro contato',t:'date'},{k:'ultimoContato',l:'Último contato',t:'date'},
-    {k:'valor',l:'Honorários estimados (R$)',t:'number'},{k:'proposta',l:'Proposta enviada',t:'textarea',full:1,rows:2,},
+    {k:'valor',l:'Honorários estimados (R$)',t:'number'},{k:'campanha',l:'Campanha (Meta)',list:()=>[...new Set(db.trafego.map(t=>t.campanha))].sort(),dica:'Para medir o resultado de cada campanha na tela Tráfego pago.'},
+    {k:'dataFechamento',l:'Data de fechamento',t:'date',dica:'Preenchida sozinha ao mover para "Fechado".'},{k:'valorFechado',l:'Honorários fechados (R$)',t:'number',dica:'Valor do contrato fechado (se vazio, usa o estimado).'},
+    {k:'proposta',l:'Proposta enviada',t:'textarea',full:1,rows:2,},
     {k:'obs',l:'Resumo do caso',t:'textarea',full:1,rows:2},...campoParceiro(),...camposPerfil],
-    l,v=>{upsert('leads',id,v,{criado:v.primeiroContato||today()});},id&&(()=>{db.leads=db.leads.filter(x=>x.id!==id);}));
+    l,v=>{if(v.etapa==='Fechado'&&!v.dataFechamento)v.dataFechamento=today();if(v.etapa!=='Fechado')v.dataFechamento='';upsert('leads',id,v,{criado:v.primeiroContato||today()});},id&&(()=>{db.leads=db.leads.filter(x=>x.id!==id);}));
 }
 function editLanc(id,pre){
   const l=id?db.lancamentos.find(x=>x.id===id):{tipo:'receita',venc:today(),pago:false,forma:'PIX',...pre};
@@ -252,7 +254,8 @@ function editSm(id,pre){
     {k:'qualidadeAte',l:'Qualidade de segurada até',t:'date'},{k:'der',l:'DER — data do requerimento',t:'date'},
     {k:'nb',l:'NB / protocolo'},{k:'beneficioEstimado',l:'Valor total estimado do benefício (R$)',t:'number'},
     {k:'obs',l:'Observações',t:'textarea',full:1,rows:2}],
-    c,v=>{const nid=upsert('sm',id,v,{guias:[]});if(!id)location.hash='sm/'+nid;},id&&(()=>{db.sm=db.sm.filter(x=>x.id!==id);if(ui.page==='sm'&&ui.id)location.hash='sm';}),
+    c,v=>{if(v.status==='Aguardando o parto'&&v.dataParto){v.status='Pronto para protocolo';setTimeout(()=>toast('Parto informado: caso movido para "Pronto para protocolo" 👶'),300);}
+      const nid=upsert('sm',id,v,{guias:[]});if(!id)location.hash='sm/'+nid;},id&&(()=>{db.sm=db.sm.filter(x=>x.id!==id);if(ui.page==='sm'&&ui.id)location.hash='sm';}),
     'Cadastre também os documentos padrão do salário-maternidade no checklist do cliente (botão na ficha do caso).');
 }
 const vencGuia=comp=>diaNoMes(ymAdd(comp,1),15);
