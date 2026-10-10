@@ -111,7 +111,12 @@ const A={
   smContrato:id=>{const c=db.sm.find(x=>x.id===id);const m=db.modelos.find(x=>/salário-maternidade/i.test(x.nome));ui.tabDoc='gerador';ui.f.doc={...(ui.f.doc||{}),mcli:c.clienteId,mproc:'',mctr:'',modelo:m?.id};location.hash='documentos';render();},
   novoProcSm:id=>{const c=db.sm.find(x=>x.id===id);editProcesso(null,{clienteId:c.clienteId,tipo:'Administrativo',area:'Previdenciário',objeto:'Salário-maternidade',parteContraria:'INSS',orgaoAdm:'INSS',fase:'Requerimento a protocolar'});},
   docsPadraoSm:cid=>{let n=0;SM_DOCS.forEach(nome=>{if(!db.documentos.some(d=>d.clienteId===cid&&norm(d.nome)===norm(nome))){db.documentos.push({id:uid(),clienteId:cid,nome,recebido:false,data:''});n++;}});save();render();toast(n+' documento(s) adicionado(s) ao checklist');},
-  drivePasta:async id=>{try{await drivePastaCliente(id);render();toast('Pasta criada no Google Drive ✓');}catch(e){gErro(e);}},
+  vincularDrive:id=>{const c=cli(id);
+    form('Pasta do cliente no Google Drive',[{k:'driveLink',l:'Link da pasta',t:'url',full:1,req:1,ph:'https://drive.google.com/drive/folders/…'}],{},v=>{
+      const l=v.driveLink.trim(),fid=(l.match(/folders\/([\w-]+)/)||l.match(/[?&]id=([\w-]+)/)||[])[1];
+      upsert('clientes',id,{driveLink:l,driveId:fid||''});},null,
+      `No Google Drive, abra a pasta de <b>${esc(c.nome)}</b>, copie o endereço da barra do navegador (ou clique com o botão direito na pasta → <b>Compartilhar → Copiar link</b>) e cole abaixo.`+(!gIndisponivel()?` Ou <a href="#" data-act="drivePasta" data-id="${id}">crie uma pasta nova automaticamente</a>.`:''));},
+  drivePasta:async id=>{closeModal();try{await drivePastaCliente(id);render();toast('Pasta criada no Google Drive ✓');}catch(e){gErro(e);}},
   anexarDoc:id=>{const m=gIndisponivel();if(m){modal('Anexar arquivo',`<p class="small" style="margin-bottom:10px">${esc(m)}</p><p class="small">Enquanto isso, você pode colar o link do arquivo (Google Drive, Dropbox etc.) no documento.</p>`,[{l:'Fechar',c:'btn-ghost',fn:closeModal},{l:'Colar link',c:'btn-brand',fn:()=>{closeModal();editDoc(id);}}]);return;}
     const inp=$('#file-anexo');inp.dataset.doc=id;inp.click();},
   scrCat:c=>{ui.f.scr.cat=c;render();},novoScript:()=>editScript(),editScript:id=>editScript(id),

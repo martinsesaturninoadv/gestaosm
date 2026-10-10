@@ -67,8 +67,9 @@ function editCliente(id){
     {k:'origem',l:'Origem (como chegou)',t:'select',o:ORIGENS},{k:'produto',l:'Produto / nicho',t:'select',o:O.produtos},
     {k:'primeiroContato',l:'Primeiro contato',t:'date'},{k:'ultimoContato',l:'Último contato',t:'date'},
     {k:'status',l:'Situação',t:'select',o:['Ativo','Inativo'],req:1},...campoParceiro(),
-    ...camposPerfil,{k:'obs',l:'Observações',t:'textarea',full:1}],
-    c,v=>{const nid=upsert('clientes',id,v,{criado:today()});if(!id)location.hash='cliente/'+nid;},
+    ...camposPerfil,{k:'driveLink',l:'Pasta no Google Drive (cole o link da pasta)',t:'url',full:1,ph:'https://drive.google.com/drive/folders/…'},{k:'obs',l:'Observações',t:'textarea',full:1}],
+    c,v=>{v.driveLink=(v.driveLink||'').trim();const fid=(v.driveLink.match(/folders\/([\w-]+)/)||v.driveLink.match(/[?&]id=([\w-]+)/)||[])[1];v.driveId=fid||(v.driveLink?'':(c.driveLink?'':c.driveId||''));
+      const nid=upsert('clientes',id,v,{criado:today()});if(!id)location.hash='cliente/'+nid;},
     id&&(()=>{db.clientes=db.clientes.filter(x=>x.id!==id);if(ui.page==='cliente')location.hash='clientes';}));
 }
 function editProcesso(id,pre){

@@ -1428,8 +1428,9 @@ function editCliente(id){
     {k:'origem',l:'Origem (como chegou)',t:'select',o:ORIGENS},{k:'produto',l:'Produto / nicho',t:'select',o:O.produtos},
     {k:'primeiroContato',l:'Primeiro contato',t:'date'},{k:'ultimoContato',l:'Último contato',t:'date'},
     {k:'status',l:'Situação',t:'select',o:['Ativo','Inativo'],req:1},...campoParceiro(),
-    ...camposPerfil,{k:'obs',l:'Observações',t:'textarea',full:1}],
-    c,v=>{const nid=upsert('clientes',id,v,{criado:today()});if(!id)location.hash='cliente/'+nid;},
+    ...camposPerfil,{k:'driveLink',l:'Pasta no Google Drive (cole o link da pasta)',t:'url',full:1,ph:'https://drive.google.com/drive/folders/…'},{k:'obs',l:'Observações',t:'textarea',full:1}],
+    c,v=>{v.driveLink=(v.driveLink||'').trim();const fid=(v.driveLink.match(/folders\/([\w-]+)/)||v.driveLink.match(/[?&]id=([\w-]+)/)||[])[1];v.driveId=fid||(v.driveLink?'':(c.driveLink?'':c.driveId||''));
+      const nid=upsert('clientes',id,v,{criado:today()});if(!id)location.hash='cliente/'+nid;},
     id&&(()=>{db.clientes=db.clientes.filter(x=>x.id!==id);if(ui.page==='cliente')location.hash='clientes';}));
 }
 function editProcesso(id,pre){
@@ -1796,7 +1797,7 @@ V.clientes=()=>{
     <span class="grow"></span><a class="btn btn-ghost" href="#registro" style="text-decoration:none">Registro histórico</a><button class="btn btn-gold" data-act="novoCli">+ Cliente</button></div>
   <div class="card tbl"><table><thead><tr><th>Cliente</th><th>CPF / CNPJ</th><th class="hide-m">Contato</th><th class="hide-m">Produto</th><th class="hide-m">Cidade</th><th class="num">Processos</th>${podeFin()?'<th class="num">Em aberto</th>':''}<th>Situação</th></tr></thead><tbody>
   ${list.map(c=>{const np=db.processos.filter(p=>p.clienteId===c.id&&p.status==='Em andamento').length;const ab=podeFin()?saldoAberto(c.id):0;
-    return `<tr data-go="cliente/${c.id}"><td><div class="strong">${esc(c.nome)}</div><div class="small muted">${c.tipo==='PJ'?'Pessoa jurídica':'Pessoa física'} · desde ${fd(c.criado)}</div></td><td>${esc(c.doc)}</td><td class="hide-m">${esc(c.tel)}<div class="small muted">${esc(c.email)}</div></td><td class="hide-m small">${esc(c.produto)}</td><td class="hide-m">${esc(cidadeUF(c))}</td><td class="num">${np}</td>${podeFin()?`<td class="num">${ab?brl(ab):'—'}</td>`:''}<td>${pill(c.status,c.status==='Ativo'?'p-green':'p-gray')}</td></tr>`;}).join('')||'<tr><td colspan="8" class="empty">Nenhum cliente encontrado</td></tr>'}
+    return `<tr data-go="cliente/${c.id}"><td><div class="strong">${esc(c.nome)}${c.driveLink?` <a href="${esc(c.driveLink)}" target="_blank" rel="noopener" title="Abrir a pasta no Google Drive" style="text-decoration:none">📁</a>`:''}</div><div class="small muted">${c.tipo==='PJ'?'Pessoa jurídica':'Pessoa física'} · desde ${fd(c.criado)}</div></td><td>${esc(c.doc)}</td><td class="hide-m">${esc(c.tel)}<div class="small muted">${esc(c.email)}</div></td><td class="hide-m small">${esc(c.produto)}</td><td class="hide-m">${esc(cidadeUF(c))}</td><td class="num">${np}</td>${podeFin()?`<td class="num">${ab?brl(ab):'—'}</td>`:''}<td>${pill(c.status,c.status==='Ativo'?'p-green':'p-gray')}</td></tr>`;}).join('')||'<tr><td colspan="8" class="empty">Nenhum cliente encontrado</td></tr>'}
   </tbody></table></div>`;
 };
 
@@ -1813,6 +1814,10 @@ function contratosTable(list,showCli=true){
   return `<div class="tbl"><table><thead><tr><th>Data</th>${showCli?'<th>Cliente</th>':''}<th class="hide-m">Produto</th><th class="num">Contrato</th><th class="num">Entrada</th><th class="num">Parcelas</th><th class="num">Recebido</th></tr></thead><tbody>
   ${list.map(k=>`<tr data-act="editCtr" data-id="${k.id}"><td>${fd(k.data)}</td>${showCli?`<td class="strong">${esc(nomeCli(k.clienteId))}${k.titular?`<div class="small muted">Titular: ${esc(k.titular)}</div>`:''}</td>`:''}<td class="hide-m small">${esc(k.produto)}<div class="muted">${esc(k.ambito)}</div></td>
     <td class="num">${brl(k.valorTotal)}</td><td class="num">${brl(k.entrada)}</td><td class="num">${k.parcelas?`${num(k.parcelas,0)}× ${brl(valorParcela(k))}`:'—'}</td><td class="num">${brl(recebidoContrato(k))}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function btnDrive(c){
+  return c.driveLink?`<a class="btn btn-ghost" style="text-decoration:none" target="_blank" rel="noopener" href="${esc(c.driveLink)}">📁 Pasta no Drive</a>`
+    :`<button class="btn btn-ghost" data-act="vincularDrive" data-id="${c.id}">📁 Vincular pasta do Drive</button>`;
 }
 V.cliente=()=>{
   const c=cli(ui.id);if(!c)return '<div class="empty">Cliente não encontrado. <a href="#clientes">Voltar</a></div>';
@@ -1831,14 +1836,14 @@ V.cliente=()=>{
   if(tab==='contratos')body=`<div class="toolbar"><span class="grow"></span><button class="btn btn-gold btn-sm" data-act="ctrCli" data-id="${c.id}">+ Contrato de honorários</button></div>${contratosTable(ks,false)}`;
   if(tab==='financeiro')body=`<div class="toolbar"><span class="small">Recebido: <b style="color:var(--green)">${brl(pago)}</b> · Em aberto: <b style="color:var(--amber)">${brl(aberto)}</b></span><span class="grow"></span>
     <button class="btn btn-ghost btn-sm" data-act="novaRecCli" data-id="${c.id}">+ Receita avulsa</button><button class="btn btn-gold btn-sm" data-act="ctrCli" data-id="${c.id}">Novo contrato</button></div>${lancTable(ls,false)}`;
-  if(tab==='documentos')body=`<div class="toolbar">${c.driveLink?`<a class="btn btn-ghost btn-sm" href="${esc(c.driveLink)}" target="_blank" rel="noopener" style="text-decoration:none">📁 Pasta no Google Drive</a>`:`<button class="btn btn-ghost btn-sm" data-act="drivePasta" data-id="${c.id}">📁 Criar pasta no Google Drive</button>`}<span class="grow"></span><button class="btn btn-ghost btn-sm" data-act="docsPadraoSm" data-id="${c.id}">+ Documentos padrão do salário-maternidade</button><button class="btn btn-ghost btn-sm" data-act="modeloCli" data-id="${c.id}">Gerar contrato / proposta / procuração</button><button class="btn btn-gold btn-sm" data-act="novoDocCli" data-id="${c.id}">+ Documento</button></div>`+docList(docs);
+  if(tab==='documentos')body=`<div class="toolbar">${c.driveLink?`<a class="btn btn-ghost btn-sm" href="${esc(c.driveLink)}" target="_blank" rel="noopener" style="text-decoration:none">📁 Pasta no Google Drive</a>`:`<button class="btn btn-ghost btn-sm" data-act="vincularDrive" data-id="${c.id}">📁 Vincular pasta do Drive</button>`}<span class="grow"></span><button class="btn btn-ghost btn-sm" data-act="docsPadraoSm" data-id="${c.id}">+ Documentos padrão do salário-maternidade</button><button class="btn btn-ghost btn-sm" data-act="modeloCli" data-id="${c.id}">Gerar contrato / proposta / procuração</button><button class="btn btn-gold btn-sm" data-act="novoDocCli" data-id="${c.id}">+ Documento</button></div>`+docList(docs);
   if(tab==='sm')body=`<div class="toolbar"><span class="grow"></span><button class="btn btn-gold btn-sm" data-act="novoSmCli" data-id="${c.id}">+ Caso de salário-maternidade</button></div>`+(sms.length?sms.map(x=>{const pg=x.guias.filter(g=>g.pagaEm).length;return `<div class="ev"><div class="body" data-go="sm/${x.id}"><div class="t">${esc(x.categoria)} · ${esc(x.estrategia||'')}</div><div class="small muted">DPP/parto ${fd(x.dataParto||x.dpp)} · guias pagas ${pg}/${x.guias.length}</div></div>${pill(x.status,smCor(x.status))}</div>`;}).join(''):'<div class="empty">Nenhum caso cadastrado</div>');
   if(tab==='agenda')body=`<div class="toolbar"><span class="grow"></span><button class="btn btn-gold btn-sm" data-act="novoEvCli" data-id="${c.id}">+ Compromisso</button></div>`+(evs.length?evs.map(e=>evItem(e)).join(''):'<div class="empty">Nenhum compromisso pendente</div>');
   if(tab==='historico')body=`<div style="display:flex;gap:8px;margin-bottom:14px"><textarea id="nota-txt" rows="2" style="flex:1" placeholder="Registrar atendimento, ligação, reunião…"></textarea><button class="btn btn-brand" data-act="addNota" data-id="${c.id}">Registrar</button></div>
     <div class="tl">${notas.map(n=>`<div class="tli"><div class="d">${fd(n.data)} · ${esc(nomeUsr(n.autor))} <button class="btn btn-sm lnk" data-act="editNota" data-id="${n.id}">editar</button></div><div>${esc(n.texto)}</div></div>`).join('')||'<div class="empty">Nenhum registro</div>'}</div>`;
   const wa=c.tel?`<a class="btn btn-ghost" style="color:#1F9D55;border-color:#1F9D55;text-decoration:none" target="_blank" rel="noopener" href="${waLink(c.tel)}">WhatsApp</a>`:'';
   const idade=idadeDe(c);
-  return `<div class="toolbar"><a class="btn btn-ghost" href="#clientes" style="text-decoration:none">← Clientes</a><span class="grow"></span>${wa}<button class="btn btn-ghost" data-act="editCli" data-id="${c.id}">Editar dados</button></div>
+  return `<div class="toolbar"><a class="btn btn-ghost" href="#clientes" style="text-decoration:none">← Clientes</a><span class="grow"></span>${wa}${btnDrive(c)}<button class="btn btn-ghost" data-act="editCli" data-id="${c.id}">Editar dados</button></div>
   <div class="grid" style="grid-template-columns:minmax(0,320px) minmax(0,1fr)" id="cli-grid">
     <div class="card"><div style="display:flex;gap:12px;align-items:center;margin-bottom:14px"><div class="av" style="width:44px;height:44px;font-size:15px">${esc(initials(c.nome))}</div><div><div style="font-size:15px;font-weight:700">${esc(c.nome)}</div>${pill(c.status,c.status==='Ativo'?'p-green':'p-gray')} ${pill(c.tipo,'p-blue')}</div></div>
       <dl class="dl"><dt>${c.tipo==='PJ'?'CNPJ':'CPF'}</dt><dd>${esc(c.doc)||'—'}</dd><dt>Telefone</dt><dd>${esc(c.tel)||'—'}</dd><dt>E-mail</dt><dd style="word-break:break-all">${esc(c.email)||'—'}</dd><dt>Cidade</dt><dd>${esc(cidadeUF(c))||'—'}</dd>
@@ -2935,7 +2940,12 @@ const A={
   smContrato:id=>{const c=db.sm.find(x=>x.id===id);const m=db.modelos.find(x=>/salário-maternidade/i.test(x.nome));ui.tabDoc='gerador';ui.f.doc={...(ui.f.doc||{}),mcli:c.clienteId,mproc:'',mctr:'',modelo:m?.id};location.hash='documentos';render();},
   novoProcSm:id=>{const c=db.sm.find(x=>x.id===id);editProcesso(null,{clienteId:c.clienteId,tipo:'Administrativo',area:'Previdenciário',objeto:'Salário-maternidade',parteContraria:'INSS',orgaoAdm:'INSS',fase:'Requerimento a protocolar'});},
   docsPadraoSm:cid=>{let n=0;SM_DOCS.forEach(nome=>{if(!db.documentos.some(d=>d.clienteId===cid&&norm(d.nome)===norm(nome))){db.documentos.push({id:uid(),clienteId:cid,nome,recebido:false,data:''});n++;}});save();render();toast(n+' documento(s) adicionado(s) ao checklist');},
-  drivePasta:async id=>{try{await drivePastaCliente(id);render();toast('Pasta criada no Google Drive ✓');}catch(e){gErro(e);}},
+  vincularDrive:id=>{const c=cli(id);
+    form('Pasta do cliente no Google Drive',[{k:'driveLink',l:'Link da pasta',t:'url',full:1,req:1,ph:'https://drive.google.com/drive/folders/…'}],{},v=>{
+      const l=v.driveLink.trim(),fid=(l.match(/folders\/([\w-]+)/)||l.match(/[?&]id=([\w-]+)/)||[])[1];
+      upsert('clientes',id,{driveLink:l,driveId:fid||''});},null,
+      `No Google Drive, abra a pasta de <b>${esc(c.nome)}</b>, copie o endereço da barra do navegador (ou clique com o botão direito na pasta → <b>Compartilhar → Copiar link</b>) e cole abaixo.`+(!gIndisponivel()?` Ou <a href="#" data-act="drivePasta" data-id="${id}">crie uma pasta nova automaticamente</a>.`:''));},
+  drivePasta:async id=>{closeModal();try{await drivePastaCliente(id);render();toast('Pasta criada no Google Drive ✓');}catch(e){gErro(e);}},
   anexarDoc:id=>{const m=gIndisponivel();if(m){modal('Anexar arquivo',`<p class="small" style="margin-bottom:10px">${esc(m)}</p><p class="small">Enquanto isso, você pode colar o link do arquivo (Google Drive, Dropbox etc.) no documento.</p>`,[{l:'Fechar',c:'btn-ghost',fn:closeModal},{l:'Colar link',c:'btn-brand',fn:()=>{closeModal();editDoc(id);}}]);return;}
     const inp=$('#file-anexo');inp.dataset.doc=id;inp.click();},
   scrCat:c=>{ui.f.scr.cat=c;render();},novoScript:()=>editScript(),editScript:id=>editScript(id),
