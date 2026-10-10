@@ -11,8 +11,11 @@ const ui={page:'painel',id:null,agendaView:'lista',agendaMes:today().slice(0,7),
 const COLS=['clientes','processos','eventos','tarefas','leads','lancamentos','documentos','notas','contratos','despesasFixas','usuarios','sm','scripts','modelos'];
 const SINGLES=['escritorio','metas','produtos','tiposEvento','indAjustes','indExtras'];
 const COLS_FIN=['lancamentos','contratos','despesasFixas'];
-const COLS_PARC=['clientes','processos','eventos','tarefas','leads','documentos','notas','contratos','lancamentos','sm'];
-const COLS_LIVRES_PARC=['usuarios','scripts','modelos'];
+/* parceiro: só a parceria (clientes, processos, prazos, tarefas e honorários) — sem CRM, salário-maternidade, documentos, modelos e scripts */
+const COLS_PARC=['clientes','processos','eventos','tarefas','notas','contratos','lancamentos'];
+const COLS_LIVRES_PARC=['usuarios'];
+/* registro é do parceiro se o caso é da parceria dele ou se ele foi marcado como responsável */
+const doParceiro=(x,email)=>!!x&&(norm(x.parceiro)===norm(email)||(Array.isArray(x.parceiros)&&x.parceiros.some(e=>norm(e)===norm(email))));
 const CONFIG_PARC=['escritorio','produtos','tiposEvento'];
 
 function vazio(){return {versao:6,escritorio:{nome:'Martins & Saturnino Advocacia e Consultoria',cnpj:'',oab:'',email:'',tel:'',endereco:'',cidade:'',saldoInicial:0,saldoInicialData:'',logo:'',googleClientId:'',salarioMinimo:1518},
@@ -54,7 +57,7 @@ function regraLeitura(u,col,id,dados){
   if(u.papel==='parceiro'){
     if(col==='config')return CONFIG_PARC.includes(id);
     if(COLS_LIVRES_PARC.includes(col))return true;
-    if(COLS_PARC.includes(col))return !!dados&&norm(dados.parceiro)===norm(u.email);
+    if(COLS_PARC.includes(col))return doParceiro(dados,u.email);
     return false;}
   return true;
 }
@@ -64,7 +67,7 @@ function regraEscrita(u,col,id,novo,antigo){
   if(u.papel==='estagiario'&&(COLS_FIN.includes(col)||(col==='config'&&id==='metas')))return false;
   if(u.papel==='parceiro'){
     if(!COLS_PARC.includes(col)||col==='contratos'||col==='lancamentos')return false;
-    const dele=x=>x&&norm(x.parceiro)===norm(u.email);
+    const dele=x=>doParceiro(x,u.email);
     return (novo===null||dele(novo))&&(!antigo||dele(antigo));}
   return true;
 }
@@ -142,6 +145,10 @@ function propagarParceiro(){
   ['processos','eventos','tarefas','documentos','notas','contratos','lancamentos','sm'].forEach(c=>(db[c]||[]).forEach(o=>{
     let cid=o.clienteId;if(!cid&&o.processoId)cid=proc(o.processoId)?.clienteId;
     const c=cid&&cli(cid);if(c){const p=c.parceiro||'';if((o.parceiro||'')!==p)o.parceiro=p;}}));
+  // tarefas e compromissos com um parceiro entre os responsáveis ficam visíveis para ele
+  const emP=new Map(parceiros().map(u=>[u.id,norm(u.email)]));
+  ['tarefas','eventos'].forEach(c=>(db[c]||[]).forEach(o=>{const ps=respDe(o).map(id=>emP.get(id)).filter(Boolean);
+    if(ps.join('|')!==(o.parceiros||[]).join('|')){if(ps.length)o.parceiros=ps;else delete o.parceiros;}}));
 }
 function chaves(){const m={};COLS.forEach(c=>(db[c]||[]).forEach(o=>{if(o&&o.id)m[c+'|'+o.id]=o;}));SINGLES.forEach(k=>m['config|'+k]=db[k]);return m;}
 function setSync(t,cls){const s=$('#sync');if(s){s.textContent=t;s.className='sync '+(cls||'');}}

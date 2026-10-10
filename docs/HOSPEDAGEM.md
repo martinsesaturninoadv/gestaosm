@@ -18,7 +18,7 @@ Na hospedagem, tudo fica num **banco de dados MySQL** do escritório, e não mai
 - funciona no computador e no celular, de qualquer lugar;
 - o sistema registra **quem alterou o quê e quando** (tabela `historico`);
 - o perfil **estagiário** não vê nada do financeiro, e o bloqueio é feito no servidor, não só na tela.
-- o perfil **parceiro** vê só os clientes, processos e honorários marcados para a parceria dele.
+- o perfil **parceiro** vê só o painel da parceria, as **tarefas** em que foi marcado como responsável e os clientes, processos e honorários da parceria dele. Não vê CRM, salário-maternidade, documentos, modelos nem scripts.
 
 > O link de demonstração no Claude e o arquivo aberto direto no computador são **modo demonstração**: os dados ficam só naquele navegador. Para trabalhar em equipe, é preciso hospedar (passo a passo abaixo).
 

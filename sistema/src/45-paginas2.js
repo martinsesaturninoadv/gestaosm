@@ -15,7 +15,24 @@ function aniversariantes(dias){
 }
 
 /* ---------------- PAINEL ---------------- */
+/* tarefas ligadas a um parceiro: responsável por ela ou caso da parceria dele */
+const tarefasParceiro=email=>db.tarefas.filter(t=>doParceiro(t,email)).sort((a,b)=>(a.status==='done')-(b.status==='done')||(a.prazo||'9').localeCompare(b.prazo||'9'));
+const linhaTarefa=t=>`<div class="ev${t.status==='done'?' done':''}"><span class="pic" style="width:16px">${t.status==='done'?'✔':'☑'}</span><div class="body" data-act="editTar" data-id="${t.id}"><div class="t" style="${t.status==='done'?'text-decoration:line-through;color:var(--text3)':''}">${esc(t.titulo)}</div><div class="small muted">${esc(TSTATUS.find(s=>s[0]===t.status)[1])} · ${esc(nomesResp(t))}${t.clienteId&&cli(t.clienteId)?' · '+esc(nomeCli(t.clienteId)):''}</div></div><div class="small" style="text-align:right">${t.prazo?(t.status==='done'?fd(t.prazo):prazoTxt(t.prazo)):''}</div></div>`;
+function painelParceiro(){
+  const email=sessao.email,h=new Date().getHours();
+  const ts=tarefasParceiro(email),abertas=ts.filter(t=>t.status!=='done'),atras=abertas.filter(t=>t.prazo&&diff(t.prazo)<0);
+  const evs=db.eventos.filter(e=>!e.feito&&diff(e.data)<=15).sort((a,b)=>(a.data+(a.hora||'')).localeCompare(b.data+(b.hora||'')));
+  const cls=db.clientes.filter(c=>norm(c.parceiro)===norm(email));
+  const chip=(n,l,href,cls)=>`<a class="hchip ${cls||''}" href="${href}"><b>${n}</b><span>${l}</span></a>`;
+  return `<div class="hero"><div><div class="hero-oi">${h<12?'Bom dia':h<18?'Boa tarde':'Boa noite'}, ${esc(sessao.nome)}! 👋</div><div class="hero-sub">Aqui está o que está com você na nossa parceria.</div></div>
+    <div class="hchips">${chip(abertas.length,'tarefas em aberto','#tarefas')}${chip(atras.length,'em atraso','#tarefas',atras.length?'perigo':'ok')}${chip(evs.length,'prazos (15 dias)','#painel')}${chip(cls.length,'clientes da parceria','#parcerias')}</div></div>
+    <div class="grid g-2">
+      <div class="card"><h3>☑ Minhas tarefas <span><button class="btn btn-gold btn-sm" data-act="novaTar">+ Tarefa</button> <a class="btn btn-ghost btn-sm" href="#tarefas">Quadro</a></span></h3>${abertas.map(linhaTarefa).join('')||'<div class="empty">Nenhuma tarefa em aberto 🎉</div>'}</div>
+      <div class="card"><h3>📅 Prazos e compromissos — próximos 15 dias</h3>${evs.map(e=>`<div class="ev" data-act="editEv" data-id="${e.id}"><div class="body"><div class="t">${esc(e.titulo)}</div><div class="small muted">${tagTipo(e.tipo)} ${esc(nomeCli(e.clienteId))} · ${esc(nomesResp(e))}</div></div><div class="small" style="text-align:right">${fd(e.data)}${e.hora?' '+esc(e.hora):''}<br>${prazoTxt(e.data)}</div></div>`).join('')||'<div class="empty">Nenhum prazo próximo</div>'}</div>
+    </div>`;
+}
 V.painel=()=>{
+  if(ehParceiro())return painelParceiro();
   const ym=today().slice(0,7),me=db.usuarioAtual;
   const evs=db.eventos.filter(e=>!e.feito);
   const atrasE=evs.filter(e=>diff(e.data)<0),hojeE=evs.filter(e=>diff(e.data)===0);
@@ -344,6 +361,7 @@ V.parcerias=()=>{
     ${kpi('Parte do parceiro (recebida)',brl(r.parte),'sobre honorários já recebidos')}${kpi('Já repassado',brl(r.pago))}${kpi('Saldo a repassar',brl(r.saldo),'+ '+brl(r.futura)+' a receber',r.saldo>0?'bad':'good')}</div>
   <div class="card" style="margin-bottom:14px"><h3>Contratos da parceria${pn?' — '+esc(pn.nome):''}</h3>${r.linhas.length?`<div class="tbl"><table><thead><tr><th>Cliente</th><th>Data</th><th class="num">Contrato</th><th class="num">% parceiro</th><th class="num">Recebido</th><th class="num">Parte recebida</th><th class="num">Parte a receber</th></tr></thead><tbody>
     ${r.linhas.map(l=>`<tr><td class="strong">${esc(nomeCli(l.k.clienteId))}</td><td>${fd(l.k.data)}</td><td class="num">${brl(l.k.valorTotal)}</td><td class="num">${num(l.pct*100)}%</td><td class="num">${brl(l.rec)}</td><td class="num strong">${brl(l.parte)}</td><td class="num">${brl(l.parteFutura)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Nenhum contrato com % de parceria. Informe o "% do parceiro" no contrato.</div>'}</div>
+  <div class="card" style="margin-bottom:14px"><h3>☑ Tarefas ${ehParceiro()?'da parceria':'com '+esc(pn?.nome||'o parceiro')}<button class="btn btn-gold btn-sm" data-act="tarParceiro" data-id="${esc(sel)}">+ Tarefa${ehParceiro()?'':' para o parceiro'}</button></h3>${tarefasParceiro(sel).map(linhaTarefa).join('')||'<div class="empty">Nenhuma tarefa. Marque o parceiro como responsável numa tarefa para ela aparecer aqui e no painel dele.</div>'}</div>
   <div class="grid g-2"><div class="card"><h3>Clientes da parceria</h3>${cls.map(c=>`<div class="ev" data-go="cliente/${c.id}"><div class="body"><div class="t">${esc(c.nome)}</div><div class="small muted">${esc(c.produto||'')} · ${esc(c.status)}</div></div></div>`).join('')||'<div class="empty">Nenhum cliente</div>'}</div>
   <div class="card"><h3>Repasses</h3>${r.repasses.length?r.repasses.map(l=>`<div class="ev"><div class="body"${ehParceiro()?'':` data-act="editLanc" data-id="${l.id}"`}><div class="t">${brl(l.valor)}</div><div class="small muted">${esc(l.descricao)} · ${l.pago?'pago em '+fd(l.pagoEm):'previsto para '+fd(l.venc)}</div></div>${pStatusLanc(lancStatus(l))}</div>`).join(''):'<div class="empty">Nenhum repasse registrado</div>'}</div></div>`}`;
 };

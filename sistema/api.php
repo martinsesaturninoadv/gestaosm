@@ -25,20 +25,29 @@ const COLECOES = ['clientes', 'processos', 'eventos', 'tarefas', 'leads', 'lanca
 const CONFIG_IDS = ['escritorio', 'metas', 'produtos', 'tiposEvento', 'indAjustes', 'indExtras'];
 // Coleções que o perfil "estagiario" não pode ver nem alterar
 const COLECOES_FINANCEIRAS = ['lancamentos', 'contratos', 'despesasFixas'];
-// Perfil "parceiro": só vê os registros marcados com o e-mail dele no campo "parceiro"
-const COLECOES_PARCERIA = ['clientes', 'processos', 'eventos', 'tarefas', 'leads', 'documentos', 'notas', 'contratos', 'lancamentos', 'sm'];
-const COLECOES_LIVRES_PARCEIRO = ['usuarios', 'scripts', 'modelos'];
+// Perfil "parceiro": só vê a parceria — registros com o e-mail dele no campo "parceiro"
+// (casos da parceria) ou na lista "parceiros" (tarefas e compromissos em que ele é responsável).
+// Não vê CRM, salário-maternidade, documentos, modelos nem scripts.
+const COLECOES_PARCERIA = ['clientes', 'processos', 'eventos', 'tarefas', 'notas', 'contratos', 'lancamentos'];
+const COLECOES_LIVRES_PARCEIRO = ['usuarios'];
 const CONFIG_PARCEIRO = ['escritorio', 'produtos', 'tiposEvento'];
 const PAPEIS = ['admin', 'advogado', 'estagiario', 'financeiro', 'parceiro'];
 
 function minusculo(?string $s): string { return mb_strtolower(trim((string) $s)); }
+function doParceiro($d, string $email): bool
+{
+    if (!is_array($d)) return false;
+    if (minusculo($d['parceiro'] ?? '') === minusculo($email)) return true;
+    foreach ((array) ($d['parceiros'] ?? []) as $e) if (is_string($e) && minusculo($e) === minusculo($email)) return true;
+    return false;
+}
 function podeLer(array $u, string $col, string $id, $dados): bool
 {
     if ($u['papel'] === 'estagiario' && in_array($col, COLECOES_FINANCEIRAS, true)) return false;
     if ($u['papel'] === 'parceiro') {
         if ($col === 'config') return in_array($id, CONFIG_PARCEIRO, true);
         if (in_array($col, COLECOES_LIVRES_PARCEIRO, true)) return true;
-        if (in_array($col, COLECOES_PARCERIA, true)) return is_array($dados) && minusculo($dados['parceiro'] ?? '') === minusculo($u['email']);
+        if (in_array($col, COLECOES_PARCERIA, true)) return doParceiro($dados, $u['email']);
         return false;
     }
     return true;
@@ -50,7 +59,7 @@ function podeGravar(array $u, string $col, string $id, $novo, $antigo): bool
     if ($u['papel'] === 'estagiario' && (in_array($col, COLECOES_FINANCEIRAS, true) || ($col === 'config' && $id === 'metas'))) return false;
     if ($u['papel'] === 'parceiro') {
         if (!in_array($col, COLECOES_PARCERIA, true) || $col === 'contratos' || $col === 'lancamentos') return false;
-        $dele = fn($d) => is_array($d) && minusculo($d['parceiro'] ?? '') === minusculo($u['email']);
+        $dele = fn($d) => doParceiro($d, $u['email']);
         return ($novo === null || $dele($novo)) && ($antigo === null || $dele($antigo));
     }
     return true;

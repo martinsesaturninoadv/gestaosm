@@ -46,7 +46,7 @@ function upsert(coll,id,vals,base){
 const O={
   clientes:()=>db.clientes.slice().sort((a,b)=>a.nome.localeCompare(b.nome)).map(c=>[c.id,c.nome]),
   processos:()=>db.processos.map(p=>[p.id,p.numero+' — '+nomeCli(p.clienteId)]),
-  usuarios:()=>db.usuarios.map(u=>[u.id,u.nome]),
+  usuarios:()=>db.usuarios.map(u=>[u.id,u.nome+(/parceir/i.test(u.papel)?' (parceiro)':'')]),
   produtos:()=>db.produtos,
   parceiros:()=>parceiros().map(u=>[norm(u.email),u.nome]),
   tipos:()=>db.tiposEvento.map(t=>t.nome),

@@ -1,10 +1,12 @@
 /* =========================================================
    RENDER / ROTEAMENTO
    ========================================================= */
+const PAGINAS_PARCEIRO=['painel','tarefas','parcerias','config','cliente','processo'];
 function render(){
   if(!db)return;
   const [page,id]=(location.hash.slice(1)||'painel').split('/');
   ui.page=V[page]?page:'painel';ui.id=id||null;
+  if(ehParceiro()&&!PAGINAS_PARCEIRO.includes(ui.page))ui.page='painel';
   let title=TITLES[ui.page];
   if(ui.page==='cliente'&&cli(ui.id))title=cli(ui.id).nome;
   if(ui.page==='processo'&&proc(ui.id))title=(proc(ui.id).tipo==='Judicial'?'Processo ':'Requerimento ')+proc(ui.id).numero;
@@ -37,7 +39,8 @@ function userBox(){
 
 /* ---------- ações (delegação de eventos) ---------- */
 const A={
-  quickAdd:()=>modal('O que deseja cadastrar?',`<div class="qa">
+  tarParceiro:email=>{const u=db.usuarios.find(x=>norm(x.email)===norm(email));editTarefa(null,u?{responsaveis:ehParceiro()?[u.id]:[u.id,db.usuarioAtual].filter(Boolean)}:{});},
+  quickAdd:()=>ehParceiro()?editTarefa():modal('O que deseja cadastrar?',`<div class="qa">
     <button data-act="novoLead">Atendimento<small>novo contato / possível cliente</small></button><button data-act="novoCli">Cliente<small>pessoa física ou jurídica</small></button>
     <button data-act="novoProc">Processo<small>judicial ou administrativo</small></button><button data-act="novoEv">Prazo / compromisso<small>prazo, audiência, perícia, reunião</small></button>
     <button data-act="novaTar">Tarefa<small>para você ou a equipe</small></button><button data-act="novoSm">Caso de salário-maternidade<small>guias, DPP e requerimento</small></button>${podeFin()?`<button data-act="novoCtr">Contrato de honorários<small>gera entrada e parcelas</small></button>

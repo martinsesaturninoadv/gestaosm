@@ -6,6 +6,8 @@
 - **Exportar .ics** (página Agenda): arquivo que importa todos os compromissos no Google Agenda, Outlook ou celular.
 - **Baixar Word** e **Imprimir / salvar PDF** no gerador de documentos.
 
+- **Pasta do cliente no Drive (vincular)**: na ficha do cliente, clique em **📁 Vincular pasta do Drive** e cole o link da pasta que já existe no Google Drive. Depois disso, o botão **📁 Pasta no Drive** (e o ícone 📁 na lista de clientes) abre a pasta com um clique. Cada pessoa precisa ter acesso à pasta no Drive dela.
+
 ## O que exige a conexão com o Google (configurada uma vez pelo administrador)
 
 - **↻ Google Agenda**: envia de uma vez os compromissos e as tarefas de cada pessoa para o Google Agenda dela e mantém tudo atualizado (alterações viram atualização; itens cumpridos são retirados).
