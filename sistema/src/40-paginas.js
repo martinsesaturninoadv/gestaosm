@@ -47,7 +47,7 @@ function lancTable(list,showCli=true){
   ${list.map(l=>{const st=lancStatus(l);return `<tr data-act="editLanc" data-id="${l.id}"><td>${fd(l.venc)}</td><td><div class="strong">${esc(l.descricao)}</div>${l.processoId&&proc(l.processoId)?`<div class="small muted">${esc(proc(l.processoId).numero)}</div>`:''}${l.obs?`<div class="small muted">${esc(l.obs)}</div>`:''}</td>
     ${showCli?`<td class="hide-m">${esc(l.clienteId?nomeCli(l.clienteId):'—')}</td>`:''}<td class="hide-m small">${esc(l.categoria)}</td>
     <td class="num" style="color:${l.tipo==='despesa'?'var(--red)':'var(--green)'};font-weight:600">${l.tipo==='despesa'?'− ':''}${brl(l.valor)}</td><td>${pStatusLanc(st)}${l.pago&&l.pagoEm&&l.pagoEm!==l.venc?`<div class="small muted">em ${fd(l.pagoEm)}</div>`:''}</td>
-    <td class="num">${l.pago?'':`<button class="btn btn-ghost btn-sm" data-act="baixar" data-id="${l.id}">${l.tipo==='despesa'?'Pagar':'Receber'}</button>`}</td></tr>`;}).join('')}</tbody></table></div>`;
+    <td class="num">${l.pago?'':`${l.tipo==='receita'&&l.clienteId?`<button class="btn btn-ghost btn-sm" data-act="asaasCobrar" data-id="${l.id}" title="${l.cobranca?'Ver o link de pagamento':'Gerar cobrança PIX/boleto (Asaas)'}">${l.cobranca?'💳 Link':'💳 Cobrar'}</button>`:''}<button class="btn btn-ghost btn-sm" data-act="baixar" data-id="${l.id}">${l.tipo==='despesa'?'Pagar':'Receber'}</button>`}</td></tr>`;}).join('')}</tbody></table></div>`;
 }
 function contratosTable(list,showCli=true){
   if(!list.length)return '<div class="empty">Nenhum contrato</div>';
@@ -84,7 +84,7 @@ V.cliente=()=>{
     <div class="tl">${notas.map(n=>`<div class="tli"><div class="d">${fd(n.data)} · ${esc(nomeUsr(n.autor))} <button class="btn btn-sm lnk" data-act="editNota" data-id="${n.id}">editar</button></div><div>${esc(n.texto)}</div></div>`).join('')||'<div class="empty">Nenhum registro</div>'}</div>`;
   const wa=c.tel?`<a class="btn btn-ghost" style="color:#1F9D55;border-color:#1F9D55;text-decoration:none" target="_blank" rel="noopener" href="${waLink(c.tel)}">WhatsApp</a>`:'';
   const idade=idadeDe(c);
-  return `<div class="toolbar"><a class="btn btn-ghost" href="#clientes" style="text-decoration:none">← Clientes</a><span class="grow"></span>${wa}${btnDrive(c)}<button class="btn btn-ghost" data-act="editCli" data-id="${c.id}">Editar dados</button></div>
+  return `<div class="toolbar"><a class="btn btn-ghost" href="#clientes" style="text-decoration:none">← Clientes</a><span class="grow"></span>${wa}${ehParceiro()?'':`<button class="btn btn-ghost" data-act="portalCli" data-id="${c.id}">🔗 Portal do cliente</button>`}${btnDrive(c)}<button class="btn btn-ghost" data-act="editCli" data-id="${c.id}">Editar dados</button></div>
   <div class="grid" style="grid-template-columns:minmax(0,320px) minmax(0,1fr)" id="cli-grid">
     <div class="card"><div style="display:flex;gap:12px;align-items:center;margin-bottom:14px"><div class="av" style="width:44px;height:44px;font-size:15px">${esc(initials(c.nome))}</div><div><div style="font-size:15px;font-weight:700">${esc(c.nome)}</div>${pill(c.status,c.status==='Ativo'?'p-green':'p-gray')} ${pill(c.tipo,'p-blue')}</div></div>
       <dl class="dl"><dt>${c.tipo==='PJ'?'CNPJ':'CPF'}</dt><dd>${esc(c.doc)||'—'}</dd><dt>Telefone</dt><dd>${esc(c.tel)||'—'}</dd><dt>E-mail</dt><dd style="word-break:break-all">${esc(c.email)||'—'}</dd><dt>Cidade</dt><dd>${esc(cidadeUF(c))||'—'}</dd>
@@ -341,6 +341,6 @@ V.relatorios=()=>{
     <div class="card"><h3>Produtividade da equipe</h3><div class="tbl"><table><thead><tr><th>Membro</th><th class="num">Processos</th><th class="num">Tarefas feitas</th><th class="num">Tarefas abertas</th><th class="num">Prazos pend.</th></tr></thead><tbody>
       ${prod.map(r=>`<tr><td>${esc(r.u.nome)}<div class="small muted">${esc(r.u.papel)}</div></td><td class="num">${r.proc}</td><td class="num">${r.tdone}</td><td class="num">${r.topen}</td><td class="num">${r.ev}${r.venc?` <span class="pill p-red">${r.venc} venc.</span>`:''}</td></tr>`).join('')}</tbody></table></div></div>
     <div class="card"><h3>Origem dos clientes</h3>${hbars(Object.entries(origem).sort((a,b)=>b[1]-a[1]))}<h3 style="margin-top:18px">Processos em andamento por área</h3>${hbars(Object.entries(pArea).sort((a,b)=>b[1]-a[1]))}<div class="toolbar" style="margin:14px 0 0"><button class="btn btn-ghost" onclick="window.print()">Imprimir relatório</button></div></div>
-  </div>`;
+  </div>${htmlNps()}`;
 };
 

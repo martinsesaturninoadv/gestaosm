@@ -8,9 +8,9 @@
 let db;
 let modo='local',sessao=null;
 const ui={page:'painel',id:null,agendaView:'lista',agendaMes:today().slice(0,7),f:{},tabCli:'processos',tabProc:'Judicial',procView:'lista',tabSm:'casos',tabDoc:'gerador'};
-const COLS=['clientes','processos','eventos','tarefas','leads','lancamentos','documentos','notas','contratos','despesasFixas','usuarios','sm','scripts','modelos','trafego'];
-const SINGLES=['escritorio','metas','produtos','tiposEvento','indAjustes','indExtras','salas'];
-const COLS_FIN=['lancamentos','contratos','despesasFixas','trafego'];
+const COLS=['clientes','processos','eventos','tarefas','leads','lancamentos','documentos','notas','contratos','despesasFixas','usuarios','sm','scripts','modelos','trafego','requisitorios','nps'];
+const SINGLES=['escritorio','metas','produtos','tiposEvento','indAjustes','indExtras','salas','fluxos'];
+const COLS_FIN=['lancamentos','contratos','despesasFixas','trafego','requisitorios'];
 /* parceiro: só a parceria (clientes, processos, prazos, tarefas e honorários) — sem CRM, salário-maternidade, documentos, modelos e scripts */
 const COLS_PARC=['clientes','processos','eventos','tarefas','notas','contratos','lancamentos'];
 const COLS_LIVRES_PARC=['usuarios'];
@@ -19,8 +19,8 @@ const doParceiro=(x,email)=>!!x&&(norm(x.parceiro)===norm(email)||(Array.isArray
 const CONFIG_PARC=['escritorio','produtos','tiposEvento','salas'];
 
 function vazio(){return {versao:6,escritorio:{nome:'Martins & Saturnino Advocacia e Consultoria',cnpj:'',oab:'',email:'',tel:'',endereco:'',cidade:'',saldoInicial:0,saldoInicialData:'',logo:'',googleClientId:'',salarioMinimo:1518},
-  metas:{...METAS_PADRAO},produtos:PRODUTOS_PADRAO.slice(),tiposEvento:TIPOS_EVT_PADRAO.map(([nome,cor])=>({nome,cor})),indAjustes:{},indExtras:[],salas:salasPadrao(),
-  usuarioAtual:'',usuarios:[],clientes:[],processos:[],eventos:[],tarefas:[],leads:[],lancamentos:[],documentos:[],notas:[],contratos:[],despesasFixas:[],sm:[],scripts:[],modelos:[],trafego:[]};}
+  metas:{...METAS_PADRAO},produtos:PRODUTOS_PADRAO.slice(),tiposEvento:TIPOS_EVT_PADRAO.map(([nome,cor])=>({nome,cor})),indAjustes:{},indExtras:[],salas:salasPadrao(),fluxos:{},
+  usuarioAtual:'',usuarios:[],clientes:[],processos:[],eventos:[],tarefas:[],leads:[],lancamentos:[],documentos:[],notas:[],contratos:[],despesasFixas:[],sm:[],scripts:[],modelos:[],trafego:[],requisitorios:[],nps:[]};}
 function migrar(d){
   const v=vazio();for(const k in v)if(d[k]===undefined||d[k]===null)d[k]=v[k];
   d.escritorio={...v.escritorio,...d.escritorio};if(d.escritorio.nome==='Martins & Saturnino Advocacia')d.escritorio.nome=v.escritorio.nome;d.metas={...METAS_PADRAO,...d.metas};
@@ -137,10 +137,10 @@ function api(acao,corpo,params){
   return fetch('api.php?acao='+acao+(params||''),{method:corpo?'POST':'GET',credentials:'same-origin',cache:'no-store',
     headers:{'Content-Type':'application/json','X-Requested-With':'gestao'},body:corpo?JSON.stringify(corpo):undefined})
   .then(async r=>{let j=null;try{j=await r.json();}catch(e){throw {status:r.status,naoApi:true};}
-    if(!r.ok||!j||!j.ok){if(r.status===401&&!['login','sessao'].includes(acao))mostrarLogin('Sua sessão expirou. Entre novamente.');throw {status:r.status,msg:j&&j.erro};}
+    if(!r.ok||!j||!j.ok){if(r.status===401&&!['login','sessao'].includes(acao))mostrarLogin('Sua sessão expirou. Entre novamente.');throw {status:r.status,msg:j&&j.erro,dados:j};}
     return j;});
 }
-function save(){propagarParceiro();agendarEnvio();}
+function save(){processarFluxos();propagarParceiro();agendarEnvio();}
 /* registros ligados a um cliente de parceria herdam o parceiro (é o que permite ao parceiro vê-los) */
 function propagarParceiro(){
   if(!db)return;
@@ -206,10 +206,10 @@ async function entrar(u){
   if(!m&&u.papel!=='parceiro'){m={id:uid(),nome:u.nome,papel:papelNome(u.papel).replace(/ —.*/,''),oab:'',email:u.email};db.usuarios.push(m);}
   db.usuarioAtual=m?m.id:'';
   if(['admin','advogado'].includes(u.papel)){if(!db.modelos.length)db.modelos=modelosPadrao();if(!db.scripts.length)db.scripts=scriptsPadrao();
-    if(!db.produtos.some(p=>norm(p)==='direito digital'))db.produtos.push('Direito digital');}
+    if(!db.produtos.some(p=>norm(p)==='direito digital'))db.produtos.push('Direito digital');iniciarFluxos();}
   save();if(!location.hash)location.hash='painel';render();
   clearInterval(tPuxar);if(modo==='servidor')tPuxar=setInterval(()=>puxar(false),20000);
-  escIniciar();
+  escIniciar();INTEG=null;carregarIntegracoes();
   setTimeout(checarMetas,600);
 }
 async function iniciar(){

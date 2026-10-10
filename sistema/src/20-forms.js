@@ -12,7 +12,7 @@ function modal(title,html,buttons,wide){
 }
 function form(title,fields,data,onSave,onDelete,nota){
   const html=(nota?`<div class="nota">${nota}</div>`:'')+'<div class="fgrid">'+fields.map(f=>{
-    if(f.t==='sec')return `<div class="full dgroup" style="margin:8px 0 0">${esc(f.l)}</div>`;
+    if(f.t==='sec')return f.html?`<div class="full">${f.html}</div>`:`<div class="full dgroup" style="margin:8px 0 0">${esc(f.l)}</div>`;
     const v=data[f.k]??f.d??'';const id='f_'+f.k;const cls=f.full?' class="full"':'';
     let inp;
     if(f.t==='select'){let os=normOpts(f.o);if(v!==''&&!os.some(([ov])=>String(ov)===String(v)))os=[[v,v]].concat(os);
@@ -102,7 +102,7 @@ function editEvento(id,pre){
     {k:'processoId',l:'Processo',t:'select',o:O.processos,full:1},
     {k:'clienteId',l:'Cliente',t:'select',o:O.clientes,full:1},
     {k:'responsaveis',l:'Responsáveis (marque uma ou mais pessoas)',t:'multi',o:O.usuarios,full:1,req:1},
-    {k:'obs',l:'Observações',t:'textarea',full:1,rows:2},{k:'feito',l:'Cumprido / realizado',t:'check',full:1}],
+    ...camposPrazo(),{k:'obs',l:'Observações',t:'textarea',full:1,rows:2},{k:'feito',l:'Cumprido / realizado',t:'check',full:1}],
     {...e,responsaveis:respDe(e)},v=>{v.responsavelId=v.responsaveis[0]||'';if(v.processoId&&!v.clienteId)v.clienteId=proc(v.processoId)?.clienteId||'';
       if(!db.tiposEvento.some(t=>norm(t.nome)===norm(v.tipo)))db.tiposEvento.push({nome:v.tipo,cor:corNova()});
       else v.tipo=db.tiposEvento.find(t=>norm(t.nome)===norm(v.tipo)).nome;
@@ -219,7 +219,7 @@ function editConta(c){
   form(c.id?'Editar acesso':'Novo acesso ao sistema',[
     {k:'nome',l:'Nome',req:1},{k:'email',l:'E-mail (login)',t:'email',req:1},
     {k:'papel',l:'Perfil',t:'select',o:PAPEIS,req:1},{k:'senha',l:c.id?'Nova senha (deixe vazio para manter)':'Senha inicial (mín. 8 caracteres)',t:'text'},
-    {k:'ativo',l:'Acesso ativo',t:'check',full:1}],c,v=>{
+    {k:'ativo',l:'Acesso ativo',t:'check',full:1},...(c.id&&c.doisFatores?[{k:'zerar2fa',l:'Desligar a verificação em duas etapas desta pessoa (celular perdido/trocado)',t:'check',full:1}]:[])],c,v=>{
       api('conta',{...v,id:c.id||0}).then(()=>{contasCache=null;
         // quem ganha acesso entra também na Equipe (é o que o coloca na lista de responsáveis das tarefas)
         if(!db.usuarios.some(u=>norm(u.email)===norm(v.email))){db.usuarios.push({id:uid(),nome:v.nome,papel:papelNome(v.papel).replace(/ —.*/,''),oab:'',email:v.email});save();}

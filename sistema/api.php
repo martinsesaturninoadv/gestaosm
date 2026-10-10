@@ -14,6 +14,12 @@
  *   GET  contas               → lista de acessos (somente administrador)
  *   POST conta {id?,nome,email,papel,ativo,senha?} (somente administrador)
  *   POST sala {presenca?,enviar?,desde} → escritório virtual: presença da equipe e chat
+ *   GET  arquivo&doc=id       → arquivo enviado pelo cliente no portal
+ *   GET  integracoes / POST segredos (admin) → chaves dos serviços externos (nunca vão para o navegador)
+ *   POST zapsign | zapsignStatus | asaas | escavador | ia → integrações (assinatura, cobrança, andamentos, IA)
+ *   POST webhook&s=asaas|zapsign&k=chave → avisos automáticos dos serviços (sem login)
+ *   POST doisfatores {etapa:iniciar|ativar|desativar} → verificação em duas etapas (app autenticador)
+ *   GET  backups / backup&f=arquivo / POST backupAgora (admin) → cópias diárias automáticas do banco
  */
 declare(strict_types=1);
 
@@ -22,10 +28,10 @@ header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
 
 const COLECOES = ['clientes', 'processos', 'eventos', 'tarefas', 'leads', 'lancamentos', 'documentos',
-    'notas', 'contratos', 'despesasFixas', 'usuarios', 'sm', 'scripts', 'modelos', 'trafego', 'config'];
-const CONFIG_IDS = ['escritorio', 'metas', 'produtos', 'tiposEvento', 'indAjustes', 'indExtras', 'salas'];
+    'notas', 'contratos', 'despesasFixas', 'usuarios', 'sm', 'scripts', 'modelos', 'trafego', 'requisitorios', 'nps', 'config'];
+const CONFIG_IDS = ['escritorio', 'metas', 'produtos', 'tiposEvento', 'indAjustes', 'indExtras', 'salas', 'fluxos'];
 // Coleções que o perfil "estagiario" não pode ver nem alterar
-const COLECOES_FINANCEIRAS = ['lancamentos', 'contratos', 'despesasFixas', 'trafego'];
+const COLECOES_FINANCEIRAS = ['lancamentos', 'contratos', 'despesasFixas', 'trafego', 'requisitorios'];
 // Perfil "parceiro": só vê a parceria — registros com o e-mail dele no campo "parceiro"
 // (casos da parceria) ou na lista "parceiros" (tarefas e compromissos em que ele é responsável).
 // Não vê CRM, salário-maternidade, documentos, modelos nem scripts.
@@ -48,6 +54,7 @@ function doParceiro($d, string $email): bool
 }
 function podeLer(array $u, string $col, string $id, $dados): bool
 {
+    if ($col === 'config' && $id === 'segredos') return false; // chaves de integração: só pelo endpoint "segredos"
     if ($u['papel'] === 'estagiario' && in_array($col, COLECOES_FINANCEIRAS, true)) return false;
     if ($u['papel'] === 'parceiro') {
         if ($col === 'config') return in_array($id, CONFIG_PARCEIRO, true);
@@ -60,7 +67,7 @@ function podeLer(array $u, string $col, string $id, $dados): bool
 function podeGravar(array $u, string $col, string $id, $novo, $antigo): bool
 {
     if (!in_array($col, COLECOES, true)) return false;
-    if ($col === 'config' && !in_array($id, CONFIG_IDS, true)) return false;
+    if ($col === 'config' && !in_array($id, CONFIG_IDS, true)) return false; // "segredos" não está na lista: só pelo endpoint próprio
     if ($u['papel'] === 'estagiario' && (in_array($col, COLECOES_FINANCEIRAS, true) || ($col === 'config' && $id === 'metas'))) return false;
     if ($u['papel'] === 'parceiro') {
         if (!in_array($col, COLECOES_PARCERIA, true) || $col === 'contratos' || $col === 'lancamentos') return false;
@@ -105,6 +112,7 @@ if (!is_file($arqConfig)) {
     erro('Sistema não instalado: abra instalar.php neste mesmo endereço para instalar.', 503);
 }
 $cfg = require $arqConfig;
+require __DIR__ . '/nucleo.php';
 
 /* ---------- sessão ---------- */
 $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
@@ -155,6 +163,8 @@ function criarTabelas(PDO $pdo, bool $mysql): void
     } else {
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_reg_atualizado ON registros (atualizado_em)');
     }
+    try { $pdo->query('SELECT totp_secret FROM usuarios LIMIT 1'); }
+    catch (PDOException $e) { $pdo->exec('ALTER TABLE usuarios ADD COLUMN totp_secret VARCHAR(64) NULL'); }
     // escritório virtual: presença (uma linha por pessoa) e mensagens do chat — fora do histórico de auditoria
     $pdo->exec("CREATE TABLE IF NOT EXISTS presenca (
         uid INT NOT NULL PRIMARY KEY, email VARCHAR(190) NOT NULL, nome VARCHAR(120) NOT NULL, papel VARCHAR(20) NOT NULL,
@@ -185,7 +195,7 @@ function registrar(PDO $pdo, ?int $uid, string $acao, ?string $col = null, ?stri
 
 function usuarioPublico(array $u): array
 {
-    return ['id' => (int) $u['id'], 'nome' => $u['nome'], 'email' => $u['email'], 'papel' => $u['papel'], 'ativo' => (int) $u['ativo'] === 1];
+    return ['id' => (int) $u['id'], 'nome' => $u['nome'], 'email' => $u['email'], 'papel' => $u['papel'], 'ativo' => (int) $u['ativo'] === 1, 'doisFatores' => !empty($u['totp_secret'])];
 }
 
 function usuarioLogado(PDO $pdo): array
@@ -212,6 +222,180 @@ function corpo(): array
 $acao = $_GET['acao'] ?? '';
 $metodo = $_SERVER['REQUEST_METHOD'];
 
+/* ---------- verificação em duas etapas (TOTP, RFC 6238 — Google Authenticator, Microsoft Authenticator…) ---------- */
+function base32Dec(string $b32): string
+{
+    $alf = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; $bits = ''; $out = '';
+    foreach (str_split(strtoupper(preg_replace('/[^A-Z2-7]/i', '', $b32))) as $c) $bits .= str_pad(decbin(strpos($alf, $c)), 5, '0', STR_PAD_LEFT);
+    foreach (str_split($bits, 8) as $byte) if (strlen($byte) === 8) $out .= chr(bindec($byte));
+    return $out;
+}
+function base32Enc(string $bin): string
+{
+    $alf = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; $bits = ''; $out = '';
+    foreach (str_split($bin) as $c) $bits .= str_pad(decbin(ord($c)), 8, '0', STR_PAD_LEFT);
+    foreach (str_split($bits, 5) as $g) $out .= $alf[bindec(str_pad($g, 5, '0'))];
+    return $out;
+}
+function totpValido(string $segredo, string $codigo): bool
+{
+    $codigo = preg_replace('/\D/', '', $codigo);
+    if (strlen($codigo) !== 6) return false;
+    $chave = base32Dec($segredo); $t = (int) floor(time() / 30);
+    for ($i = -1; $i <= 1; $i++) {
+        $h = hash_hmac('sha1', pack('N*', 0) . pack('N*', $t + $i), $chave, true);
+        $o = ord($h[19]) & 0xf;
+        $n = ((ord($h[$o]) & 0x7f) << 24 | ord($h[$o + 1]) << 16 | ord($h[$o + 2]) << 8 | ord($h[$o + 3])) % 1000000;
+        if (hash_equals(str_pad((string) $n, 6, '0', STR_PAD_LEFT), $codigo)) return true;
+    }
+    return false;
+}
+
+/* ---------- rotina diária: backup do banco e lembretes automáticos por e-mail ---------- */
+function exportarTudo(PDO $pdo): string
+{
+    $out = ['gerado_em' => date('c'), 'registros' => [], 'usuarios' => []];
+    foreach ($pdo->query('SELECT colecao, id, dados FROM registros WHERE excluido = 0 AND NOT (colecao = \'config\' AND id = \'segredos\')') as $r)
+        $out['registros'][$r['colecao']][$r['id']] = json_decode((string) $r['dados'], true);
+    foreach ($pdo->query('SELECT id, nome, email, papel, ativo FROM usuarios') as $u) $out['usuarios'][] = $u;
+    return json_encode($out, JSON_UNESCAPED_UNICODE);
+}
+function fazerBackup(PDO $pdo, array $cfg): string
+{
+    $dir = nuc_pasta($cfg, 'backups');
+    $nome = 'backup-' . date('Y-m-d') . '.json.gz';
+    file_put_contents($dir . '/' . $nome, gzencode(exportarTudo($pdo), 9));
+    $todos = glob($dir . '/backup-*.json.gz') ?: [];
+    sort($todos);
+    foreach (array_slice($todos, 0, max(0, count($todos) - 30)) as $velho) @unlink($velho); // guarda os últimos 30 dias
+    return $dir . '/' . $nome;
+}
+function rotinaDiaria(PDO $pdo, array $cfg): void
+{
+    $dir = nuc_pasta($cfg, 'backups');
+    $marca = $dir . '/ultima-rotina.txt';
+    if (is_file($marca) && trim((string) file_get_contents($marca)) === date('Y-m-d')) return;
+    $lock = @fopen($dir . '/rotina.lock', 'c');
+    if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) return;
+    file_put_contents($marca, date('Y-m-d'));
+    $esc = nuc_config($pdo, 'escritorio');
+    $de = (string) ($esc['email'] ?? '');
+    try {
+        $arq = fazerBackup($pdo, $cfg);
+        if (!empty($esc['backupEmail'])) {
+            $tam = filesize($arq);
+            nuc_email((string) $esc['backupEmail'], 'Backup diário — ' . ($esc['nome'] ?? 'sistema') . ' — ' . date('d/m/Y'),
+                "Backup automático do sistema de gestão (" . round($tam / 1024) . " KB).\nGuarde este arquivo em local seguro. Para restaurar, fale com o suporte técnico.",
+                $de, $tam < 8 * 1024 * 1024 ? [basename($arq) => file_get_contents($arq)] : []);
+        }
+    } catch (Throwable $e) { /* o backup não pode impedir o uso do sistema */ }
+    if (!empty($esc['lembreteAuto'])) {
+        try {
+            $tpl = $esc['lembretes'] ?? [];
+            $tGuia = $tpl['guia'] ?? 'Olá, {nome}! Lembrando que a guia do INSS da competência {competencia}, no valor de {valor}, vence em {venc}. {link}';
+            $tParto = $tpl['parto'] ?? 'Olá, {nome}! A data prevista do parto é {dpp}. Assim que o bebê nascer, nos envie a certidão de nascimento.';
+            $clientes = [];
+            foreach (nuc_listar($pdo, 'clientes') as $c) $clientes[$c['id']] = $c;
+            $em3 = date('Y-m-d', strtotime('+3 days')); $em10 = date('Y-m-d', strtotime('+10 days'));
+            $fill = function (string $t, array $v): string { return trim(preg_replace('/\s{2,}/', ' ', preg_replace_callback('/\{(\w+)\}/', fn($m) => $v[$m[1]] ?? '', $t))); };
+            foreach (nuc_listar($pdo, 'sm') as $caso) {
+                $c = $clientes[$caso['clienteId'] ?? ''] ?? null;
+                if (!$c || empty($c['email']) || in_array($caso['status'] ?? '', ['Concluído', 'Indeferido'], true)) continue;
+                $nome = explode(' ', trim((string) $c['nome']))[0];
+                $mudou = false;
+                foreach (($caso['guias'] ?? []) as $i => $g) {
+                    if (!empty($g['pagaEm']) || ($g['venc'] ?? '') !== $em3 || ($g['quemPaga'] ?? '') === 'Escritório' || !empty($g['lembradoAutoEm'])) continue;
+                    $comp = preg_match('/^(\d{4})-(\d{2})/', (string) $g['competencia'], $m) ? "$m[2]/$m[1]" : '';
+                    $link = !empty($g['link']) ? 'Guia: ' . $g['link'] : (!empty($c['portalToken']) ? 'Guia e código no seu portal: ' . portalUrl($c['portalToken']) : '');
+                    if (nuc_email((string) $c['email'], 'Lembrete: guia do INSS vence em ' . nuc_data($g['venc']), $fill($tGuia, ['nome' => $nome, 'escritorio' => $esc['nome'] ?? '', 'competencia' => $comp, 'valor' => nuc_brl($g['valor'] ?? 0), 'venc' => nuc_data($g['venc']), 'link' => $link]), $de)) {
+                        $caso['guias'][$i]['lembradoAutoEm'] = date('Y-m-d'); $mudou = true;
+                    }
+                }
+                if (empty($caso['dataParto']) && ($caso['dpp'] ?? '') === $em10 && empty($caso['lembradoPartoAutoEm'])
+                    && nuc_email((string) $c['email'], 'Salário-maternidade: parto previsto para ' . nuc_data($caso['dpp']), $fill($tParto, ['nome' => $nome, 'escritorio' => $esc['nome'] ?? '', 'dpp' => nuc_data($caso['dpp'])]), $de)) {
+                    $caso['lembradoPartoAutoEm'] = date('Y-m-d'); $mudou = true;
+                }
+                if ($mudou) nuc_gravar($pdo, 'sm', (string) $caso['id'], $caso);
+            }
+        } catch (Throwable $e) { /* idem */ }
+    }
+    flock($lock, LOCK_UN);
+}
+function portalUrl(string $t): string
+{
+    global $https;
+    return ($https ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? '') . rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/'), '/') . '/portal.php?t=' . $t;
+}
+
+/* ---------- integrações externas ---------- */
+function falhaExterna(string $nome, int $st, string $raw): void
+{
+    if ($st === 0) erro('Não foi possível conectar ao serviço (' . $nome . '). Tente de novo em instantes.');
+    $j = json_decode($raw, true);
+    $det = $j['errors'][0]['description'] ?? $j['error']['message'] ?? $j['detail'] ?? $j['message'] ?? mb_substr($raw, 0, 200);
+    erro($nome . ' recusou o pedido (' . $st . '): ' . (is_string($det) ? $det : json_encode($det, JSON_UNESCAPED_UNICODE)));
+}
+function segredos(PDO $pdo): array { return nuc_config($pdo, 'segredos'); }
+function httpJson(string $metodo, string $url, array $headers, ?array $corpo = null, int $timeout = 60): array
+{
+    $ch = curl_init($url);
+    $h = array_merge(['Accept: application/json'], $headers);
+    if ($corpo !== null) { $h[] = 'Content-Type: application/json'; curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($corpo, JSON_UNESCAPED_UNICODE)); }
+    curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => $metodo, CURLOPT_HTTPHEADER => $h, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $timeout, CURLOPT_CONNECTTIMEOUT => 15]);
+    $resp = curl_exec($ch);
+    $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+    return [$status, $resp === false ? null : json_decode((string) $resp, true), $err ?: (string) $resp];
+}
+function buscarPorCampo(PDO $pdo, string $col, string $trecho): array
+{
+    $st = $pdo->prepare('SELECT id, dados FROM registros WHERE colecao = ? AND excluido = 0 AND dados LIKE ?');
+    $st->execute([$col, '%' . $trecho . '%']);
+    return $st->fetchAll();
+}
+if ($acao === 'webhook') {
+    $s = segredos($pdo);
+    $servico = (string) ($_GET['s'] ?? '');
+    $corpo = json_decode(file_get_contents('php://input') ?: '{}', true) ?: [];
+    $chaveOk = !empty($s['webhookChave']) && hash_equals((string) $s['webhookChave'], (string) ($_GET['k'] ?? ''));
+    if ($servico === 'asaas') {
+        $tokenOk = !empty($s['asaasWebhookToken']) && hash_equals((string) $s['asaasWebhookToken'], (string) ($_SERVER['HTTP_ASAAS_ACCESS_TOKEN'] ?? ''));
+        if (!$tokenOk && !$chaveOk) erro('Não autorizado.', 401);
+        $ev = (string) ($corpo['event'] ?? '');
+        $pg = $corpo['payment'] ?? [];
+        $lid = (string) ($pg['externalReference'] ?? '');
+        if ($lid !== '' && ($l = nuc_ler($pdo, 'lancamentos', $lid))) {
+            $l['cobranca'] = array_merge($l['cobranca'] ?? [], ['status' => (string) ($pg['status'] ?? $ev)]);
+            if (in_array($ev, ['PAYMENT_RECEIVED', 'PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED_IN_CASH'], true)) {
+                $l['pago'] = true;
+                $l['pagoEm'] = substr((string) ($pg['paymentDate'] ?? $pg['clientPaymentDate'] ?? date('Y-m-d')), 0, 10);
+                $l['forma'] = ['PIX' => 'PIX', 'BOLETO' => 'Boleto', 'CREDIT_CARD' => 'Cartão'][$pg['billingType'] ?? ''] ?? ($l['forma'] ?? 'PIX');
+                if (!empty($pg['value'])) $l['valor'] = (float) $pg['value'];
+            }
+            nuc_gravar($pdo, 'lancamentos', $lid, $l);
+        }
+        responder(['ok' => true]);
+    }
+    if ($servico === 'zapsign') {
+        if (!$chaveOk) erro('Não autorizado.', 401);
+        $token = (string) ($corpo['token'] ?? $corpo['doc_token'] ?? '');
+        if ($token !== '' && preg_match('/^[a-zA-Z0-9-]+$/', $token)) {
+            foreach (buscarPorCampo($pdo, 'documentos', '"token":"' . $token . '"') as $r) {
+                $d = json_decode((string) $r['dados'], true);
+                if (($d['assinatura']['token'] ?? '') !== $token) continue;
+                $d['assinatura']['status'] = (string) ($corpo['status'] ?? $d['assinatura']['status'] ?? '');
+                foreach (($corpo['signers'] ?? []) as $sg) foreach (($d['assinatura']['signatarios'] ?? []) as $i => $sd)
+                    if (($sd['token'] ?? '') === ($sg['token'] ?? '-')) $d['assinatura']['signatarios'][$i]['status'] = (string) ($sg['status'] ?? '');
+                if (($d['assinatura']['status'] ?? '') === 'signed') { $d['recebido'] = true; $d['data'] = date('Y-m-d'); if (!empty($corpo['signed_file'])) $d['link'] = (string) $corpo['signed_file']; }
+                nuc_gravar($pdo, 'documentos', (string) $r['id'], $d);
+            }
+        }
+        responder(['ok' => true]);
+    }
+    erro('Serviço desconhecido.', 404);
+}
+
 // Proteção contra envio de formulários de outros sites (CSRF): toda escrita exige este cabeçalho,
 // que um formulário comum de outro site não consegue enviar.
 if ($metodo === 'POST' && ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') !== 'gestao') {
@@ -221,6 +405,7 @@ if ($metodo === 'POST' && ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') !== 'gestao'
 switch ($acao) {
     case 'sessao':
         $u = usuarioLogado($pdo);
+        rotinaDiaria($pdo, $cfg);
         responder(['ok' => true, 'usuario' => usuarioPublico($u), 'agora' => agoraMs()]);
 
     case 'login':
@@ -234,6 +419,10 @@ switch ($acao) {
             registrar($pdo, $u ? (int) $u['id'] : null, 'login_falhou');
             sleep(1); // dificulta tentativas em massa
             erro('E-mail ou senha incorretos.', 401);
+        }
+        if (!empty($u['totp_secret']) && !totpValido((string) $u['totp_secret'], (string) ($b['codigo'] ?? ''))) {
+            if (($b['codigo'] ?? '') !== '') { registrar($pdo, (int) $u['id'], 'login_2fa_falhou'); sleep(1); }
+            responder(['ok' => false, 'precisa2fa' => true, 'erro' => ($b['codigo'] ?? '') !== '' ? 'Código inválido. Confira o aplicativo autenticador.' : 'Digite o código de 6 dígitos do aplicativo autenticador.'], 401);
         }
         session_regenerate_id(true);
         $_SESSION['uid'] = (int) $u['id'];
@@ -374,6 +563,217 @@ switch ($acao) {
         }
         responder(['ok' => true, 'agora' => $agora, 'presencas' => $pres, 'mensagens' => $msgs]);
 
+    case 'arquivo': // arquivo enviado pelo cliente no portal (só para a equipe com acesso ao documento)
+        $u = usuarioLogado($pdo);
+        $id = (string) ($_GET['doc'] ?? '');
+        $doc = nuc_ler($pdo, 'documentos', $id);
+        if (!$doc || empty($doc['portalArquivo']['arquivo']) || !podeLer($u, 'documentos', $id, $doc)) erro('Arquivo não encontrado.', 404);
+        $caminho = nuc_pasta($cfg, 'uploads/' . preg_replace('/[^a-z0-9]/i', '', (string) $doc['clienteId'])) . '/' . basename((string) $doc['portalArquivo']['arquivo']);
+        if (!is_file($caminho)) erro('Arquivo não encontrado.', 404);
+        $mime = (function_exists('mime_content_type') ? mime_content_type($caminho) : '') ?: 'application/octet-stream';
+        header_remove('Content-Type');
+        header('Content-Type: ' . $mime);
+        header('Content-Length: ' . filesize($caminho));
+        header("Content-Disposition: inline; filename*=UTF-8''" . rawurlencode((string) ($doc['portalArquivo']['nome'] ?? 'arquivo')));
+        readfile($caminho);
+        exit;
+
+    case 'integracoes':
+        $u = usuarioLogado($pdo);
+        $s = segredos($pdo);
+        $mask = fn($k) => !empty($s[$k]) ? '••••' . substr((string) $s[$k], -4) : '';
+        $base = ($https ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? '') . rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/'), '/') . '/api.php?acao=webhook';
+        $r = ['ok' => true, 'zapsign' => !empty($s['zapsignToken']), 'asaas' => !empty($s['asaasToken']), 'escavador' => !empty($s['escavadorToken']), 'ia' => !empty($s['anthropicKey'])];
+        if ($u['papel'] === 'admin') $r += ['mascaras' => ['zapsignToken' => $mask('zapsignToken'), 'asaasToken' => $mask('asaasToken'), 'asaasWebhookToken' => $mask('asaasWebhookToken'), 'escavadorToken' => $mask('escavadorToken'), 'anthropicKey' => $mask('anthropicKey')],
+            'zapsignSandbox' => !empty($s['zapsignSandbox']), 'asaasSandbox' => !empty($s['asaasSandbox']),
+            'webhooks' => !empty($s['webhookChave']) ? ['asaas' => $base . '&s=asaas', 'zapsign' => $base . '&s=zapsign&k=' . $s['webhookChave']] : null];
+        responder($r);
+
+    case 'segredos':
+        if ($metodo !== 'POST') erro('Método inválido.', 405);
+        $u = usuarioLogado($pdo);
+        if ($u['papel'] !== 'admin') erro('Somente administradores.', 403);
+        $b = corpo();
+        $s = segredos($pdo);
+        foreach (['zapsignToken', 'asaasToken', 'asaasWebhookToken', 'escavadorToken', 'anthropicKey'] as $k) {
+            $v = trim((string) ($b[$k] ?? ''));
+            if ($v === '-') unset($s[$k]); elseif ($v !== '') $s[$k] = mb_substr($v, 0, 500);
+        }
+        foreach (['zapsignSandbox', 'asaasSandbox'] as $k) if (array_key_exists($k, $b)) $s[$k] = !empty($b[$k]);
+        if (empty($s['webhookChave'])) $s['webhookChave'] = bin2hex(random_bytes(16));
+        nuc_gravar($pdo, 'config', 'segredos', $s, (int) $u['id']);
+        registrar($pdo, (int) $u['id'], 'segredos', 'config', 'segredos');
+        responder(['ok' => true]);
+
+    case 'zapsign':
+    case 'zapsignStatus':
+        if ($metodo !== 'POST') erro('Método inválido.', 405);
+        $u = usuarioLogado($pdo);
+        if ($u['papel'] === 'parceiro') erro('Sem permissão.', 403);
+        $s = segredos($pdo);
+        if (empty($s['zapsignToken'])) erro('Configure o token da ZapSign em Configurações → Integrações.');
+        $api = !empty($s['zapsignSandbox']) ? 'https://sandbox.api.zapsign.com.br/api/v1' : 'https://api.zapsign.com.br/api/v1';
+        $auth = ['Authorization: Bearer ' . $s['zapsignToken']];
+        $b = corpo();
+        if ($acao === 'zapsignStatus') {
+            $tk = (string) ($b['token'] ?? '');
+            if (!preg_match('/^[a-zA-Z0-9-]+$/', $tk)) erro('Documento inválido.');
+            [$st, $j, $raw] = httpJson('GET', $api . '/docs/' . $tk . '/', $auth);
+            if ($st >= 300 || !$j) falhaExterna('ZapSign', $st, $raw);
+            responder(['ok' => true, 'status' => $j['status'] ?? '', 'signed_file' => $j['signed_file'] ?? null,
+                'signatarios' => array_map(fn($x) => ['token' => $x['token'] ?? '', 'nome' => $x['name'] ?? '', 'status' => $x['status'] ?? '', 'url' => $x['sign_url'] ?? ''], $j['signers'] ?? [])]);
+        }
+        $signers = [];
+        foreach (array_slice((array) ($b['signatarios'] ?? []), 0, 10) as $sg) {
+            $tel = preg_replace('/\D/', '', (string) ($sg['tel'] ?? ''));
+            if (strlen($tel) > 11 && substr($tel, 0, 2) === '55') $tel = substr($tel, 2);
+            $signers[] = array_filter(['name' => mb_substr((string) ($sg['nome'] ?? ''), 0, 120), 'email' => filter_var($sg['email'] ?? '', FILTER_VALIDATE_EMAIL) ?: null,
+                'phone_country' => $tel ? '55' : null, 'phone_number' => $tel ?: null, 'auth_mode' => 'assinaturaTela', 'send_automatic_email' => !empty($sg['email']),
+                'send_automatic_whatsapp' => false], fn($v) => $v !== null);
+        }
+        if (!$signers) erro('Informe ao menos um signatário.');
+        $doc = ['name' => mb_substr((string) ($b['nome'] ?? 'Documento'), 0, 200), 'lang' => 'pt-br', 'signers' => $signers, 'external_id' => (string) ($b['documentoId'] ?? ''),
+            'base64_docx' => (string) ($b['docx'] ?? '')];
+        if ($doc['base64_docx'] === '' || strlen($doc['base64_docx']) > 20000000) erro('Documento vazio ou grande demais.');
+        [$st, $j, $raw] = httpJson('POST', $api . '/docs/', $auth, $doc, 90);
+        if ($st >= 300 || !$j || empty($j['token'])) falhaExterna('ZapSign', $st, $raw);
+        responder(['ok' => true, 'token' => $j['token'], 'status' => $j['status'] ?? 'pending',
+            'signatarios' => array_map(fn($x) => ['token' => $x['token'] ?? '', 'nome' => $x['name'] ?? '', 'status' => $x['status'] ?? 'new', 'url' => $x['sign_url'] ?? ''], $j['signers'] ?? [])]);
+
+    case 'asaas':
+        if ($metodo !== 'POST') erro('Método inválido.', 405);
+        $u = usuarioLogado($pdo);
+        if (!in_array($u['papel'], ['admin', 'advogado', 'financeiro'], true)) erro('Sem permissão.', 403);
+        $s = segredos($pdo);
+        if (empty($s['asaasToken'])) erro('Configure a chave do Asaas em Configurações → Integrações.');
+        $api = !empty($s['asaasSandbox']) ? 'https://sandbox.asaas.com/api/v3' : 'https://api.asaas.com/v3';
+        $auth = ['access_token: ' . $s['asaasToken'], 'User-Agent: GestaoEscritorio'];
+        $lid = (string) (corpo()['lancamentoId'] ?? '');
+        $l = nuc_ler($pdo, 'lancamentos', $lid);
+        if (!$l || ($l['tipo'] ?? '') !== 'receita' || !empty($l['pago'])) erro('Receita não encontrada ou já paga.');
+        if (!empty($l['cobranca']['id'])) responder(['ok' => true, 'cobranca' => $l['cobranca']]);
+        $c = !empty($l['clienteId']) ? nuc_ler($pdo, 'clientes', (string) $l['clienteId']) : null;
+        if (!$c) erro('Vincule um cliente a esta receita para gerar a cobrança.');
+        $doc = preg_replace('/\D/', '', (string) ($c['doc'] ?? ''));
+        if (!in_array(strlen($doc), [11, 14], true)) erro('Cadastre o CPF/CNPJ do cliente para gerar a cobrança.');
+        if (empty($c['asaasId'])) {
+            [$st, $j, $raw] = httpJson('GET', $api . '/customers?cpfCnpj=' . $doc, $auth);
+            $cust = $j['data'][0]['id'] ?? null;
+            if (!$cust) {
+                $tel = preg_replace('/\D/', '', (string) ($c['tel'] ?? ''));
+                [$st, $j, $raw] = httpJson('POST', $api . '/customers', $auth, array_filter(['name' => $c['nome'] ?? '', 'cpfCnpj' => $doc, 'email' => $c['email'] ?? null, 'mobilePhone' => $tel ?: null, 'externalReference' => $c['id'], 'notificationDisabled' => false]));
+                if ($st >= 300 || empty($j['id'])) falhaExterna('Asaas', $st, $raw);
+                $cust = $j['id'];
+            }
+            $c['asaasId'] = $cust;
+            nuc_gravar($pdo, 'clientes', (string) $c['id'], $c, (int) $u['id']);
+        }
+        $venc = max((string) ($l['venc'] ?? ''), date('Y-m-d'));
+        [$st, $j, $raw] = httpJson('POST', $api . '/payments', $auth, ['customer' => $c['asaasId'], 'billingType' => 'UNDEFINED', 'value' => round((float) $l['valor'], 2), 'dueDate' => $venc,
+            'description' => mb_substr((string) ($l['descricao'] ?? 'Honorários advocatícios'), 0, 500), 'externalReference' => $lid]);
+        if ($st >= 300 || empty($j['id'])) falhaExterna('Asaas', $st, $raw);
+        $l['cobranca'] = ['id' => $j['id'], 'link' => $j['invoiceUrl'] ?? '', 'boleto' => $j['bankSlipUrl'] ?? '', 'status' => $j['status'] ?? 'PENDING', 'criadaEm' => date('Y-m-d')];
+        nuc_gravar($pdo, 'lancamentos', $lid, $l, (int) $u['id']);
+        responder(['ok' => true, 'cobranca' => $l['cobranca']]);
+
+    case 'escavador':
+        if ($metodo !== 'POST') erro('Método inválido.', 405);
+        $u = usuarioLogado($pdo);
+        if ($u['papel'] === 'parceiro') erro('Sem permissão.', 403);
+        $s = segredos($pdo);
+        if (empty($s['escavadorToken'])) erro('Configure o token do Escavador em Configurações → Integrações.');
+        $num = preg_replace('/[^0-9.\-]/', '', (string) (corpo()['numero'] ?? ''));
+        if (strlen(preg_replace('/\D/', '', $num)) !== 20) erro('Informe o número CNJ completo (20 dígitos).');
+        [$st, $j, $raw] = httpJson('GET', 'https://api.escavador.com/api/v2/processos/numero_cnj/' . $num . '/movimentacoes', ['Authorization: Bearer ' . $s['escavadorToken'], 'X-Requested-With: XMLHttpRequest']);
+        if ($st === 404) erro('O Escavador não encontrou este processo.');
+        if ($st >= 300 || !$j) falhaExterna('Escavador', $st, $raw);
+        $itens = [];
+        foreach (($j['items'] ?? $j['movimentacoes'] ?? []) as $m) {
+            $itens[] = ['data' => substr((string) ($m['data'] ?? ''), 0, 10), 'texto' => trim((string) ($m['conteudo'] ?? $m['texto'] ?? $m['tipo'] ?? '')), 'fonte' => (string) ($m['fonte']['nome'] ?? $m['fonte']['sigla'] ?? '')];
+        }
+        responder(['ok' => true, 'movimentacoes' => $itens]);
+
+    case 'ia':
+        if ($metodo !== 'POST') erro('Método inválido.', 405);
+        $u = usuarioLogado($pdo);
+        if ($u['papel'] === 'parceiro') erro('Sem permissão.', 403);
+        $s = segredos($pdo);
+        if (empty($s['anthropicKey'])) erro('Configure a chave da IA (Claude) em Configurações → Integrações.');
+        $b = corpo();
+        $pedido = trim(mb_substr((string) ($b['pedido'] ?? ''), 0, 20000));
+        $contexto = trim(mb_substr((string) ($b['contexto'] ?? ''), 0, 60000));
+        if ($pedido === '') erro('Descreva a peça que deseja.');
+        @set_time_limit(300);
+        $sistema = 'Você é um advogado brasileiro experiente que redige peças processuais e documentos jurídicos em português do Brasil, '
+            . 'com linguagem técnica, clara e objetiva, fundamentação legal e jurisprudencial pertinente e estrutura completa (endereçamento, qualificação, fatos, fundamentos, pedidos, valor da causa quando couber, fecho). '
+            . 'Use somente os dados fornecidos no contexto; quando faltar alguma informação, deixe um marcador entre colchetes, por exemplo [NÚMERO DO NB]. '
+            . 'Não invente números de processos, julgados ou dados pessoais. Entregue apenas o texto da peça, sem comentários antes ou depois. '
+            . 'Use parágrafos separados por linha em branco e títulos em letras maiúsculas.';
+        [$st, $j, $raw] = httpJson('POST', 'https://api.anthropic.com/v1/messages', [
+            'x-api-key: ' . $s['anthropicKey'], 'anthropic-version: 2023-06-01', 'anthropic-beta: server-side-fallback-2026-07-01'], [
+            'model' => 'claude-opus-5-5', 'max_tokens' => 16000, 'output_config' => ['effort' => 'medium'], 'fallbacks' => 'default',
+            'system' => $sistema,
+            'messages' => [['role' => 'user', 'content' => "DADOS DO CASO (do sistema do escritório):
+" . $contexto . "
+
+PEDIDO:
+" . $pedido]]], 280);
+        if ($st === 401) erro('A chave da IA é inválida. Confira em Configurações → Integrações.');
+        if ($st >= 300 || !$j) falhaExterna('A IA', $st, $raw);
+        if (($j['stop_reason'] ?? '') === 'refusal') erro('A IA recusou este pedido. Reformule as instruções.');
+        $texto = '';
+        foreach (($j['content'] ?? []) as $bl) if (($bl['type'] ?? '') === 'text') $texto .= $bl['text'];
+        if (trim($texto) === '') erro('A IA não devolveu texto. Tente de novo.');
+        responder(['ok' => true, 'texto' => $texto, 'cortado' => ($j['stop_reason'] ?? '') === 'max_tokens']);
+
+    case 'doisfatores':
+        if ($metodo !== 'POST') erro('Método inválido.', 405);
+        $u = usuarioLogado($pdo);
+        $b = corpo();
+        $etapa = (string) ($b['etapa'] ?? '');
+        if ($etapa === 'iniciar') {
+            $seg = base32Enc(random_bytes(20));
+            $_SESSION['totp_novo'] = $seg;
+            $emissor = rawurlencode((string) (nuc_config($pdo, 'escritorio')['nome'] ?? 'Gestão do Escritório'));
+            responder(['ok' => true, 'segredo' => $seg, 'uri' => 'otpauth://totp/' . $emissor . ':' . rawurlencode($u['email']) . '?secret=' . $seg . '&issuer=' . $emissor . '&digits=6&period=30']);
+        }
+        if ($etapa === 'ativar') {
+            $seg = (string) ($_SESSION['totp_novo'] ?? '');
+            if ($seg === '' || !totpValido($seg, (string) ($b['codigo'] ?? ''))) erro('Código inválido. Confira se digitou o código atual do aplicativo.');
+            $pdo->prepare('UPDATE usuarios SET totp_secret = ? WHERE id = ?')->execute([$seg, (int) $u['id']]);
+            unset($_SESSION['totp_novo']);
+            registrar($pdo, (int) $u['id'], '2fa_ativado');
+            responder(['ok' => true]);
+        }
+        if ($etapa === 'desativar') {
+            if (!password_verify((string) ($b['senha'] ?? ''), $u['senha_hash'])) erro('Senha incorreta.');
+            $pdo->prepare('UPDATE usuarios SET totp_secret = NULL WHERE id = ?')->execute([(int) $u['id']]);
+            registrar($pdo, (int) $u['id'], '2fa_desativado');
+            responder(['ok' => true]);
+        }
+        erro('Etapa inválida.');
+
+    case 'backups':
+    case 'backup':
+    case 'backupAgora':
+        $u = usuarioLogado($pdo);
+        if ($u['papel'] !== 'admin') erro('Somente administradores.', 403);
+        $dir = nuc_pasta($cfg, 'backups');
+        if ($acao === 'backupAgora') { if ($metodo !== 'POST') erro('Método inválido.', 405); fazerBackup($pdo, $cfg); registrar($pdo, (int) $u['id'], 'backup'); }
+        if ($acao === 'backup') {
+            $f = basename((string) ($_GET['f'] ?? ''));
+            if (!preg_match('/^backup-\d{4}-\d{2}-\d{2}\.json\.gz$/', $f) || !is_file($dir . '/' . $f)) erro('Backup não encontrado.', 404);
+            header_remove('Content-Type');
+            header('Content-Type: application/gzip');
+            header('Content-Disposition: attachment; filename="' . $f . '"');
+            header('Content-Length: ' . filesize($dir . '/' . $f));
+            readfile($dir . '/' . $f);
+            exit;
+        }
+        $lista = [];
+        foreach (array_reverse(glob($dir . '/backup-*.json.gz') ?: []) as $f) $lista[] = ['arquivo' => basename($f), 'tamanho' => filesize($f)];
+        responder(['ok' => true, 'backups' => $lista]);
+
     case 'contas':
         $u = usuarioLogado($pdo);
         if ($u['papel'] !== 'admin') erro('Somente administradores.', 403);
@@ -398,6 +798,7 @@ switch ($acao) {
                 if ($id === (int) $u['id'] && ($papel !== 'admin' || !$ativo)) erro('Você não pode remover o seu próprio acesso de administrador.');
                 $pdo->prepare('UPDATE usuarios SET nome = ?, email = ?, papel = ?, ativo = ? WHERE id = ?')->execute([$nome, $email, $papel, $ativo, $id]);
                 if ($senha !== '') $pdo->prepare('UPDATE usuarios SET senha_hash = ? WHERE id = ?')->execute([password_hash($senha, PASSWORD_DEFAULT), $id]);
+                if (!empty($b['zerar2fa'])) $pdo->prepare('UPDATE usuarios SET totp_secret = NULL WHERE id = ?')->execute([$id]);
             } else {
                 if ($senha === '') erro('Defina uma senha inicial.');
                 $pdo->prepare('INSERT INTO usuarios (nome, email, senha_hash, papel, ativo, criado_em) VALUES (?,?,?,?,?,?)')

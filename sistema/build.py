@@ -14,6 +14,8 @@ assets = ("const ASSET_LOGO='data:image/png;base64," + b64('logo-ms.png') + "';\
 js = assets + ''.join(ler(os.path.basename(f)) for f in sorted(glob.glob(os.path.join(S, '*.js'))))
 html = ('<!doctype html>\n<html lang="pt-BR">\n<head>\n<meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n<title>Gestão do Escritório</title>\n'
+        '<link rel="manifest" href="manifest.webmanifest">\n<meta name="theme-color" content="#0F2942">\n'
+        '<link rel="apple-touch-icon" href="icon-192.png">\n<meta name="apple-mobile-web-app-capable" content="yes">\n<meta name="apple-mobile-web-app-title" content="Gestão MS">\n'
         '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
         '<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">\n'
         '<style>\n' + ler('style.css') + '</style>\n</head>\n' + ler('shell.html') + '<script>\n' + js + '</script>\n</body>\n</html>\n')

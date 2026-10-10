@@ -61,6 +61,9 @@ V.painel=()=>{
   leadsSemRetorno().forEach(l=>pend.push(['b','◈',`Atendimento sem retorno há ${-diff(l.ultimoContato||l.primeiroContato||l.criado)} dias: ${l.nome}`,l.etapa,'editLead',l.id]));
   const docsPend={};db.documentos.filter(d=>!d.recebido).forEach(d=>docsPend[d.clienteId]=(docsPend[d.clienteId]||0)+1);
   Object.entries(docsPend).forEach(([cid,n])=>pend.push(['b','▤',`${n} documento(s) pendente(s)`,nomeCli(cid),'go','cliente/'+cid]));
+  pendenciasReq().forEach(x=>pend.push(x));
+  {const nl=lembretesPendentes().filter(x=>!x.feito).length;if(nl)pend.push(['b','📲',`${nl} lembrete(s) de guia/parto para enviar às clientes`,'um clique: WhatsApp ou e-mail','smLembretes','']);}
+  {const nn=npsPendentes().length;if(nn&&podeFin())pend.push(['b','⭐',`${nn} cliente(s) com caso concluído: enviar pesquisa de satisfação`,'Relatórios → Pesquisa de satisfação','go','relatorios']);}
   const ordem={r:0,a:1,b:2};pend.sort((a,b)=>ordem[a[0]]-ordem[b[0]]);
   const pendHtml=pend.length?pend.slice(0,12).map(([sev,ic,txt,sub,act,id])=>`<div class="pend pend-${sev}" ${act==='go'?`data-go="${id}"`:`data-act="${act}" data-id="${id}"`}><span class="pic">${ic}</span><div><div class="strong">${esc(txt)}</div><div class="small muted">${esc(sub||'')}</div></div></div>`).join('')+(pend.length>12?`<div class="small muted" style="padding:8px 4px">+ ${pend.length-12} outras pendências</div>`:''):'<div class="empty">Nenhuma pendência. Excelente trabalho! ✨</div>';
   // metas
@@ -181,7 +184,7 @@ V.processo=()=>{
   const fases=fasesDe(p.tipo);const fi=fases.indexOf(p.fase);
   const dados=jud?`<dt>Vara / juízo</dt><dd>${esc(p.orgao)||'—'}</dd><dt>Comarca</dt><dd>${esc(p.comarca)||'—'}</dd><dt>Instância</dt><dd>${esc(p.instancia)||'—'}</dd><dt>Polo do cliente</dt><dd>${esc(p.polo)||'—'}</dd><dt>Classe / rito</dt><dd>${esc(p.classe)||'—'}</dd>`
     :`<dt>Órgão</dt><dd>${esc(p.orgaoAdm||p.orgao)||'—'}</dd><dt>Protocolo</dt><dd>${esc(p.protocolo)||'—'}</dd><dt>DER</dt><dd>${fd(p.der)}${p.der?` (${-diff(p.der)} dias)`:''}</dd><dt>Prazo de resposta</dt><dd>${p.prazoAnalise?fd(p.prazoAnalise)+' · '+prazoTxt(p.prazoAnalise):'—'}</dd>`;
-  return `<div class="toolbar"><a class="btn btn-ghost" href="#processos" style="text-decoration:none">← ${jud?'Contencioso':'Administrativo'}</a><span class="grow"></span><button class="btn btn-ghost" data-act="editProc" data-id="${p.id}">Editar</button></div>
+  return `<div class="toolbar"><a class="btn btn-ghost" href="#processos" style="text-decoration:none">← ${jud?'Contencioso':'Administrativo'}</a><span class="grow"></span>${jud&&!ehParceiro()?`<button class="btn btn-ghost" data-act="escavador" data-id="${p.id}" title="Busca as movimentações do processo no Escavador">↻ Andamentos (Escavador)${p.escavadorEm?' · '+fd(p.escavadorEm).slice(0,5):''}</button>`:''}${podeFin()?`<button class="btn btn-ghost" data-act="novoReqProc" data-id="${p.id}">+ RPV / alvará</button>`:''}<button class="btn btn-ghost" data-act="editProc" data-id="${p.id}">Editar</button></div>
   <div class="card" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><div class="small muted">${jud?'⚖️ Contencioso':'🏛️ Administrativo'} · ${esc(p.area)}</div><div style="font-size:17px;font-weight:700">${esc(p.numero)}</div><div>${esc(p.objeto)}</div></div><div>${pStatusProc(p.status)}</div></div>
     <div class="fases">${fases.map((s,i)=>`<div class="fase ${s===p.fase?'atual':i<fi?'feita':''}" data-act="setFase" data-id="${p.id}|${esc(s)}" title="Mudar para esta fase"><i></i><span>${esc(s)}</span></div>`).join('')}</div></div>
   <div class="grid g-2">
@@ -213,10 +216,11 @@ V.sm=()=>{
     <div class="card tbl"><table><thead><tr><th>Segurada</th><th>Competência</th><th>Código</th><th class="num">Valor</th><th>Vencimento</th><th>Status</th><th></th></tr></thead><tbody>
     ${lista.map(({c,g,st})=>`<tr><td data-go="sm/${c.id}" style="cursor:pointer" class="strong">${esc(nomeCli(c.clienteId))}</td><td>${mLabel(g.competencia)}</td><td>${esc(g.codigo)}</td><td class="num">${brl(g.valor)}</td><td>${fd(g.venc)}<div class="small">${st!=='Paga'?prazoTxt(g.venc):''}</div></td><td>${pill(st,guiaCor(st))}</td>
       <td class="num">${guiaBotoes(c,g,st)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Nenhuma guia</td></tr>'}</tbody></table></div>`;}
+  if(t==='lembretes')corpo=htmlLembretes();
   if(t==='partos')corpo=`<div class="card">${db.sm.filter(c=>c.dpp||c.dataParto).sort((a,b)=>(a.dataParto||a.dpp).localeCompare(b.dataParto||b.dpp)).reverse().map(c=>`<div class="ev" data-go="sm/${c.id}"><div class="av" style="background:#FDE8EF;color:#C84B6E">👶</div><div class="body"><div class="t">${esc(nomeCli(c.clienteId))} ${c.crianca?'· '+esc(c.crianca):''}</div><div class="small muted">${c.dataParto?'Nasceu em '+fd(c.dataParto):'Previsto para '+fd(c.dpp)+' ('+prazoTxt(c.dpp)+')'}</div></div>${pill(c.status,smCor(c.status))}</div>`).join('')||'<div class="empty">Nenhum caso</div>'}</div>`;
   return `<div class="grid g-kpi">${kpi('Casos em andamento',ativos.length)}${kpi('Guias a emitir/pagar (30 dias)',gp.length,venc.length?venc.length+' vencida(s)!':'nenhuma vencida',venc.length?'bad':'good')}${kpi('Partos previstos (60 dias)',partos.length)}${(()=>{const ag=db.sm.filter(c=>c.status==='Aguardando o parto');const pass=ag.filter(c=>c.dpp&&diff(c.dpp)<0).length;return kpi('👶 Aguardando o parto',ag.length,pass?pass+' com DPP já passada':'guias pagas, esperando o nascimento',pass?'bad':'');})()}
     ${kpi('Em exigência',db.sm.filter(c=>c.status==='Em exigência').length,'',db.sm.some(c=>c.status==='Em exigência')?'bad':'')}${kpi('Deferidos em '+ano,db.sm.filter(c=>['Deferido','Concluído'].includes(c.status)&&(c.der||'').startsWith(ano)).length)}${podeFin()?kpi('Benefícios em andamento',brlK(sumBy(ativos,c=>c.beneficioEstimado)),'valor estimado'):''}</div>
-  <div class="toolbar"><div class="tabs" style="margin:0;border:none">${[['casos','Quadro de casos'],['guias','Guias de recolhimento'],['partos','Partos e nascimentos']].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabSm" data-id="${k}">${l}</button>`).join('')}</div>
+  <div class="toolbar"><div class="tabs" style="margin:0;border:none">${[['casos','Quadro de casos'],['guias','Guias de recolhimento'],['partos','Partos e nascimentos'],['lembretes','📲 Lembretes'+(lembretesPendentes().filter(x=>!x.feito).length?' ('+lembretesPendentes().filter(x=>!x.feito).length+')':'')]].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabSm" data-id="${k}">${l}</button>`).join('')}</div>
     <span class="grow"></span><a class="btn btn-ghost" href="#scripts" style="text-decoration:none">Scripts de salário-maternidade</a><button class="btn btn-gold" data-act="novoSm">+ Caso</button></div>
   ${t==='casos'?'<div class="hint">Controle completo: categoria da segurada, estratégia, carência, guias (GPS/DAS), DPP, protocolo e exigências. Arraste os cards para mudar a etapa.</div>':''}${corpo}`;
 };
@@ -253,7 +257,7 @@ const CAMPOS_MODELO=['cliente','qualificacao','tipodoc','doc','cidade','email','
 function docList(docs){
   if(!docs.length)return '<div class="empty">Nenhum documento no checklist</div>';
   return docs.map(d=>`<div class="ev"><input type="checkbox" data-act="toggleDoc" data-id="${d.id}"${d.recebido?' checked':''} aria-label="Recebido"><div class="body" data-act="editDoc" data-id="${d.id}"><div class="t">${esc(d.nome)}</div><div class="small muted">${d.recebido?'Recebido'+(d.data?' em '+fd(d.data):''):'Pendente'}${d.arquivo?' · 📎 '+esc(d.arquivo):''}${d.obs?' · '+esc(d.obs):''}</div></div>
-    <div class="flx">${d.link?`<a class="btn btn-ghost btn-sm" href="${esc(d.link)}" target="_blank" rel="noopener" style="text-decoration:none">📎 Abrir</a>`:''}<button class="btn btn-ghost btn-sm" data-act="anexarDoc" data-id="${d.id}">${d.link?'Substituir':'Anexar'}</button>${d.recebido?pill('Recebido','p-green'):pill('Pendente','p-amber')}</div></div>`).join('');
+    <div class="flx">${d.assinatura?`<button class="btn btn-ghost btn-sm" data-act="assLinks" data-id="${d.id}">✍️ ${esc(statusAss(d.assinatura.status))}</button>`:''}${d.portalArquivo?`<a class="btn btn-ghost btn-sm" href="api.php?acao=arquivo&doc=${encodeURIComponent(d.id)}" target="_blank" rel="noopener" style="text-decoration:none" title="Enviado pela cliente pelo portal">📥 ${esc(String(d.portalArquivo.nome||'arquivo').slice(0,24))}</a>`:''}${d.link?`<a class="btn btn-ghost btn-sm" href="${esc(d.link)}" target="_blank" rel="noopener" style="text-decoration:none">📎 Abrir</a>`:''}<button class="btn btn-ghost btn-sm" data-act="anexarDoc" data-id="${d.id}">${d.link?'Substituir':'Anexar'}</button>${d.recebido?pill('Recebido','p-green'):pill('Pendente','p-amber')}</div></div>`).join('');
 }
 function contextoModelo(cid,pid,kid,valorX,validade){
   const c=cli(cid)||{},p=proc(pid),e=db.escritorio;
@@ -282,7 +286,8 @@ function corpoDocHTML(texto){
 }
 V.documentos=()=>{
   const t=ui.tabDoc;
-  const tabs=`<div class="tabs">${[['gerador','📝 Gerador de documentos'],['checklist','✅ Checklist de documentos'],['modelos','🗂️ Modelos (editar)']].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabDoc" data-id="${k}">${l}</button>`).join('')}</div>`;
+  const tabs=`<div class="tabs">${[['gerador','📝 Gerador de documentos'],['ia','🤖 Peças com IA'],['checklist','✅ Checklist de documentos'],['modelos','🗂️ Modelos (editar)']].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabDoc" data-id="${k}">${l}</button>`).join('')}</div>`;
+  if(t==='ia')return htmlPecasIA(tabs);
   if(t==='checklist'){
     const f=ui.f.dcl||(ui.f.dcl={cli:''});const pend=db.documentos.filter(d=>!d.recebido);
     const byCli={};db.documentos.filter(d=>!f.cli||d.clienteId===f.cli).forEach(d=>(byCli[d.clienteId]=byCli[d.clienteId]||[]).push(d));
@@ -296,15 +301,16 @@ V.documentos=()=>{
     ${Object.entries(grupos).map(([g,ms])=>`<div class="card" style="margin-bottom:14px"><h3>${esc(g)} <small>${ms.length}</small></h3>${ms.map(m=>`<div class="ev"><div class="body" data-act="editModelo" data-id="${m.id}"><div class="t">${esc(m.nome)}</div><div class="small muted">${esc(m.area||'Geral')} · ${esc(String(m.texto).slice(0,110))}…</div></div><div class="flx"><button class="btn btn-ghost btn-sm" data-act="usarModelo" data-id="${m.id}">Usar</button><button class="btn btn-ghost btn-sm" data-act="duplicarModelo" data-id="${m.id}">Duplicar</button></div></div>`).join('')}</div>`).join('')||'<div class="empty">Nenhum modelo</div>'}`;
   }
   const f=ui.f.doc||(ui.f.doc={});
-  if(!f.modelo||!db.modelos.some(m=>m.id===f.modelo))f.modelo=db.modelos[0]?.id||'';
-  const m=db.modelos.find(x=>x.id===f.modelo);
+  if(f.modelo==='__ia'&&!f.iaTexto)f.modelo='';
+  if(f.modelo!=='__ia'&&(!f.modelo||!db.modelos.some(m=>m.id===f.modelo)))f.modelo=db.modelos[0]?.id||'';
+  const m=f.modelo==='__ia'?{id:'__ia',nome:f.iaNome||'Minuta gerada pela IA',categoria:'IA',texto:f.iaTexto}:db.modelos.find(x=>x.id===f.modelo);
   const procsCli=db.processos.filter(p=>!f.mcli||p.clienteId===f.mcli),ctrsCli=db.contratos.filter(k=>!f.mcli||k.clienteId===f.mcli);
   const ctx=contextoModelo(f.mcli,f.mproc,f.mctr,parseFloat(f.valor)||0,f.validade);
   const grupos={};db.modelos.forEach(x=>(grupos[x.categoria]=grupos[x.categoria]||[]).push(x));
   const gOk=!gIndisponivel();
   return tabs+`<div class="grid" style="grid-template-columns:minmax(0,330px) minmax(0,1fr)" id="doc-grid">
     <div class="card"><h3>Dados do documento</h3><div class="fgrid" style="grid-template-columns:1fr">
-      <label>Modelo<select data-f="doc.modelo">${Object.entries(grupos).map(([g,ms])=>`<optgroup label="${esc(g)}">${ms.map(x=>`<option value="${x.id}"${x.id===f.modelo?' selected':''}>${esc(x.nome)}</option>`).join('')}</optgroup>`).join('')}</select></label>
+      <label>Modelo<select data-f="doc.modelo">${f.iaTexto?`<option value="__ia"${f.modelo==='__ia'?' selected':''}>🤖 ${esc(f.iaNome||'Minuta gerada pela IA')}</option>`:''}${Object.entries(grupos).map(([g,ms])=>`<optgroup label="${esc(g)}">${ms.map(x=>`<option value="${x.id}"${x.id===f.modelo?' selected':''}>${esc(x.nome)}</option>`).join('')}</optgroup>`).join('')}</select></label>
       <label>Cliente<select data-f="doc.mcli"><option value="">—</option>${O.clientes().map(([id,n])=>`<option value="${id}"${f.mcli===id?' selected':''}>${esc(n)}</option>`).join('')}</select></label>
       <label>Processo<select data-f="doc.mproc"><option value="">—</option>${procsCli.map(p=>`<option value="${p.id}"${f.mproc===p.id?' selected':''}>${esc(p.numero)} — ${esc(p.objeto)}</option>`).join('')}</select></label>
       <label>Contrato (valores)<select data-f="doc.mctr"><option value="">${ctrsCli.length?'Mais recente do cliente':'—'}</option>${ctrsCli.map(k=>`<option value="${k.id}"${f.mctr===k.id?' selected':''}>${fd(k.data)} — ${brl(k.valorTotal)} ${esc(k.produto||'')}</option>`).join('')}</select></label>
@@ -316,6 +322,7 @@ V.documentos=()=>{
       <button class="btn btn-brand" data-act="docWord">⬇ Baixar Word (.docx)</button>
       <button class="btn btn-ghost" data-act="docPrint">🖨 Imprimir / salvar PDF</button>
       <button class="btn btn-ghost" data-act="docGoogle" title="${gOk?'Cria um Google Docs editável':esc(gIndisponivel())}">📄 Abrir no Google Docs</button>
+      <button class="btn btn-ghost" data-act="docAssinar" title="Envia o documento para assinatura eletrônica (ZapSign)">✍️ Enviar para assinatura</button>
       <button class="btn btn-ghost" data-act="docCopiar">Copiar texto</button>
     </div></div>
     <div class="folha-wrap"><div class="folha" id="doc-preview" contenteditable="true" spellcheck="true" style="${estiloFolha()}">${m?documentoHTML(corpoDocHTML(preencher(m.texto,ctx))):'<div class="empty">Cadastre um modelo</div>'}</div></div>
@@ -475,7 +482,7 @@ V.config=()=>{
     ${e.driveRaizLink?`<p class="small"><a href="${esc(e.driveRaizLink)}" target="_blank" rel="noopener">📁 Pasta de clientes no Google Drive</a></p>`:''}
     <div class="mfoot">${ehAdmin()?'<button class="btn btn-ghost" data-act="salvarGoogle">Salvar</button>':'<button class="btn btn-ghost" data-act="salvarGoogle">Salvar agenda</button>'}<button class="btn btn-brand" data-act="gConectar"${gStatus?' disabled':''}>Conectar Google</button></div>
     <div class="small muted">Como configurar: veja o guia <b>docs/GOOGLE.md</b> (uma vez só, pelo administrador).</div></div>`;
-  if(ehParceiro())return `<div class="grid g-2">${minhaSenha}${google}</div>`;
+  if(ehParceiro())return `<div class="grid g-2">${minhaSenha}${card2FA()}${cardAppCelular()}${google}</div>`;
   return `<div class="grid g-2">
   <div class="card"><h3>🏢 Dados do escritório</h3>
     <div class="fgrid">${[['nome','Nome do escritório',1],['cnpj','CNPJ'],['oab','Registro da sociedade na OAB'],['email','E-mail'],['tel','Telefone'],['cidade','Cidade/UF'],['endereco','Endereço',1]].map(([k,l,full])=>`<label${full?' class="full"':''}>${l}<input id="esc_${k}" value="${esc(e[k])}"></label>`).join('')}
@@ -497,7 +504,8 @@ V.config=()=>{
     ${(contasCache||[]).map((c,i)=>`<tr data-act="editConta" data-id="${i}"><td class="strong">${esc(c.nome)}</td><td>${esc(c.email)}</td><td class="small">${esc(papelNome(c.papel))}</td><td>${c.ativo?pill('Ativo','p-green'):pill('Desativado','p-gray')}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">Carregando…</td></tr>'}</tbody></table></div>
     <div class="small muted" style="margin-top:8px">Cada pessoa entra com o próprio e-mail e senha. <b>Estagiário</b> não vê o financeiro; <b>Parceiro</b> vê só os casos da parceria.${modo==='local'?' Na demonstração, a senha de todos é <b>demo1234</b>.':''}</div></div>`:''}
   ${minhaSenha}
-  ${['admin','advogado'].includes(papel())?cardSalasConfig():''}
+  ${card2FA()}${cardAppCelular()}${cardBackup()}
+  ${['admin','advogado'].includes(papel())?cardSalasConfig()+cardFluxosConfig()+cardLembretesConfig():''}${cardIntegracoes()}
   <div class="card"><h3>🧑‍⚖️ Equipe (responsáveis e parceiros) <button class="btn btn-gold btn-sm" data-act="novoUsr">+ Membro</button></h3><div class="tbl"><table><thead><tr><th>Nome</th><th>Função</th><th>OAB</th></tr></thead><tbody>
     ${db.usuarios.map(u=>`<tr data-act="editUsr" data-id="${u.id}"><td class="strong">${esc(u.nome)}<div class="small muted">${esc(u.email)}</div></td><td>${esc(u.papel)}</td><td>${esc(u.oab)||'—'}</td></tr>`).join('')}</tbody></table></div></div>
   <div class="card"><h3>🏷️ Tipos de compromisso / serviço</h3><div id="tipos-lista">${db.tiposEvento.map((t,i)=>`<div class="tipo-lin"><input type="color" value="${esc(t.cor)}" data-tipo-cor="${i}" aria-label="Cor"><input value="${esc(t.nome)}" data-tipo-nome="${i}" aria-label="Nome"><button class="btn btn-sm lnk" data-act="delTipo" data-id="${i}">remover</button></div>`).join('')}</div>

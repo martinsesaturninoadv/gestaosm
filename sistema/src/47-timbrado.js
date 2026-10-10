@@ -94,7 +94,7 @@ async function gerarDocx(){
   zip.file('word/header1.xml',hd);
   return zip.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document',compression:'DEFLATE'});
 }
-function nomeArquivoDoc(){const f=ui.f.doc||{};const m=db.modelos.find(x=>x.id===f.modelo);return (m?.nome||'documento')+(f.mcli?' '+nomeCli(f.mcli).split(' ')[0]:'');}
+function nomeArquivoDoc(){const f=ui.f.doc||{};const m=f.modelo==='__ia'?{nome:f.iaNome||'Minuta'}:db.modelos.find(x=>x.id===f.modelo);return (m?.nome||'documento')+(f.mcli?' '+nomeCli(f.mcli).split(' ')[0]:'');}
 /* imagem enviada → PNG redimensionado (dataURL) */
 function lerImagem(file,maxLado){
   return new Promise((res,rej)=>{const rd=new FileReader();rd.onload=()=>{const img=new Image();img.onload=()=>{

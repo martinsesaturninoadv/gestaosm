@@ -32,6 +32,7 @@ function badges(){
   n('nb-docs',db.documentos.filter(d=>!d.recebido).length);
   n('nb-sm',ehParceiro()?0:guiasPendentes(7).length);
   n('nb-esc',totalNaoLidas());
+  verificarAvisosAparelho();
   $('#brand-nome').textContent=(db.escritorio.nome||'Escritório').replace(/\s+Advocacia(\s+e\s+Consultoria)?$/i,'');
 }
 function userBox(){
@@ -166,7 +167,7 @@ const A={
   importar:()=>$('#file-import').click(),
   importarXls:()=>$('#file-xlsx').click(),importarWa:()=>importarWhatsApp(),
 };
-Object.assign(A,ESC_ACOES,TRAF_ACOES);
+Object.assign(A,ESC_ACOES,TRAF_ACOES,FLUXO_ACOES,LEMB_ACOES,INTEG_ACOES,SEG_ACOES,{smLembretes:()=>{ui.tabSm='lembretes';location.hash='sm';render();}});
 function lerTipos(){document.querySelectorAll('[data-tipo-nome]').forEach(el=>{const i=+el.dataset.tipoNome;if(db.tiposEvento[i])db.tiposEvento[i].nome=el.value.trim();});
   document.querySelectorAll('[data-tipo-cor]').forEach(el=>{const i=+el.dataset.tipoCor;if(db.tiposEvento[i])db.tiposEvento[i].cor=el.value;});}
 function lancarFixas(ym,ids){
@@ -178,7 +179,7 @@ function lancarFixas(ym,ids){
 }
 document.addEventListener('click',ev=>{
   const a=ev.target.closest('[data-act]');
-  if(a&&A[a.dataset.act]){if(a.tagName!=='INPUT')ev.preventDefault();ev.stopPropagation();if(a.closest('.qa')&&$('#mbg').classList.contains('open'))closeModal();A[a.dataset.act](a.dataset.id,a);return;}
+  if(a&&A[a.dataset.act]){if(a.tagName!=='INPUT'&&!(a.tagName==='A'&&/^(https?|mailto):/.test(a.getAttribute('href')||'')))ev.preventDefault();ev.stopPropagation();if(a.closest('.qa')&&$('#mbg').classList.contains('open'))closeModal();A[a.dataset.act](a.dataset.id,a);return;}
   const g=ev.target.closest('[data-go]');if(g&&!ev.target.closest('a,button,input')){location.hash=g.dataset.go;return;}
   if(ev.target.id==='mbg')closeModal();
   if(!ev.target.closest('.search'))$('#sres').classList.remove('open');
@@ -224,7 +225,10 @@ $('#file-trafego').addEventListener('change',e=>{const f=e.target.files[0];e.tar
 $('#file-wa').addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)lerArquivoWa(f);});
 $('#file-xlsx').addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)iniciarImportacao(f);});
 $('#login-form').addEventListener('submit',e=>{e.preventDefault();$('#l-err').textContent='';
-  api('login',{email:$('#l-email').value,senha:$('#l-senha').value}).then(r=>{$('#l-senha').value='';entrar(r.usuario);}).catch(err=>{$('#l-err').textContent=err.msg||'Não foi possível entrar. Verifique a conexão.';});});
+  const cod=$('#l-codigo');
+  api('login',{email:$('#l-email').value,senha:$('#l-senha').value,codigo:cod?cod.value:''}).then(r=>{$('#l-senha').value='';if(cod)cod.closest('label').remove();entrar(r.usuario);})
+  .catch(err=>{if(err.dados?.precisa2fa&&!$('#l-codigo')){const l=document.createElement('label');l.innerHTML='Código do aplicativo autenticador<input id="l-codigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required>';$('#l-err').before(l);$('#l-codigo').focus();}
+    $('#l-err').textContent=err.msg||'Não foi possível entrar. Verifique a conexão.';});});
 window.addEventListener('hashchange',()=>{closeModal();render();window.scrollTo(0,0);});
 window.addEventListener('resize',()=>{const g=$('#cli-grid');if(g)g.style.gridTemplateColumns=innerWidth<860?'minmax(0,1fr)':'minmax(0,320px) minmax(0,1fr)';const d=$('#doc-grid');if(d)d.style.gridTemplateColumns=innerWidth<860?'minmax(0,1fr)':'minmax(0,330px) minmax(0,1fr)';});
 

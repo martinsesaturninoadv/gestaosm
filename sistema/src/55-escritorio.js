@@ -275,6 +275,7 @@ function escNotificar(m){
   const me=meuEmailEsc();if(m.de===me||m.tipo==='emote')return;
   if(!canaisVisiveis()(m.canal))return;
   const vendo=ui.page==='escritorio'&&!document.hidden&&escCanalAtual()===m.canal;
+  if(document.hidden&&(m.tipo==='toc'||m.canal.startsWith('dm:')))notificar(m.tipo==='toc'?'🚪 '+m.nome+' está batendo na sua porta':'💬 '+m.nome,m.tipo==='toc'?'Escritório virtual':m.texto.slice(0,120),'chat-'+m.canal);
   if(m.tipo==='toc'){escSom(true);toastAcao(`🚪 ${m.nome} está batendo na sua porta`,'Ir até lá',()=>{location.hash='escritorio';escIrAte(m.de);});return;}
   if(vendo)return;
   escSom(m.canal.startsWith('dm:'));
