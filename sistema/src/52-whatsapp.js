@@ -40,7 +40,7 @@ function aplicarImportWa(p){
   const hoje=today(),sm=ehCanalSm(p.canal),prodSm=db.produtos.find(x=>/matern/i.test(x))||'Salário-maternidade';
   p.novos.forEach(x=>{const d=x.data&&x.data<=hoje?x.data:hoje;
     db.leads.push({id:uid(),nome:x.nome||telTxt(x.telBruto)||'Contato do WhatsApp',tel:telTxt(digits(String(x.telBruto).split('@')[0]).replace(/^55(?=\d{10,11}$)/,'')),email:x.email,
-      canal:p.canal,origem:'',produto:sm?prodSm:'',etapa:x.etiquetas?mapEtapa(x.etiquetas):'Novo contato',etiquetas:x.etiquetas,
+      canal:p.canal,origem:ui.waOrigem||'',produto:sm?prodSm:'',etapa:x.etiquetas?mapEtapa(x.etiquetas):'Novo contato',etiquetas:x.etiquetas,
       primeiroContato:d,ultimoContato:d,valor:0,proposta:'',obs:x.obs,criado:d,criadoPor:db.usuarioAtual||'',importadoWa:hoje});});
   p.atual.forEach(([l,x])=>{if(x.etiquetas){l.etiquetas=x.etiquetas;const e=mapEtapa(x.etiquetas);if(l.etapa==='Novo contato'&&e!=='Novo contato')l.etapa=e;}if(!l.canal)l.canal=p.canal;if(x.data&&x.data<=hoje&&x.data>(l.ultimoContato||''))l.ultimoContato=x.data;
     if(!l.nome||/^contato do whatsapp$/i.test(l.nome))l.nome=x.nome||l.nome;if(x.email&&!l.email)l.email=x.email;});
@@ -48,8 +48,9 @@ function aplicarImportWa(p){
 function importarWhatsApp(){
   const ult=db.escritorio.ultimaImportWa||{};
   modal('Importar contatos do WhatsApp',`<p class="small muted">Exporte os contatos no WaSpeed (planilha .xlsx ou .csv) e envie aqui. Contatos que já estão no CRM são <b>atualizados</b> (não duplicam) e quem já é cliente é ignorado.</p>
-    <div class="imp-list">${CANAIS.map((c,i)=>`<label><input type="radio" name="wa-canal" value="${esc(c)}"${i===0?' checked':''}><span><b>${esc(c)}</b>${ult[c]?`última importação: ${fd(ult[c])}`:'ainda não importado'}${ehCanalSm(c)?' · os contatos entram com o produto Salário-maternidade':''}</span></label>`).join('')}</div>`,
-    [{l:'Cancelar',c:'btn-ghost',fn:closeModal},{l:'Escolher planilha…',c:'btn-brand',fn:()=>{ui.waCanal=document.querySelector('input[name="wa-canal"]:checked').value;$('#file-wa').click();}}]);
+    <div class="imp-list">${CANAIS.map((c,i)=>`<label><input type="radio" name="wa-canal" value="${esc(c)}"${i===0?' checked':''}><span><b>${esc(c)}</b>${ult[c]?`última importação: ${fd(ult[c])}`:'ainda não importado'}${ehCanalSm(c)?' · os contatos entram com o produto Salário-maternidade':''}</span></label>`).join('')}</div>
+    <label class="small" style="display:block;margin-top:12px">Origem dos contatos novos (usada no cálculo do tráfego pago)<select id="wa-origem" style="display:block;margin-top:4px;width:100%"><option value="">Não informar</option>${ORIGENS.map(o=>`<option${(db.escritorio.waOrigem||'')===o?' selected':''}>${esc(o)}</option>`).join('')}</select></label>`,
+    [{l:'Cancelar',c:'btn-ghost',fn:closeModal},{l:'Escolher planilha…',c:'btn-brand',fn:()=>{ui.waCanal=document.querySelector('input[name="wa-canal"]:checked').value;ui.waOrigem=$('#wa-origem').value;db.escritorio.waOrigem=ui.waOrigem;$('#file-wa').click();}}]);
 }
 async function lerArquivoWa(file){
   let rows;

@@ -22,10 +22,10 @@ header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
 
 const COLECOES = ['clientes', 'processos', 'eventos', 'tarefas', 'leads', 'lancamentos', 'documentos',
-    'notas', 'contratos', 'despesasFixas', 'usuarios', 'sm', 'scripts', 'modelos', 'config'];
+    'notas', 'contratos', 'despesasFixas', 'usuarios', 'sm', 'scripts', 'modelos', 'trafego', 'config'];
 const CONFIG_IDS = ['escritorio', 'metas', 'produtos', 'tiposEvento', 'indAjustes', 'indExtras', 'salas'];
 // Coleções que o perfil "estagiario" não pode ver nem alterar
-const COLECOES_FINANCEIRAS = ['lancamentos', 'contratos', 'despesasFixas'];
+const COLECOES_FINANCEIRAS = ['lancamentos', 'contratos', 'despesasFixas', 'trafego'];
 // Perfil "parceiro": só vê a parceria — registros com o e-mail dele no campo "parceiro"
 // (casos da parceria) ou na lista "parceiros" (tarefas e compromissos em que ele é responsável).
 // Não vê CRM, salário-maternidade, documentos, modelos nem scripts.

@@ -166,7 +166,7 @@ const A={
   importar:()=>$('#file-import').click(),
   importarXls:()=>$('#file-xlsx').click(),importarWa:()=>importarWhatsApp(),
 };
-Object.assign(A,ESC_ACOES);
+Object.assign(A,ESC_ACOES,TRAF_ACOES);
 function lerTipos(){document.querySelectorAll('[data-tipo-nome]').forEach(el=>{const i=+el.dataset.tipoNome;if(db.tiposEvento[i])db.tiposEvento[i].nome=el.value.trim();});
   document.querySelectorAll('[data-tipo-cor]').forEach(el=>{const i=+el.dataset.tipoCor;if(db.tiposEvento[i])db.tiposEvento[i].cor=el.value;});}
 function lancarFixas(ym,ids){
@@ -220,6 +220,7 @@ $('#file-anexo').addEventListener('change',async e=>{const f=e.target.files[0];c
 $('#file-logo').addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(!f)return;lerImagem(f,900).then(u=>{db.escritorio.logo=u;save();render();toast('Logotipo atualizado ✓');}).catch(err=>toast(err.message,1));});
 $('#file-marca').addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(!f)return;lerImagem(f,1414).then(u=>{db.escritorio.marcaDagua=u;db.escritorio.semMarca=false;save();render();toast("Marca d'água atualizada ✓");}).catch(err=>toast(err.message,1));});
 document.addEventListener('click',e=>{const b=e.target.closest('[data-login]');if(b){$('#l-email').value=b.dataset.login;$('#l-senha').value='demo1234';$('#login-form').requestSubmit();}});
+$('#file-trafego').addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)lerArquivoTrafego(f);});
 $('#file-wa').addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)lerArquivoWa(f);});
 $('#file-xlsx').addEventListener('change',e=>{const f=e.target.files[0];e.target.value='';if(f)iniciarImportacao(f);});
 $('#login-form').addEventListener('submit',e=>{e.preventDefault();$('#l-err').textContent='';
