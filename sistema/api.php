@@ -28,7 +28,7 @@ header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
 
 const COLECOES = ['clientes', 'processos', 'eventos', 'tarefas', 'leads', 'lancamentos', 'documentos',
-    'notas', 'contratos', 'despesasFixas', 'usuarios', 'sm', 'scripts', 'modelos', 'trafego', 'requisitorios', 'nps', 'config'];
+    'notas', 'contratos', 'despesasFixas', 'usuarios', 'sm', 'scripts', 'modelos', 'trafego', 'requisitorios', 'nps', 'recados', 'config'];
 const CONFIG_IDS = ['escritorio', 'metas', 'produtos', 'tiposEvento', 'indAjustes', 'indExtras', 'salas', 'fluxos'];
 // Coleções que o perfil "estagiario" não pode ver nem alterar
 const COLECOES_FINANCEIRAS = ['lancamentos', 'contratos', 'despesasFixas', 'trafego', 'requisitorios'];

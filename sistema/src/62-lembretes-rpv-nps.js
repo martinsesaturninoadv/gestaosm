@@ -4,12 +4,13 @@
 const LEMBRETES_PADRAO={
   guia:'Olá, {nome}! Aqui é do escritório {escritorio}. Lembrando que a guia do INSS da competência {competencia}, no valor de {valor}, vence em {venc}. {link}Qualquer dúvida, estamos à disposição. 😊',
   parto:'Olá, {nome}! Tudo bem? Aqui é do escritório {escritorio}. A data prevista do parto é {dpp}. Assim que o bebê nascer, nos envie a certidão de nascimento para darmos entrada no salário-maternidade. 💗',
+  recado:'Olá, {nome}! Você tem uma nova mensagem do escritório {escritorio} no seu portal:\n\n"{mensagem}"\n\nPara ver e responder: {portal}',
   portal:'Olá, {nome}! Este é o seu link para acompanhar o seu caso, enviar documentos e ver as guias: {portal}',
   nps:'Olá, {nome}! Foi um prazer cuidar do seu caso. Você pode avaliar o nosso atendimento em 1 minuto? {nps} Muito obrigado! 🙏'};
 const tplLembrete=k=>(db.escritorio.lembretes||{})[k]||LEMBRETES_PADRAO[k];
 const urlBase=()=>location.origin+location.pathname.replace(/[^/]*$/,'');
 const linkPortal=c=>c?.portalToken?urlBase()+'portal.php?t='+c.portalToken:'';
-function preencherMsg(tpl,v){return tpl.replace(/\{(\w+)\}/g,(m,k)=>v[k]??'').replace(/\s{2,}/g,' ').trim();}
+function preencherMsg(tpl,v){return tpl.replace(/\{(\w+)\}/g,(m,k)=>v[k]??'').replace(/[ \t]{2,}/g,' ').trim();}
 function msgGuia(c,g){const cl=cli(c.clienteId);return preencherMsg(tplLembrete('guia'),{nome:(cl?.nome||'').split(' ')[0],escritorio:db.escritorio.nome,competencia:mLabel(g.competencia),valor:brl(g.valor),venc:fd(g.venc),link:g.link?'Guia: '+g.link+' ':linkPortal(cl)?'Guia e código no seu portal: '+linkPortal(cl)+' ':''});}
 function msgParto(c){const cl=cli(c.clienteId);return preencherMsg(tplLembrete('parto'),{nome:(cl?.nome||'').split(' ')[0],escritorio:db.escritorio.nome,dpp:fd(c.dpp)});}
 const mailLink=(email,assunto,txt)=>email?`mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(txt)}`:'';
@@ -37,7 +38,7 @@ function cardLembretesConfig(){
   const t=k=>esc(tplLembrete(k));
   return `<div class="card"><h3>📲 Lembretes e mensagens para clientes</h3>
     <label class="chk small"><input type="checkbox" id="lem-auto"${db.escritorio.lembreteAuto?' checked':''}> Enviar <b>automaticamente por e-mail</b> o lembrete da guia 3 dias antes do vencimento e o do parto 10 dias antes (clientes com e-mail cadastrado)</label>
-    <div class="fgrid" style="margin-top:8px">${[['guia','Guia do INSS — {nome} {competencia} {valor} {venc} {link}'],['parto','Parto — {nome} {dpp}'],['portal','Link do portal — {nome} {portal}'],['nps','Pesquisa de satisfação — {nome} {nps}']].map(([k,l])=>`<label class="full">${l}<textarea id="lem-${k}" rows="3">${t(k)}</textarea></label>`).join('')}</div>
+    <div class="fgrid" style="margin-top:8px">${[['recado','Aviso de nova mensagem no portal — {nome} {mensagem} {portal}'],['guia','Guia do INSS — {nome} {competencia} {valor} {venc} {link}'],['parto','Parto — {nome} {dpp}'],['portal','Link do portal — {nome} {portal}'],['nps','Pesquisa de satisfação — {nome} {nps}']].map(([k,l])=>`<label class="full">${l}<textarea id="lem-${k}" rows="3">${t(k)}</textarea></label>`).join('')}</div>
     <div class="mfoot"><button class="btn btn-brand" data-act="lemSalvar">Salvar mensagens</button></div></div>`;
 }
 
@@ -113,7 +114,7 @@ function htmlNps(){
 const LEMB_ACOES={
   lembrouGuia:k=>{const[cid,gid]=k.split('|');const g=db.sm.find(x=>x.id===cid)?.guias.find(x=>x.id===gid);if(g){g.lembradoEm=today();save();setTimeout(render,300);}},
   lembrouParto:id=>{const c=db.sm.find(x=>x.id===id);if(c){c.lembradoPartoEm=today();save();setTimeout(render,300);}},
-  lemSalvar:()=>{db.escritorio.lembretes={};['guia','parto','portal','nps'].forEach(k=>db.escritorio.lembretes[k]=$('#lem-'+k).value.trim());db.escritorio.lembreteAuto=$('#lem-auto').checked;save();render();toast('Mensagens salvas ✓');},
+  lemSalvar:()=>{db.escritorio.lembretes={};['recado','guia','parto','portal','nps'].forEach(k=>db.escritorio.lembretes[k]=$('#lem-'+k).value.trim());db.escritorio.lembreteAuto=$('#lem-auto').checked;save();render();toast('Mensagens salvas ✓');},
   novoReq:()=>editReq(),editReq:id=>editReq(id),novoReqProc:id=>editReq(null,{processoId:id,clienteId:proc(id)?.clienteId}),
   reqHon:id=>{const r=db.requisitorios.find(x=>x.id===id);const c=calcReq(r);if(!c.hon)return toast('Informe o percentual ou o valor dos honorários',1);
     db.lancamentos.push({id:uid(),tipo:'receita',descricao:`Honorários — ${r.tipo} ${r.numero||''}`.trim(),categoria:'H.O. finais — êxito',clienteId:r.clienteId,processoId:r.processoId||'',contratoId:'',valor:Math.round(c.hon*100)/100,venc:r.dataLevantamento||today(),pago:true,pagoEm:r.dataLevantamento||today(),forma:'Transferência',produto:cli(r.clienteId)?.produto||'',obs:'Lançado do controle de RPV/precatórios',criado:today(),reqRef:r.id});
@@ -128,3 +129,26 @@ const LEMB_ACOES={
   portalNovo:async id=>{if(!await confirmar('Gerar um novo link? O link antigo deixa de funcionar.','Gerar'))return;const c=cli(id);c.portalToken='';garantirToken(c);A.portalCli(id);},
   npsMarcar:id=>{const c=cli(id);if(c){c.npsEnviadoEm=today();save();}},
 };
+
+/* ---------- mensagens públicas no portal do cliente (separadas do histórico interno) ---------- */
+function recadosDe(cid){return db.recados.filter(r=>r.clienteId===cid).sort((a,b)=>(a.em||0)-(b.em||0));}
+const recadosNaoLidos=cid=>db.recados.filter(r=>r.clienteId===cid&&r.origem==='cliente'&&!r.lidoEscritorio).length;
+function htmlRecados(c){
+  const ms=recadosDe(c.id);
+  return `<div class="hint">💬 O que for publicado aqui <b>aparece para ${esc((c.nome||'').split(' ')[0])} no portal do cliente</b> (aba Mensagens). Anotações internas continuam no <b>Histórico</b>, que é só do escritório.</div>
+    <div class="esc-msgs" style="max-height:420px;border:1px solid var(--border);border-radius:12px;padding:10px;margin-bottom:10px">${ms.map(r=>{const nos=r.origem!=='cliente';
+      return `<div class="esc-msg ${nos?'meu':''}"><div style="width:100%"><div class="esc-meta"><b>${esc(nos?(r.autor||'Escritório'):c.nome)}</b> <span>${hhmm(r.em)}</span>${nos?` · <span>${r.lidoEm?'✓✓ visto pela cliente em '+esc(r.lidoEm):'enviado ✓'}</span>`:''}</div><div class="esc-bal" style="white-space:pre-wrap">${linkify(r.texto)}</div>
+        ${nos?`<div class="flx" style="margin-top:4px">${botoesEnvio(c,msgRecado(c,r.texto),'Nova mensagem no portal','recadoAvisado',r.id)}${r.avisadoEm?`<span class="small muted">avisado em ${fd(r.avisadoEm)}</span>`:''}<button class="btn btn-sm lnk" data-act="recadoApagar" data-id="${r.id}">apagar</button></div>`:''}</div></div>`;}).join('')||'<div class="empty">Nenhuma mensagem no portal ainda</div>'}</div>
+    <textarea id="recado-txt" rows="3" style="width:100%" placeholder="Escreva a mensagem para a cliente (ex.: Seu benefício foi concedido! O primeiro pagamento sai em…)"></textarea>
+    <div class="flx" style="margin-top:8px"><span class="grow"></span><button class="btn btn-brand" data-act="recadoPublicar" data-id="${c.id}">Publicar no portal</button></div>`;
+}
+function msgRecado(c,texto){garantirToken(c);return preencherMsg(tplLembrete('recado'),{nome:(c.nome||'').split(' ')[0],escritorio:db.escritorio.nome,mensagem:texto.length>500?texto.slice(0,497)+'…':texto,portal:linkPortal(c)});}
+Object.assign(LEMB_ACOES,{
+  recadoPublicar:id=>{const c=cli(id);const t=$('#recado-txt').value.trim();if(!t)return toast('Escreva a mensagem',1);garantirToken(c);
+    const r={id:uid(),clienteId:id,texto:t,origem:'escritorio',autor:sessao?.nome||nomeUsr(db.usuarioAtual),em:Date.now(),criadoPor:db.usuarioAtual};
+    if(c.parceiro)r.parceiro=c.parceiro;db.recados.push(r);save();render();
+    const txt=msgRecado(c,t);
+    modal('✅ Mensagem publicada no portal','<p class="small">Avise a cliente que há uma mensagem nova (o texto já vai junto):</p><div class="nota" style="white-space:pre-wrap;margin:8px 0">'+esc(txt)+'</div><div class="flx">'+botoesEnvio(c,txt,'Nova mensagem no portal','recadoAvisado',r.id)+'</div>',[{l:'Fechar',c:'btn-ghost',fn:closeModal}]);},
+  recadoAvisado:id=>{const r=db.recados.find(x=>x.id===id);if(r){r.avisadoEm=today();save();setTimeout(render,300);}},
+  recadoApagar:async id=>{if(!await confirmar('Apagar esta mensagem do portal? A cliente deixa de vê-la.','Apagar'))return;db.recados=db.recados.filter(x=>x.id!==id);save();render();},
+});

@@ -62,6 +62,7 @@ V.painel=()=>{
   const docsPend={};db.documentos.filter(d=>!d.recebido).forEach(d=>docsPend[d.clienteId]=(docsPend[d.clienteId]||0)+1);
   Object.entries(docsPend).forEach(([cid,n])=>pend.push(['b','▤',`${n} documento(s) pendente(s)`,nomeCli(cid),'go','cliente/'+cid]));
   pendenciasReq().forEach(x=>pend.push(x));
+  {const por={};db.recados.filter(r=>r.origem==='cliente'&&!r.lidoEscritorio).forEach(r=>por[r.clienteId]=(por[r.clienteId]||0)+1);Object.entries(por).forEach(([cid,n])=>pend.push(['a','💬',`${n} mensagem(ns) nova(s) da cliente no portal`,nomeCli(cid),'portalAba',cid]));}
   {const nl=lembretesPendentes().filter(x=>!x.feito).length;if(nl)pend.push(['b','📲',`${nl} lembrete(s) de guia/parto para enviar às clientes`,'um clique: WhatsApp ou e-mail','smLembretes','']);}
   {const nn=npsPendentes().length;if(nn&&podeFin())pend.push(['b','⭐',`${nn} cliente(s) com caso concluído: enviar pesquisa de satisfação`,'Relatórios → Pesquisa de satisfação','go','relatorios']);}
   const ordem={r:0,a:1,b:2};pend.sort((a,b)=>ordem[a[0]]-ordem[b[0]]);

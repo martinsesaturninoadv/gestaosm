@@ -78,6 +78,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'nps') {
     }
 }
 
+/* ---------- resposta da cliente às mensagens do escritório ---------- */
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'responder') {
+    $texto = trim(mb_substr((string) ($_POST['texto'] ?? ''), 0, 3000));
+    if ($texto === '') $msg = 'erro:Escreva a sua mensagem.';
+    else {
+        $rid = nuc_uid();
+        nuc_gravar($pdo, 'recados', $rid, ['id' => $rid, 'clienteId' => $cid, 'texto' => $texto, 'origem' => 'cliente', 'autor' => $cliente['nome'] ?? '', 'em' => nuc_ms(), 'parceiro' => $cliente['parceiro'] ?? '']);
+        $tid = nuc_uid();
+        nuc_gravar($pdo, 'tarefas', $tid, ['id' => $tid, 'titulo' => 'Responder mensagem do portal — ' . ($cliente['nome'] ?? ''), 'status' => 'todo', 'prioridade' => 'Alta',
+            'prazo' => date('Y-m-d', strtotime('+1 day')), 'responsavelId' => '', 'clienteId' => $cid, 'processoId' => '', 'obs' => mb_substr($texto, 0, 300), 'parceiro' => $cliente['parceiro'] ?? '']);
+        $msg = 'ok:Mensagem enviada ao escritório. Responderemos em breve. 😊';
+    }
+}
+
 /* ---------- dados do cliente ---------- */
 $doCliente = fn($l) => array_values(array_filter($l, fn($x) => ($x['clienteId'] ?? '') === $cid));
 $processos = $doCliente(nuc_listar($pdo, 'processos'));
@@ -141,6 +155,26 @@ if ($docs) {
     foreach ($docs as $d) $html .= '<form method="post" enctype="multipart/form-data" class="doc"><input type="hidden" name="acao" value="enviar"><input type="hidden" name="doc" value="' . $h($d['id']) . '"><span>' . $h($d['nome'] ?? '') . '</span><input type="file" name="arquivo" required accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx"><button>Enviar</button></form>';
 } else $html .= '<p class="sub">Nenhum documento pendente no momento. ✅</p>';
 $html .= '<form method="post" enctype="multipart/form-data" class="doc"><input type="hidden" name="acao" value="enviar"><span>Enviar outro documento</span><input type="file" name="arquivo" required accept=".pdf,.jpg,.jpeg,.png,.heic,.webp,.doc,.docx"><button>Enviar</button></form></div>';
+/* ---------- aba Mensagens (o que o escritório publicou para a cliente) ---------- */
+$recados = $doCliente(nuc_listar($pdo, 'recados'));
+usort($recados, fn($a, $b) => ($a['em'] ?? 0) <=> ($b['em'] ?? 0));
+$novas = count(array_filter($recados, fn($r) => ($r['origem'] ?? '') !== 'cliente' && empty($r['lidoEm'])));
+$aba = ($_GET['aba'] ?? '') === 'msgs' ? 'msgs' : 'caso';
+$base = 'portal.php?t=' . $t;
+if ($aba === 'msgs') {
+    $html = $msg ? '<div class="aviso ' . (strpos($msg, 'ok:') === 0 ? 'ok' : 'erro') . '">' . $h(explode(':', $msg, 2)[1]) . '</div>' : '';
+    $html .= '<div class="card"><h2>💬 Mensagens do escritório</h2>';
+    foreach ($recados as $r) {
+        $nos = ($r['origem'] ?? '') !== 'cliente';
+        $quando = !empty($r['em']) ? date('d/m/Y H:i', (int) floor($r['em'] / 1000)) : '';
+        $html .= '<div class="msg ' . ($nos ? 'nos' : 'eu') . '"><div class="quem">' . $h($nos ? ($r['autor'] ?? 'Escritório') : 'Você') . ' · ' . $quando . (!$nos ? '' : (empty($r['lidoEm']) ? ' · <b class="novo">nova</b>' : '')) . '</div><div class="txt">' . nl2br($h((string) ($r['texto'] ?? ''))) . '</div></div>';
+        if ($nos && empty($r['lidoEm'])) { $r['lidoEm'] = date('d/m/Y H:i'); nuc_gravar($pdo, 'recados', (string) $r['id'], $r); }
+    }
+    if (!$recados) $html .= '<p class="sub">Nenhuma mensagem por enquanto. Quando o escritório publicar uma novidade sobre o seu caso, ela aparece aqui.</p>';
+    $html .= '<form method="post" action="' . $h($base) . '&aba=msgs"><input type="hidden" name="acao" value="responder"><label>Escrever para o escritório<textarea name="texto" rows="3" required></textarea></label><button>Enviar mensagem</button></form></div>';
+}
+$html = '<nav class="abas"><a href="' . $h($base) . '"' . ($aba === 'caso' ? ' class="on"' : '') . '>📋 Meu caso</a><a href="' . $h($base) . '&aba=msgs"' . ($aba === 'msgs' ? ' class="on"' : '') . '>💬 Mensagens' . ($novas && $aba !== 'msgs' ? ' <span class="bolha">' . $novas . '</span>' : '') . '</a></nav>'
+    . ($novas && $aba !== 'msgs' ? '<a class="aviso ok" style="display:block;text-decoration:none" href="' . $h($base) . '&aba=msgs">📩 Você tem ' . $novas . ' mensagem(ns) nova(s) do escritório. Toque para ler.</a>' : '') . $html;
 $tel = preg_replace('/\D/', '', (string) ($esc['tel'] ?? ''));
 if ($tel) $html .= '<a class="whats" href="https://wa.me/' . (strlen($tel) <= 11 ? '55' : '') . $tel . '" target="_blank" rel="noopener">Falar com o escritório no WhatsApp</a>';
 pagina($nomeEsc, '<div class="ola">Olá, ' . $h($primeiro) . '! 👋</div><p class="sub">Aqui você acompanha o seu caso com o escritório ' . $h($nomeEsc) . '.</p>' . $html);
@@ -153,7 +187,7 @@ function pagina(string $esc, string $corpo): void
     main{max-width:720px;margin:0 auto;padding:16px}.ola{font-size:22px;font-weight:700;margin-top:6px}.sub{color:#666;font-size:14px}.card{background:#fff;border-radius:14px;padding:16px;margin:14px 0;box-shadow:0 2px 10px rgba(0,0,0,.06)}
     h2{font-size:17px;margin:0 0 8px;color:#0F2942}h3{font-size:14px;margin:14px 0 6px}.trilha{display:flex;gap:4px;margin:10px 0 6px}.trilha span{flex:1;height:8px;border-radius:4px;background:#E5E1D6}.trilha .feita{background:#C9A646}.trilha .atual{background:#1B3A5C}
     .etapa-atual,.linha{font-size:14px;margin:6px 0}.barra{height:8px;background:#E5E1D6;border-radius:4px;margin-top:4px}.barra i{display:block;height:100%;background:#2E7D4E;border-radius:4px}
-    table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:7px 4px;border-bottom:1px solid #eee}.rolar{overflow-x:auto}.btn.mini{padding:6px 10px;font-size:13px}td,th{white-space:nowrap}.tag{font-size:12px;padding:2px 8px;border-radius:99px;background:#FEF3E0;color:#8A5300}.tag.ok{background:#E4F5EB;color:#2E7D4E}.tag.erro{background:#FBEAEA;color:#B93434}
+    table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:7px 4px;border-bottom:1px solid #eee}.rolar{overflow-x:auto}.abas{display:flex;gap:6px;margin:14px 0 4px}.abas a{flex:1;text-align:center;padding:10px;border-radius:10px;background:#fff;color:#1B3A5C;text-decoration:none;font-weight:600;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.05)}.abas a.on{background:#1B3A5C;color:#fff}.bolha{background:#C0392B;color:#fff;border-radius:99px;padding:1px 7px;font-size:12px}.msg{margin:10px 0;max-width:88%}.msg.eu{margin-left:auto}.msg .quem{font-size:12px;color:#888;margin-bottom:3px}.msg .txt{background:#F1F3F6;border-radius:4px 14px 14px 14px;padding:9px 12px;font-size:14px;line-height:1.45}.msg.eu .txt{background:#FBF3DC;border-radius:14px 4px 14px 14px}.novo{color:#C0392B}.btn.mini{padding:6px 10px;font-size:13px}td,th{white-space:nowrap}.tag{font-size:12px;padding:2px 8px;border-radius:99px;background:#FEF3E0;color:#8A5300}.tag.ok{background:#E4F5EB;color:#2E7D4E}.tag.erro{background:#FBEAEA;color:#B93434}
     .btn,button{display:inline-block;background:#1B3A5C;color:#fff;border:0;border-radius:8px;padding:9px 14px;font:inherit;font-size:14px;cursor:pointer;text-decoration:none}
     .doc{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 0;border-top:1px solid #eee}.doc span{flex:1 1 100%;font-weight:600;font-size:14px}.doc input[type=file]{flex:1;min-width:0;font-size:13px}
     .aviso{padding:12px;border-radius:10px;margin-top:12px}.aviso.ok{background:#E4F5EB;color:#2E7D4E}.aviso.erro{background:#FBEAEA;color:#B93434}
