@@ -27,7 +27,8 @@ function cardAppCelular(){
   return `<div class="card"><h3>📱 Aplicativo no celular e notificações</h3>
     <p class="small">${ehIOS()?'No iPhone: abra o sistema no <b>Safari</b>, toque em <b>Compartilhar</b> e depois em <b>Adicionar à Tela de Início</b>.':'No Android (Chrome): toque no menu <b>⋮</b> e depois em <b>Instalar app</b> (ou "Adicionar à tela inicial").'} O ícone do escritório aparece junto com os outros aplicativos e abre em tela cheia.</p>
     ${PWA.prompt?'<button class="btn btn-gold" data-act="pwaInstalar">Instalar o aplicativo agora</button>':''}
-    <p class="small muted" style="margin-top:10px">Notificações neste aparelho: mensagens do escritório virtual, "bater na porta", tarefas novas para você e os prazos do dia (enquanto o sistema estiver aberto, mesmo em segundo plano).</p>
+    <p class="small muted" style="margin-top:10px">Avisos com o sistema aberto (mesmo em segundo plano): mensagens do escritório virtual, "bater na porta", tarefas novas e os prazos do dia.</p>
+    ${cardPush()}
     <div class="mfoot">${perm==='granted'?pill('Notificações ativadas','p-green')+' <button class="btn btn-ghost btn-sm" data-act="notifTeste">Testar</button>':perm==='denied'?'<span class="small muted">Notificações bloqueadas no navegador: libere nas configurações do site.</span>':perm==='indisponivel'?'<span class="small muted">Este navegador não suporta notificações.</span>':'<button class="btn btn-brand" data-act="notifAtivar">Ativar notificações</button>'}</div></div>`;
 }
 const ehIOS=()=>/iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -35,7 +36,7 @@ const ehIOS=()=>/iphone|ipad|ipod/i.test(navigator.userAgent);
 /* ---------- PWA (instalar como aplicativo) ---------- */
 const PWA={prompt:null,reg:null};
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();PWA.prompt=e;if(ui.page==='config'&&db)render();});
-if('serviceWorker' in navigator&&/^https:$/.test(location.protocol)&&!window.claude){
+if('serviceWorker' in navigator&&window.isSecureContext&&/^https?:$/.test(location.protocol)&&!window.claude){
   navigator.serviceWorker.register('sw.js').then(r=>PWA.reg=r).catch(()=>{});
 }
 function notificar(titulo,corpo,tag){
@@ -57,7 +58,72 @@ function verificarAvisosAparelho(){
     if(hoje||venc)notificar('📅 Seu dia no escritório',`${hoje} prazo(s)/compromisso(s) hoje${venc?` · ${venc} em atraso`:''}`,'resumo-dia');}
 }
 
+/* ---------- notificações PUSH (chegam com o sistema fechado) ---------- */
+const PUSH_TIPOS=[['tarefa','☑ Tarefas e petições para mim (e urgências)'],['prazo','📅 Prazos, audiências e o "bom dia" com o que vence'],['msg','💬 Mensagens do escritório virtual'],['portal','📨 Mensagens e arquivos de clientes no portal'],['meta','🏆 Metas batidas e ranking'],['resumo','📋 Resumo do dia da equipe (18h)']];
+let PUSH=null;
+const pushSuportado=()=>'serviceWorker' in navigator&&'PushManager' in window&&!!window.Notification&&window.isSecureContext;
+function b64uParaU8(s){const b=atob((s+'='.repeat((4-s.length%4)%4)).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(b,c=>c.charCodeAt(0));}
+async function pushAssinatura(){try{const reg=await navigator.serviceWorker.ready;return await reg.pushManager.getSubscription();}catch(e){return null;}}
+async function carregarPush(){
+  if(modo!=='servidor'||!pushSuportado()){PUSH={indisponivel:true};return;}
+  try{const sub=await pushAssinatura();const r=await api('push',{op:'estado',endpoint:sub?.endpoint||''});PUSH={...r,ativo:!!(sub&&r.assinado)};}
+  catch(e){PUSH={erro:true};}
+  if(ui.page==='config')render();
+}
+/* ao entrar: se este aparelho já recebe push, confirma no servidor que é desta pessoa */
+async function sincronizarPush(){
+  if(modo!=='servidor'||!pushSuportado()||Notification.permission!=='granted')return;
+  const sub=await pushAssinatura();if(!sub)return;
+  try{await api('push',{op:'assinar',sub:sub.toJSON(),aparelho:nomeAparelho(),prefs:PUSH?.prefs||undefined});}catch(e){}
+}
+const nomeAparelho=()=>{const u=navigator.userAgent;return (/iphone|ipad/i.test(u)?'iPhone/iPad':/android/i.test(u)?'Android':/windows/i.test(u)?'Windows':/mac/i.test(u)?'Mac':'Navegador')+(matchMedia('(display-mode: standalone)').matches?' (app)':'');};
+function cardPush(){
+  if(modo!=='servidor')return '<div class="hint" style="margin-top:10px">🔔 As notificações push (que chegam com o sistema fechado) funcionam na versão hospedada.</div>';
+  if(!pushSuportado())return `<div class="hint" style="margin-top:10px">🔔 Este navegador não recebe notificações push.${ehIOS()?' No iPhone, primeiro adicione o sistema à Tela de Início (Safari → Compartilhar) e abra pelo ícone; depois ative aqui.':''}</div>`;
+  if(PUSH===null){carregarPush();return '<div class="small muted" style="margin-top:10px">Verificando notificações push…</div>';}
+  if(PUSH.erro)return '<div class="small muted" style="margin-top:10px">Não foi possível verificar as notificações push agora.</div>';
+  if(PUSH.suportado===false)return '<div class="hint" style="margin-top:10px">🔔 O servidor da hospedagem não tem OpenSSL/cURL com suporte a notificações push. Fale com o suporte da HostGator.</div>';
+  const pr=PUSH.prefs||{};
+  return `<div class="push-box"><div class="strong">🔔 Notificações push neste aparelho ${PUSH.ativo?pill('Ativadas','p-green'):pill('Desativadas','p-gray')}</div>
+    <p class="small muted" style="margin:4px 0 8px">Chegam como as de WhatsApp, <b>mesmo com o sistema fechado</b>. Ative em cada celular e computador que você usa.${ehIOS()?' No iPhone, só funciona com o sistema adicionado à Tela de Início.':''}</p>
+    ${PUSH.ativo?`<div class="multi" id="push-prefs">${PUSH_TIPOS.map(([k,l])=>`<label class="chk"><input type="checkbox" value="${k}"${pr[k]!==false?' checked':''}> ${esc(l)}</label>`).join('')}</div>
+      <div class="mfoot"><button class="btn btn-ghost btn-sm" data-act="pushDesativar">Desativar neste aparelho</button><button class="btn btn-ghost btn-sm" data-act="pushTestar">Enviar teste</button><button class="btn btn-brand btn-sm" data-act="pushPrefs">Salvar preferências</button></div>`
+      :`<div class="mfoot"><button class="btn btn-gold" data-act="pushAtivar">🔔 Ativar notificações push</button></div>`}
+    ${PUSH.cron?`<details class="small" style="margin-top:8px"><summary>Administração: avisos mesmo quando ninguém está com o sistema aberto (${PUSH.aparelhos} aparelho(s) cadastrados)</summary>
+      <p>Os avisos de horário (tarefa vencendo, audiência em 1 hora, "bom dia" e resumo das 18h) são verificados a cada 5 minutos enquanto alguém usa o sistema. Para funcionarem também à noite e no fim de semana, crie uma tarefa agendada no cPanel: <b>Trabalhos Cron</b> → <b>A cada 5 minutos</b> → comando:</p>
+      <code style="display:block;word-break:break-all;background:var(--bg2,#f3efe6);padding:8px;border-radius:6px">curl -s "${esc(PUSH.cron)}" &gt;/dev/null</code>
+      <button class="btn btn-ghost btn-sm" style="margin-top:6px" data-act="pushCopiarCron">Copiar comando</button></details>`:''}</div>`;
+}
+/* metas e ranking: quem perceber primeiro avisa a equipe (o servidor evita aviso repetido) */
+let ultAvisoMeta=0;
+function avisosMetaRanking(){
+  if(modo!=='servidor'||!sessao||ehParceiro()||!db||Date.now()-ultAvisoMeta<120000)return;ultAvisoMeta=Date.now();
+  const ym=today().slice(0,7);const ja=k=>{try{if(localStorage.getItem('av|'+k))return true;localStorage.setItem('av|'+k,'1');}catch(e){}return false;};
+  const enviar=(tipo,chave,titulo,texto)=>{if(!ja(chave))api('avisar',{tipo,chave,titulo,texto}).catch(()=>{});};
+  statusMetas(ym).forEach(m=>{if(!m.meta)return;const p=m.atual/m.meta;
+    if(p>=1)enviar('meta','meta:'+ym+':'+m.id,'🏆 Meta batida: '+m.nome+'!',m.fin?'A equipe bateu a meta do mês. Parabéns, time! 🎉':'Chegamos a '+m.fmt(m.atual)+' de '+m.fmt(m.meta)+'. Parabéns, time! 🎉');
+    else if(p>=0.9)enviar('meta','meta:'+ym+':'+m.id+':90','🔥 Falta pouco: '+m.nome,'Já estamos em '+Math.round(p*100)+'% da meta do mês. Bora fechar!');});
+  const prod=produtividade(ym);const l=prod[0];
+  if(l&&l.pontos>0&&(!prod[1]||prod[1].pontos<l.pontos)){let ant=null;try{ant=localStorage.getItem('rk_lider|'+ym);localStorage.setItem('rk_lider|'+ym,l.u.id);}catch(e){}
+    if(ant&&ant!==l.u.id)enviar('ranking','ranking:'+today()+':'+l.u.id,'🥇 '+l.u.nome+' assumiu a liderança do ranking!',l.pontos+' pontos no mês'+(prod[1]?' · '+prod[1].u.nome+' vem logo atrás com '+prod[1].pontos:'')+'. Quem vai recuperar? 💪');}
+}
+if('serviceWorker' in navigator)navigator.serviceWorker.addEventListener('message',e=>{if(e.data&&e.data.ir){location.hash=String(e.data.ir).replace(/^#/,'');}});
+
 const SEG_ACOES={
+  pushAtivar:async()=>{
+    try{const p=await Notification.requestPermission();if(p!=='granted')return toast('As notificações foram bloqueadas. Libere nas configurações do navegador para este site.',1);
+      const reg=await navigator.serviceWorker.ready;const r=await api('push',{op:'estado'});
+      let sub=await reg.pushManager.getSubscription();
+      if(sub&&sub.options&&sub.options.applicationServerKey){const atual=btoa(String.fromCharCode(...new Uint8Array(sub.options.applicationServerKey))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');if(atual!==r.pub){await sub.unsubscribe();sub=null;}}
+      if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64uParaU8(r.pub)});
+      await api('push',{op:'assinar',sub:sub.toJSON(),aparelho:nomeAparelho()});
+      await carregarPush();toast('Notificações push ativadas ✓ Toque em "Enviar teste" para conferir.');}
+    catch(e){toast(e.msg||'Não foi possível ativar: '+(e.message||e),1);}},
+  pushPrefs:async()=>{const sub=await pushAssinatura();if(!sub)return;const prefs={};PUSH_TIPOS.forEach(([k])=>prefs[k]=!!document.querySelector(`#push-prefs input[value="${k}"]`)?.checked);
+    try{await api('push',{op:'prefs',endpoint:sub.endpoint,prefs});PUSH.prefs=prefs;toast('Preferências salvas ✓');}catch(e){toast(e.msg||'Falha ao salvar',1);}},
+  pushTestar:async()=>{try{const r=await api('push',{op:'testar'});toast(r.enviados?'Teste enviado ✓ A notificação deve chegar em alguns segundos.':'Nenhum aparelho recebeu. Desative e ative de novo.',r.enviados?0:1);}catch(e){toast(e.msg||'Falha no teste',1);}},
+  pushDesativar:async()=>{const sub=await pushAssinatura();try{if(sub){await api('push',{op:'remover',endpoint:sub.endpoint});await sub.unsubscribe();}}catch(e){}await carregarPush();toast('Notificações push desativadas neste aparelho');},
+  pushCopiarCron:()=>{navigator.clipboard?.writeText(`curl -s "${PUSH.cron}" >/dev/null`).then(()=>toast('Comando copiado ✓'));},
   tfaAtivar:async()=>{if(precisaServidor())return;
     try{const r=await api('doisfatores',{etapa:'iniciar'});await carregarQR();
       modal('🛡️ Ativar verificação em duas etapas',`<ol class="small" style="line-height:1.7;padding-left:18px;margin:0"><li>Instale no celular o <b>Google Authenticator</b> ou o <b>Microsoft Authenticator</b>.</li><li>No aplicativo, toque em <b>+</b> e <b>Ler QR code</b>, e aponte para o código abaixo.</li><li>Digite o código de 6 dígitos que aparecer no aplicativo.</li></ol>

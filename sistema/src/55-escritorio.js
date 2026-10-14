@@ -2,7 +2,7 @@
    ESCRITÓRIO VIRTUAL — mapa com salas, bonequinhos animados, presença e chat
    - cada pessoa clica numa sala (ou usa as setas) e o bonequinho anda até lá;
    - chat geral, por sala e privado; "bater na porta"; emotes;
-   - cada sala pode ter um link fixo do Google Meet para vídeo/voz;
+   - chamada de voz e vídeo própria em cada sala e ligação privada (56-chamadas.js); o Meet fica como alternativa;
    - o parceiro só entra na Sala de Reunião (regra também no servidor).
    ========================================================= */
 const ESC={on:false,t:null,desde:0,pres:new Map(),msgs:[],ids:new Set(),eu:null,aba:'geral',dm:'',primeira:true,lidas:null,ocultoDesde:0,ultimoOnline:0};
@@ -79,7 +79,7 @@ V.escritorio=()=>{
     <div class="esc-corpo">
       <div class="esc-mapa-wrap"><div class="esc-mapa" id="esc-mapa">
         ${SALAS_ORDEM.map(id=>{const[a,b,w,h]=SALA_GEO[id];return `<div class="esc-sala sala-${id}${podeSala(id)?'':' trancada'}" data-sala="${id}" style="left:${a}%;top:${b}%;width:${w}%;height:${h}%">
-          ${moveis(id)}<div class="esc-rot"><b data-nome-sala="${id}">${esc(salaNome(id))}</b><span class="esc-qtd" data-qtd="${id}"></span>${db.salas?.[id]?.meet&&podeSala(id)?`<button class="esc-meet" data-act="escMeet" data-id="${id}" title="Entrar na chamada desta sala">🎥</button>`:''}</div>
+          ${moveis(id)}<div class="esc-rot"><b data-nome-sala="${id}">${esc(salaNome(id))}</b><span class="esc-qtd" data-qtd="${id}"></span>${podeSala(id)?`<button class="esc-meet" data-act="rtcSala" data-id="${id}" title="Chamada de voz e vídeo desta sala">📞</button>`:''}${db.salas?.[id]?.meet&&podeSala(id)?`<button class="esc-meet" data-act="escMeet" data-id="${id}" title="Abrir o Google Meet desta sala">🎥</button>`:''}</div>
           ${podeSala(id)?'':'<div class="esc-tranca">🔒</div>'}</div>`;}).join('')}
         <div id="esc-avs"></div><div class="esc-menu" id="esc-menu" hidden></div>
       </div><div class="small muted esc-dica">Clique numa sala (ou use as setas do teclado) para andar até lá. Clique num colega para conversar ou bater na porta.${ehParceiro()?' Como parceiro, você tem acesso à <b>Sala de Reunião</b>.':''}</div></div>
@@ -130,6 +130,7 @@ async function escEnviar(enviar){
 function escProcessar(r){
   if(!r||!r.ok)return;
   ESC.pres=new Map((r.presencas||[]).map(p=>[norm(p.email),p]));
+  rtcAtualizarAtivas(r.chamadas);
   const novas=[];
   (r.mensagens||[]).forEach(m=>{if(ESC.ids.has(m.id))return;ESC.ids.add(m.id);ESC.msgs.push(m);novas.push(m);if(m.em>ESC.desde)ESC.desde=m.em;});
   if(ESC.msgs.length>3000){ESC.msgs=ESC.msgs.slice(-2000);}
@@ -176,9 +177,9 @@ function escRenderChat(){
   form.style.display='';
   const canal=escCanalAtual();
   if(ESC.aba==='dm'){const p=ESC.pres.get(ESC.dm);const nome=p?.nome||db.usuarios.find(u=>norm(u.email)===ESC.dm)?.nome||ESC.dm;
-    cab.innerHTML=`<button class="btn btn-ghost btn-sm" data-act="escAba" data-id="dm">←</button> ${cabecaMini(ESC.dm)} <b>${esc(nome)}</b> <span class="small muted">${p?.online?'🟢 online':'offline'}</span><span class="grow"></span><button class="btn btn-ghost btn-sm" data-act="escToc" data-id="${esc(ESC.dm)}" title="Bater na porta">🚪</button>`;}
+    cab.innerHTML=`<button class="btn btn-ghost btn-sm" data-act="escAba" data-id="dm">←</button> ${cabecaMini(ESC.dm)} <b>${esc(nome)}</b> <span class="small muted">${p?.online?'🟢 online':'offline'}</span><span class="grow"></span><button class="btn btn-ghost btn-sm" data-act="rtcLigar" data-id="${esc(ESC.dm)}" title="Ligar (voz)">📞</button><button class="btn btn-ghost btn-sm" data-act="rtcLigar" data-id="${esc(ESC.dm)}" data-video="1" title="Chamada de vídeo">🎥</button><button class="btn btn-ghost btn-sm" data-act="escToc" data-id="${esc(ESC.dm)}" title="Bater na porta">🚪</button>`;}
   else if(ESC.aba==='sala'){const s=ESC.eu.sala,qtd=[...ESC.pres.values()].filter(p=>p.online&&p.sala===s).length;
-    cab.innerHTML=`<span class="small muted">Conversa de quem está na sala · ${qtd} pessoa(s) aqui</span><span class="grow"></span>${db.salas?.[s]?.meet?`<button class="btn btn-gold btn-sm" data-act="escMeet" data-id="${s}">🎥 Entrar na chamada</button>`:''}`;}
+    cab.innerHTML=`<span class="small muted">Conversa de quem está na sala · ${qtd} pessoa(s) aqui</span><span class="grow"></span><button class="btn btn-gold btn-sm" data-act="rtcSala" data-id="${s}">📞 ${rtcNaSala(s)?'Entrar na chamada ('+rtcNaSala(s).pessoas.length+')':'Chamada da sala'}</button>${db.salas?.[s]?.meet?`<button class="btn btn-ghost btn-sm" data-act="escMeet" data-id="${s}" title="Google Meet (alternativa)">Meet</button>`:''}`;}
   else cab.innerHTML='<span class="small muted">Conversa de toda a equipe</span>';
   const ms=ESC.msgs.filter(m=>m.canal===canal&&m.tipo!=='emote').slice(-200);
   const perto=box.scrollHeight-box.scrollTop-box.clientHeight<80;
@@ -220,7 +221,7 @@ function escAtualizar(tudo,novas){
     el.title=`${p.nome} — ${(ST_SALA.find(s=>s[0]===p.status)||ST_SALA[0])[2]}`;
   });
   box.querySelectorAll('.av3').forEach(el=>{if(!vivos.has(el.dataset.av))el.remove();});
-  SALAS_ORDEM.forEach(id=>{const q=document.querySelector(`[data-qtd="${id}"]`);if(q)q.textContent=qtd[id]?qtd[id]+' 👤':'';});
+  SALAS_ORDEM.forEach(id=>{const q=document.querySelector(`[data-qtd="${id}"]`);if(q){const c=rtcNaSala(id);q.textContent=(qtd[id]?qtd[id]+' 👤':'')+(c?' · 📞 '+c.pessoas.length+' em chamada':'');q.classList.toggle('em-chamada',!!c);}});
   (novas||[]).forEach(m=>{
     if(m.tipo==='emote')escBalao(m.de,m.texto,true);
     else if(m.tipo==='msg'&&(m.canal==='geral'||m.canal.startsWith('sala:')))escBalao(m.de,m.texto.length>60?m.texto.slice(0,58)+'…':m.texto);
@@ -330,11 +331,16 @@ const ESC_ACOES={
       if(m&&!/^https:\/\/[\w.-]+\.[a-z]{2,}(\/\S*)?$/i.test(m)){erro=erro||salaNome(id);$('#sala_m_'+id).classList.add('err');return;}
       novas[id]={nome:n||salasPadrao()[id].nome,meet:m};});
     if(erro)return toast('Link inválido na sala "'+erro+'". Cole o endereço da chamada, ex.: https://meet.google.com/abc-defg-hij',1);
+    const tu=$('#turn_urls')?.value.trim()||'';db.escritorio.turn=tu?{urls:tu,usuario:$('#turn_usuario').value.trim(),senha:$('#turn_senha').value}:null;
     db.salas=novas;save();render();toast('Salas salvas ✓');},
 };
 function cardSalasConfig(){
-  return `<div class="card"><h3>✦ Escritório virtual — salas</h3><div class="small muted" style="margin-bottom:8px">Renomeie as salas e cole um link fixo do <b>Google Meet</b> para cada uma (em meet.google.com → "Criar uma reunião para depois"). O botão 🎥 da sala abre a chamada. O parceiro só entra na <b>${esc(salaNome(SALA_PARCEIRO))}</b>.</div>
+  return `<div class="card"><h3>✦ Escritório virtual — salas</h3><div class="small muted" style="margin-bottom:8px">Cada sala tem a sua <b>chamada de voz e vídeo própria</b> (botão 📞), direto pelo sistema. Se quiser, cole também um link fixo do <b>Google Meet</b> como alternativa (botão 🎥). O parceiro só entra na <b>${esc(salaNome(SALA_PARCEIRO))}</b>.</div>
     <div class="fgrid">${SALAS_ORDEM.map(id=>`<label>Nome da sala<input id="sala_n_${id}" value="${esc(salaNome(id))}"></label><label>Link da chamada (Google Meet)<input id="sala_m_${id}" type="url" placeholder="https://meet.google.com/…" value="${esc(db.salas?.[id]?.meet||'')}"></label>`).join('')}</div>
+    <details class="small" style="margin-top:10px"><summary><b>Avançado:</b> servidor TURN (só se as chamadas não conectarem entre redes diferentes, ex.: 4G)</summary>
+      <p class="muted">Na maioria das redes a chamada conecta direto. Em algumas redes de celular ou empresas é preciso um servidor de retransmissão (TURN). Há serviços gratuitos/baratos, como o <b>Metered</b> (metered.ca) ou o <b>Twilio</b>: crie a conta e cole os dados aqui.</p>
+      <div class="fgrid"><label class="full">Endereço(s) TURN<input id="turn_urls" placeholder="turn:global.relay.metered.ca:80, turns:global.relay.metered.ca:443" value="${esc(db.escritorio.turn?.urls||'')}"></label>
+      <label>Usuário<input id="turn_usuario" value="${esc(db.escritorio.turn?.usuario||'')}" autocomplete="off"></label><label>Senha (credencial)<input id="turn_senha" type="password" value="${esc(db.escritorio.turn?.senha||'')}" autocomplete="new-password"></label></div></details>
     <div class="mfoot"><button class="btn btn-brand" data-act="salvarSalas">Salvar salas</button></div></div>`;
 }
 

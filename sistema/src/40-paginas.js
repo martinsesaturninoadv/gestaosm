@@ -10,8 +10,10 @@ function kanban(cols,items,kind,cardFn){
 }
 function moveCard(kind,id,col){
   if(kind==='tarefa'){const t=db.tarefas.find(x=>x.id===id);if(t){if(col==='done'&&t.status!=='done'){t.concluidoEm=today();t.concluidoPor=quemConclui(t);toast('Tarefa concluída! +'+PONTOS.tarefa+' pontos 🎉');}if(col!=='done')t.concluidoEm='';t.status=col;}}
+  if(kind==='pet')moverPeticao(id,col);
+  if(kind==='cont')moverConteudo(id,col);
   if(kind==='proc'){const p=proc(id);if(p)p.fase=col;}
-  if(kind==='sm'){const c=db.sm.find(x=>x.id===id);if(c)c.status=col;}
+  if(kind==='sm'){const c=db.sm.find(x=>x.id===id);if(c){c.status=col;if(col==='Deferido'&&!c.dataDeferimento){c.dataDeferimento=today();setTimeout(()=>{toast('🎉 Benefício deferido! Complete os dados do deferimento.');editSm(id);},400);}}}
   if(kind==='lead'){const l=db.leads.find(x=>x.id===id);if(l){l.etapa=col;l.ultimoContato=today();if(col==='Fechado'){if(!l.dataFechamento)l.dataFechamento=today();}else l.dataFechamento='';if(col==='Fechado'&&!l.convertido)setTimeout(()=>toast('Negócio fechado! Use "Converter em cliente" no card.'),300);}}
   save();render();
 }
@@ -22,7 +24,7 @@ V.tarefas=()=>{
     <span class="grow"></span><button class="btn btn-gold" data-act="novaTar">+ Tarefa</button></div>
     <div class="hint">Arraste os cards entre as colunas (ou use ◀ ▶). Clique no card para editar.</div>
     ${kanban(TSTATUS,items,'tarefa',t=>`<div class="t" data-act="editTar" data-id="${t.id}" style="cursor:pointer">${esc(t.titulo)}</div>
-      <div class="meta">${pPrior(t.prioridade)} <span>${esc(nomesResp(t))}</span>${t.prazo?' · '+(t.status==='done'?fd(t.prazo):prazoTxt(t.prazo)):''}</div>
+      <div class="meta">${pPrior(t.prioridade)} <span>${esc(nomesResp(t))}</span>${t.prazo?' · '+(t.status==='done'?fd(t.prazo):prazoTxt(t.prazo))+(t.hora?` <b>até ${esc(t.hora)}</b>`:''):''}</div>
       ${t.processoId&&proc(t.processoId)?`<div class="small muted" style="margin-top:3px">${esc(proc(t.processoId).numero)}</div>`:''}`)}`;
 };
 

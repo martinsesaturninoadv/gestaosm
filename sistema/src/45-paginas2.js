@@ -17,7 +17,7 @@ function aniversariantes(dias){
 /* ---------------- PAINEL ---------------- */
 /* tarefas ligadas a um parceiro: responsável por ela ou caso da parceria dele */
 const tarefasParceiro=email=>db.tarefas.filter(t=>doParceiro(t,email)).sort((a,b)=>(a.status==='done')-(b.status==='done')||(a.prazo||'9').localeCompare(b.prazo||'9'));
-const linhaTarefa=t=>`<div class="ev${t.status==='done'?' done':''}"><span class="pic" style="width:16px">${t.status==='done'?'✔':'☑'}</span><div class="body" data-act="editTar" data-id="${t.id}"><div class="t" style="${t.status==='done'?'text-decoration:line-through;color:var(--text3)':''}">${esc(t.titulo)}</div><div class="small muted">${esc(TSTATUS.find(s=>s[0]===t.status)[1])} · ${esc(nomesResp(t))}${t.clienteId&&cli(t.clienteId)?' · '+esc(nomeCli(t.clienteId)):''}</div></div><div class="small" style="text-align:right">${t.prazo?(t.status==='done'?fd(t.prazo):prazoTxt(t.prazo)):''}</div></div>`;
+const linhaTarefa=t=>`<div class="ev${t.status==='done'?' done':''}"><span class="pic" style="width:16px">${t.status==='done'?'✔':'☑'}</span><div class="body" data-act="editTar" data-id="${t.id}"><div class="t" style="${t.status==='done'?'text-decoration:line-through;color:var(--text3)':''}">${esc(t.titulo)}</div><div class="small muted">${esc(TSTATUS.find(s=>s[0]===t.status)[1])} · ${esc(nomesResp(t))}${t.clienteId&&cli(t.clienteId)?' · '+esc(nomeCli(t.clienteId)):''}</div></div><div class="small" style="text-align:right">${t.prazo?(t.status==='done'?fd(t.prazo):prazoTxt(t.prazo)+(t.hora?' · até '+esc(t.hora):'')):''}</div></div>`;
 function painelParceiro(){
   const email=sessao.email,h=new Date().getHours();
   const ts=tarefasParceiro(email),abertas=ts.filter(t=>t.status!=='done'),atras=abertas.filter(t=>t.prazo&&diff(t.prazo)<0);
@@ -62,6 +62,9 @@ V.painel=()=>{
   const docsPend={};db.documentos.filter(d=>!d.recebido).forEach(d=>docsPend[d.clienteId]=(docsPend[d.clienteId]||0)+1);
   Object.entries(docsPend).forEach(([cid,n])=>pend.push(['b','▤',`${n} documento(s) pendente(s)`,nomeCli(cid),'go','cliente/'+cid]));
   pendenciasReq().forEach(x=>pend.push(x));
+  db.peticoes.filter(p=>p.status!=='Protocolada'&&p.prazo&&diff(p.prazo)<=1).forEach(p=>pend.push([diff(p.prazo)<0?'r':'a','🔎',`Petição ${p.status.toLowerCase()} com prazo ${diff(p.prazo)<0?'vencido':diff(p.prazo)===0?'HOJE':'amanhã'}${p.hora?' até '+p.hora:''}: ${p.titulo}`,nomeCli(p.clienteId),'editPet',p.id]));
+  db.conteudos.filter(c=>contAtrasado(c)&&((c.responsaveis||[]).includes(db.usuarioAtual)||c.editorId===db.usuarioAtual||c.criadoPor===db.usuarioAtual)).forEach(c=>pend.push([diff(c.dataPublicacao)<0?'r':'a','🎬',`Conteúdo ${c.etapa==='Agendado'?'agendado':'ainda em '+c.etapa.toLowerCase()} para ${diff(c.dataPublicacao)<0?'postar em '+fd(c.dataPublicacao)+' (atrasado)':'postar HOJE'+(c.hora?' às '+c.hora:'')}: ${c.titulo}`,(c.plataformas||[]).join(', '),'editCont',c.id]));
+  {const pc=db.peticoes.filter(p=>p.conferenteId===db.usuarioAtual&&p.status==='A conferir').length;if(pc)pend.push(['a','🔎',`${pc} petição(ões) esperando a sua conferência`,'Conferência de petições','go','peticoes']);}
   {const por={};db.recados.filter(r=>r.origem==='cliente'&&!r.lidoEscritorio).forEach(r=>por[r.clienteId]=(por[r.clienteId]||0)+1);Object.entries(por).forEach(([cid,n])=>pend.push(['a','💬',`${n} mensagem(ns) nova(s) da cliente no portal`,nomeCli(cid),'portalAba',cid]));}
   {const nl=lembretesPendentes().filter(x=>!x.feito).length;if(nl)pend.push(['b','📲',`${nl} lembrete(s) de guia/parto para enviar às clientes`,'um clique: WhatsApp ou e-mail','smLembretes','']);}
   {const nn=npsPendentes().length;if(nn&&podeFin())pend.push(['b','⭐',`${nn} cliente(s) com caso concluído: enviar pesquisa de satisfação`,'Relatórios → Pesquisa de satisfação','go','relatorios']);}
@@ -135,7 +138,7 @@ V.agenda=()=>{
   const groups={};rest.forEach(e=>(groups[e.data]=groups[e.data]||{e:[],t:[]}).e.push(e));
   tars.filter(t=>t.status==='done'||diff(t.prazo)>=0).forEach(t=>(groups[t.prazo]=groups[t.prazo]||{e:[],t:[]}).t.push(t));
   const tAtr=tars.filter(t=>t.status!=='done'&&diff(t.prazo)<0);
-  const tItem=t=>`<div class="ev${t.status==='done'?' done':''}"><span class="pic" style="width:16px">☑</span><div class="body" data-act="editTar" data-id="${t.id}"><div class="t">${esc(t.titulo)}</div><div class="small muted">Tarefa · ${esc(TSTATUS.find(s=>s[0]===t.status)[1])} · ${esc(nomesResp(t))}</div></div><div class="small" style="text-align:right">${prazoTxt(t.prazo)}${t.status==='done'?'':`<br><a class="gcal" href="${esc(linkGcalTarefa(t))}" target="_blank" rel="noopener">+ Google Agenda</a>`}</div></div>`;
+  const tItem=t=>`<div class="ev${t.status==='done'?' done':''}"><span class="pic" style="width:16px">☑</span><div class="body" data-act="editTar" data-id="${t.id}"><div class="t">${esc(t.titulo)}</div><div class="small muted">Tarefa · ${esc(TSTATUS.find(s=>s[0]===t.status)[1])} · ${esc(nomesResp(t))}</div></div><div class="small" style="text-align:right">${prazoTxt(t.prazo)}${t.hora?' · até '+esc(t.hora):''}${t.status==='done'?'':`<br><a class="gcal" href="${esc(linkGcalTarefa(t))}" target="_blank" rel="noopener">+ Google Agenda</a>`}</div></div>`;
   return head+`<div class="hint">Os links <b>+ Google Agenda</b> funcionam sem configuração. O botão <b>↻ Google Agenda</b> sincroniza tudo de uma vez (exige conectar o Google; veja Configurações).</div>
   ${venc.length||tAtr.length?`<div class="card" style="border-color:var(--red);margin-bottom:14px"><h3 style="color:var(--red)">Vencidos e não cumpridos (${venc.length+tAtr.length})</h3>${venc.map(e=>evItem(e)).join('')}${tAtr.map(tItem).join('')}</div>`:''}
   <div class="card">${Object.keys(groups).length?Object.entries(groups).sort((a,b)=>a[0].localeCompare(b[0])).map(([d,g])=>`<div class="dgroup">${fdw(d)}${d===today()?' — hoje':''}</div>${g.e.map(e=>evItem(e)).join('')}${g.t.map(tItem).join('')}`).join(''):'<div class="empty">Nenhum compromisso</div>'}</div>`;
@@ -239,7 +242,7 @@ function smCaso(id){
     <button class="btn btn-ghost" data-act="smContrato" data-id="${c.id}">Gerar contrato</button><button class="btn btn-ghost" data-act="editSm" data-id="${c.id}">Editar caso</button></div>
   <div class="card" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><div class="small muted">Salário-maternidade · ${esc(c.categoria)}</div><div style="font-size:18px;font-weight:800"><a href="#cliente/${c.clienteId}">${esc(cl.nome||'—')}</a></div><div class="small">${esc(c.estrategia||'')}</div></div><div>${pill(c.status,smCor(c.status))}</div></div>
     <div class="fases">${SM_STATUS.map((s,i)=>`<div class="fase ${s===c.status?'atual':i<SM_STATUS.indexOf(c.status)?'feita':''}" data-act="setSmStatus" data-id="${c.id}|${esc(s)}"><i></i><span>${esc(s)}</span></div>`).join('')}</div></div>
-  <div class="grid g-kpi">${kpi('Parto / DPP',c.dataParto?fd(c.dataParto):fd(c.dpp),c.dataParto?'nascimento'+(c.crianca?' — '+esc(c.crianca):''):c.dpp?prazoTxt(c.dpp):'')}
+  <div class="grid g-kpi">${c.status==='Deferido'||c.dataDeferimento?kpi('✅ Deferido',fd(c.dataDeferimento),[c.valorConcedido?brl(c.valorConcedido):'',c.previsaoPagamento?'pagamento '+fd(c.previsaoPagamento):'',c.pagoClienteEm?'pago à cliente em '+fd(c.pagoClienteEm):''].filter(Boolean).join(' · ')||'complete os dados em Editar','good'):''}${kpi('Parto / DPP',c.dataParto?fd(c.dataParto):fd(c.dpp),c.dataParto?'nascimento'+(c.crianca?' — '+esc(c.crianca):''):c.dpp?prazoTxt(c.dpp):'')}
     ${kpi('Carência',car?pagas+' / '+car:'—',car?(pagas>=car?'cumprida ✓':'faltam '+(car-pagas)+' contribuição(ões)'):'sem carência informada',car&&pagas>=car?'good':car?'bad':'')}
     ${kpi('Qualidade de segurada',c.qualidadeAte?fd(c.qualidadeAte):'—',qual==null?'':qual<0?'expirada':'mantida por mais '+qual+' dias',qual!=null&&qual<30?'bad':'good')}
     ${kpi('Requerimento',c.nb||'—',c.der?'DER '+fd(c.der):'ainda não protocolado')}${podeFin()?kpi('Benefício estimado',brl(c.beneficioEstimado)):''}</div>
@@ -306,7 +309,7 @@ V.documentos=()=>{
   if(f.modelo!=='__ia'&&(!f.modelo||!db.modelos.some(m=>m.id===f.modelo)))f.modelo=db.modelos[0]?.id||'';
   const m=f.modelo==='__ia'?{id:'__ia',nome:f.iaNome||'Minuta gerada pela IA',categoria:'IA',texto:f.iaTexto}:db.modelos.find(x=>x.id===f.modelo);
   const procsCli=db.processos.filter(p=>!f.mcli||p.clienteId===f.mcli),ctrsCli=db.contratos.filter(k=>!f.mcli||k.clienteId===f.mcli);
-  const ctx=contextoModelo(f.mcli,f.mproc,f.mctr,parseFloat(f.valor)||0,f.validade);
+  const ctx=contextoModelo(f.mcli,f.mproc,f.mctr,parseValor(f.valor)||0,f.validade);
   const grupos={};db.modelos.forEach(x=>(grupos[x.categoria]=grupos[x.categoria]||[]).push(x));
   const gOk=!gIndisponivel();
   return tabs+`<div class="grid" style="grid-template-columns:minmax(0,330px) minmax(0,1fr)" id="doc-grid">
@@ -315,7 +318,7 @@ V.documentos=()=>{
       <label>Cliente<select data-f="doc.mcli"><option value="">—</option>${O.clientes().map(([id,n])=>`<option value="${id}"${f.mcli===id?' selected':''}>${esc(n)}</option>`).join('')}</select></label>
       <label>Processo<select data-f="doc.mproc"><option value="">—</option>${procsCli.map(p=>`<option value="${p.id}"${f.mproc===p.id?' selected':''}>${esc(p.numero)} — ${esc(p.objeto)}</option>`).join('')}</select></label>
       <label>Contrato (valores)<select data-f="doc.mctr"><option value="">${ctrsCli.length?'Mais recente do cliente':'—'}</option>${ctrsCli.map(k=>`<option value="${k.id}"${f.mctr===k.id?' selected':''}>${fd(k.data)} — ${brl(k.valorTotal)} ${esc(k.produto||'')}</option>`).join('')}</select></label>
-      <label>Valor (R$) — vazio usa o do contrato<input type="number" data-f="doc.valor" value="${esc(f.valor||'')}" step="0.01" min="0"></label>
+      <label>Valor (R$) — vazio usa o do contrato<input inputmode="decimal" data-f="doc.valor" value="${esc(f.valor||'')}" step="0.01" min="0"></label>
       ${m&&/Proposta/.test(m.categoria)?`<label>Validade da proposta<input type="date" data-f="doc.validade" value="${esc(f.validade||addDays(7))}"></label>`:''}
     </div>
     <div class="small muted" style="margin-top:10px">Os documentos saem no papel timbrado do escritório (logotipo + marca d'água), que pode ser trocado em Configurações → Papel timbrado. Edite o texto direto na folha ao lado antes de exportar.</div>
@@ -462,10 +465,10 @@ const fmtInd=(v,t)=>v==null||v===''?'—':t==='brl'?brl(v):t==='pct'?num(v,1)+'%
 function editInd(rot,mes){
   const f=ui.f.ind;const k=chaveInd(f.ano,f.produto,rot);const r=tabelaIndicadores(f.ano,f.produto).find(x=>x.rot===rot);if(!r)return;
   const aj=db.indAjustes[k]||{};const atual=aj[mes]!==undefined?aj[mes]:r.auto[mes-1];
-  modal(`${rot} — ${MESES_L[mes-1]} de ${f.ano}`,`<div class="fgrid" style="grid-template-columns:1fr"><label>Valor${r.fmt==='txt'?'':' (número)'}<input id="ind-v" ${r.fmt==='txt'?'':'type="number" step="any"'} value="${esc(atual??'')}"></label></div>
+  modal(`${rot} — ${MESES_L[mes-1]} de ${f.ano}`,`<div class="fgrid" style="grid-template-columns:1fr"><label>Valor${r.fmt==='txt'?'':' (número)'}<input id="ind-v" ${r.fmt==='txt'?'':'inputmode="decimal"'} value="${esc(r.fmt==='txt'?(atual??''):valorCampo(atual??''))}"></label></div>
     <p class="small muted" style="margin-top:8px">${r.manual?'Indicador manual.':'Valor automático: <b>'+esc(fmtInd(r.auto[mes-1],r.fmt))+'</b>'}</p>`,
     [...(aj[mes]!==undefined?[{l:'Voltar ao automático',c:'btn-ghost',left:1,fn:()=>{delete aj[mes];if(!Object.keys(aj).length)delete db.indAjustes[k];else db.indAjustes[k]=aj;closeModal();save();render();}}]:[]),
-     {l:'Cancelar',c:'btn-ghost',fn:closeModal},{l:'Salvar',c:'btn-brand',fn:()=>{const v=$('#ind-v').value.trim();if(v===''){toast('Informe um valor',1);return;}aj[mes]=r.fmt==='txt'?v:parseFloat(v);db.indAjustes[k]={...aj};closeModal();save();render();toast('Indicador atualizado ✓');}}]);
+     {l:'Cancelar',c:'btn-ghost',fn:closeModal},{l:'Salvar',c:'btn-brand',fn:()=>{const v=$('#ind-v').value.trim();if(v===''){toast('Informe um valor',1);return;}if(r.fmt!=='txt'&&isNaN(parseValor(v))){toast('Valor inválido',1);return;}aj[mes]=r.fmt==='txt'?v:parseValor(v);db.indAjustes[k]={...aj};closeModal();save();render();toast('Indicador atualizado ✓');}}]);
 }
 
 /* ---------------- CONFIGURAÇÕES ---------------- */
@@ -487,8 +490,8 @@ V.config=()=>{
   return `<div class="grid g-2">
   <div class="card"><h3>🏢 Dados do escritório</h3>
     <div class="fgrid">${[['nome','Nome do escritório',1],['cnpj','CNPJ'],['oab','Registro da sociedade na OAB'],['email','E-mail'],['tel','Telefone'],['cidade','Cidade/UF'],['endereco','Endereço',1]].map(([k,l,full])=>`<label${full?' class="full"':''}>${l}<input id="esc_${k}" value="${esc(e[k])}"></label>`).join('')}
-    <label>Salário mínimo vigente (guias)<input id="esc_salarioMinimo" type="number" step="0.01" value="${esc(e.salarioMinimo)}"></label>
-    ${podeFin()?`<label>Saldo inicial do caixa (R$)<input id="esc_saldoInicial" type="number" step="0.01" value="${esc(e.saldoInicial)}"></label><label>Saldo inicial a partir de<input id="esc_saldoInicialData" type="date" value="${esc(e.saldoInicialData)}"></label>`:''}
+    <label>Salário mínimo vigente (guias)<input id="esc_salarioMinimo" inputmode="decimal" value="${esc(valorCampo(e.salarioMinimo))}"></label>
+    ${podeFin()?`<label>Saldo inicial do caixa (R$)<input id="esc_saldoInicial" inputmode="decimal" value="${esc(valorCampo(e.saldoInicial))}"></label><label>Saldo inicial a partir de<input id="esc_saldoInicialData" type="date" value="${esc(e.saldoInicialData)}"></label>`:''}
   </div><div class="mfoot"><button class="btn btn-brand" data-act="salvarEsc">Salvar</button></div></div>
   <div class="card"><h3>🖋️ Papel timbrado dos documentos <button class="btn btn-ghost btn-sm" data-act="verTimbrado">Ver no gerador</button></h3>
     <div class="timbrado-cfg">

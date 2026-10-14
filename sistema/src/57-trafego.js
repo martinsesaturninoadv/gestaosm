@@ -61,8 +61,18 @@ async function lerArquivoTrafego(file){
   modal('Importar tráfego — '+file.name,`<dl class="dl" style="grid-template-columns:200px 1fr"><dt>Linhas (${r.nivel})</dt><dd>${r.linhas.length}${diario?' · <b>dia a dia</b>':''}</dd><dt>Período</dt><dd>${fd(per[0])} a ${fd(per[1])}</dd>
     <dt>Investimento</dt><dd><b>${brl(sumBy(r.linhas,l=>l.gasto))}</b></dd><dt>Resultados</dt><dd>${num(sumBy(r.linhas,l=>l.resultados),0)}</dd><dt>Novas / atualizadas</dt><dd>${novas} / ${r.linhas.length-novas}</dd>
     ${sobrepostas.length?`<dt>Substituídas</dt><dd>${sobrepostas.length} linha(s) antigas do mesmo período</dd>`:''}</dl>
+    <div class="small strong" style="margin-top:12px">Confira e corrija antes de importar (data, investimento, leads e qualificados):</div>
+    <div class="tbl" style="max-height:320px;overflow:auto;margin-top:6px"><table class="tab-edit"><thead><tr><th>Início</th><th>Fim</th><th>Campanha</th><th class="num">Investido (R$)</th><th class="num">Resultados</th><th class="num">Leads</th><th class="num">Qualificados</th><th>Ativa</th></tr></thead><tbody>
+    ${r.linhas.slice(0,400).map((l,i)=>`<tr data-li="${i}"><td><input type="date" data-k="inicio" value="${l.inicio}"></td><td><input type="date" data-k="fim" value="${l.fim}"></td><td><input data-k="campanha" value="${esc(l.campanha)}" style="min-width:180px"></td>
+      <td><input data-k="gasto" inputmode="decimal" value="${esc(valorCampo(l.gasto))}" style="width:90px"></td><td><input data-k="resultados" inputmode="numeric" value="${l.resultados||0}" style="width:70px"></td>
+      <td><input data-k="leads" inputmode="numeric" value="${l.leads||0}" style="width:60px"></td><td><input data-k="qualificados" inputmode="numeric" value="${l.qualificados||0}" style="width:60px"></td>
+      <td><select data-k="ativa"><option value="1"${l.ativa===true?' selected':''}>Sim</option><option value="0"${l.ativa===false?' selected':''}>Não</option><option value=""${l.ativa==null?' selected':''}>—</option></select></td></tr>`).join('')}</tbody></table></div>
+    ${r.linhas.length>400?`<div class="small muted">Mostrando as 400 primeiras linhas; as demais entram como estão.</div>`:''}
     <p class="small muted" style="margin-top:10px">${diario?'Ótimo: com o detalhamento por dia, os cálculos dia a dia ficam exatos.':'Dica: no Gerenciador, use <b>Detalhamento → Por tempo → Dia</b> antes de exportar. Sem isso, o sistema distribui o investimento igualmente pelos dias do período.'} Importar de novo atualiza os números (não duplica).</p>`,
     [{l:'Cancelar',c:'btn-ghost',fn:closeModal},{l:'Importar',c:'btn-brand',fn:()=>{
+      document.querySelectorAll('#m-body tr[data-li]').forEach(tr=>{const l=r.linhas[+tr.dataset.li];tr.querySelectorAll('[data-k]').forEach(el=>{const k=el.dataset.k,v=el.value;
+        if(k==='gasto')l.gasto=parseValor(v)||0;else if(['resultados','leads','qualificados'].includes(k))l[k]=parseValor(v)||0;else if(k==='ativa')l.ativa=v===''?null:v==='1';else if(v)l[k]=k==='campanha'?v.trim():v;});
+        if(l.fim<l.inicio)l.fim=l.inicio;});
       const fora=new Set(sobrepostas.map(t=>t.id));db.trafego=db.trafego.filter(t=>!fora.has(t.id));
       r.linhas.forEach(l=>{const i=db.trafego.findIndex(t=>t.id===l.id);const ant=i>=0?db.trafego[i]:null;
         const o={...l,nicho:ant?.nicho??nichoDaCampanha(l.campanha),tipoCamp:ant?.tipoCamp??tipoDaCampanha(l.campanha),importado:today()};if(i>=0)db.trafego[i]=o;else db.trafego.push(o);});
@@ -89,18 +99,18 @@ function resumoTrafego(de,ate,f){
   const filtrando=!!(f.status||f.tipoCamp);
   const camp={};
   db.trafego.forEach(t=>{if(!passa(t.campanha))return;const fr=fracao(t,de,ate);if(!fr)return;
-    const c=camp[t.campanha]||(camp[t.campanha]={campanha:t.campanha,nicho:t.nicho||'',tipoCamp:t.tipoCamp||'',ativa:st[t.campanha]?.ativa,gasto:0,impressoes:0,alcance:0,cliques:0,resultados:0,tipo:t.tipo});
-    ['gasto','impressoes','alcance','cliques','resultados'].forEach(k=>c[k]+=(+t[k]||0)*fr);if(t.nicho)c.nicho=t.nicho;if(t.tipoCamp)c.tipoCamp=t.tipoCamp;});
+    const c=camp[t.campanha]||(camp[t.campanha]={campanha:t.campanha,nicho:t.nicho||'',tipoCamp:t.tipoCamp||'',ativa:st[t.campanha]?.ativa,gasto:0,impressoes:0,alcance:0,cliques:0,resultados:0,leads:0,qualificados:0,tipo:t.tipo});
+    ['gasto','impressoes','alcance','cliques','resultados','leads','qualificados'].forEach(k=>c[k]+=(+t[k]||0)*fr);if(t.nicho)c.nicho=t.nicho;if(t.tipoCamp)c.tipoCamp=t.tipoCamp;});
   const nomes=new Set(Object.keys(camp));
   const L=leadsMeta().filter(l=>!filtrando||nomes.has(l.campanha));
   const chegaram=L.filter(l=>dataChegada(l)>=de&&dataChegada(l)<=ate),fechados=L.filter(l=>{const d=dataFechou(l);return d&&d>=de&&d<=ate;});
   const cs=Object.values(camp).map(c=>{const lc=chegaram.filter(l=>l.campanha===c.campanha),fc=fechados.filter(l=>l.campanha===c.campanha);
     return {...c,cpr:c.resultados?c.gasto/c.resultados:null,ctr:c.impressoes?c.cliques/c.impressoes*100:null,freq:c.alcance?c.impressoes/c.alcance:null,crm:lc.length,fech:fc.length,hon:sumBy(fc,valorFechou)};}).sort((a,b)=>b.gasto-a.gasto);
-  const gasto=sumBy(cs,c=>c.gasto),res=sumBy(cs,c=>c.resultados),hon=sumBy(fechados,valorFechou);
+  const gasto=sumBy(cs,c=>c.gasto),res=sumBy(cs,c=>c.resultados),qual=sumBy(cs,c=>c.qualificados),leadsM=sumBy(cs,c=>c.leads),hon=sumBy(fechados,valorFechou);
   const nichos={};const N=p=>nichos[p||'Sem nicho']||(nichos[p||'Sem nicho']={nicho:p||'Sem nicho',gasto:0,resultados:0,leads:0,fech:0,hon:0});
   cs.forEach(c=>{const x=N(c.nicho);x.gasto+=c.gasto;x.resultados+=c.resultados;});
   chegaram.forEach(l=>N(l.produto||l.area).leads++);fechados.forEach(l=>{const x=N(l.produto||l.area);x.fech++;x.hon+=valorFechou(l);});
-  return {de,ate,cs,gasto,res,cpr:res?gasto/res:null,chegaram,fechados,hon,semCampanha:chegaram.filter(l=>!l.campanha).length,
+  return {de,ate,cs,gasto,res,qual,leadsM,cpq:qual?gasto/qual:null,cpr:res?gasto/res:null,chegaram,fechados,hon,semCampanha:chegaram.filter(l=>!l.campanha).length,
     cpa:chegaram.length?gasto/chegaram.length:null,cac:fechados.length?gasto/fechados.length:null,roi:gasto?hon/gasto:null,conv:chegaram.length?fechados.length/chegaram.length*100:null,
     nichos:Object.values(nichos).filter(n=>n.gasto||n.leads||n.fech).sort((a,b)=>b.gasto-a.gasto)};
 }
@@ -152,6 +162,7 @@ V.trafego=()=>{
   return toolbar+`${filtrando?`<div class="hint">Filtro aplicado: no CRM entram só os atendimentos com a <b>campanha</b> marcada (${r.chegaram.length} no período).</div>`:''}
   <div class="grid g-kpi">${kpi('Investimento',brl(r.gasto)+var_(r.gasto,ant.gasto),`${fd(f.de)} a ${fd(f.ate)} · ${dur} dia(s)`)}
     ${kpi('Conversas / resultados (Meta)',num(r.res,0)+var_(r.res,ant.res),r.cpr!=null?brl(r.cpr)+' por resultado':'—')}
+    ${kpi('Leads qualificados',num(r.qual,0)+var_(r.qual,ant.qual),r.cpq!=null?brl(r.cpq)+' por qualificado':'informe nos lançamentos (✏️)')}
     ${kpi('Chegaram no CRM',r.chegaram.length+var_(r.chegaram.length,ant.chegaram.length),r.cpa!=null?brl(r.cpa)+' por atendimento':'origem Facebook / Instagram Ads')}
     ${kpi('Fechados (CRM)',r.fechados.length+var_(r.fechados.length,ant.fechados.length),r.cac!=null?'CAC '+brl(r.cac)+(r.conv!=null?' · conversão '+num(r.conv,0)+'%':''):'pela data de fechamento')}
     ${kpi('Honorários fechados',brl(r.hon),r.roi!=null?'retorno de '+num(r.roi,1)+'× o investido':'',r.roi!=null?(r.roi>=1?'good':'bad'):'')}</div>
@@ -160,19 +171,23 @@ V.trafego=()=>{
     <div class="card"><h3>Dia a dia — investimento</h3>${barras([{nome:'Investimento',cor:'#C0392B',vals:dias.map(x=>x.gasto)}],dias.map(x=>x.d.slice(8)+'/'+x.d.slice(5,7)),x=>brl(x))}</div>
     <div class="card"><h3>Dia a dia — CRM</h3>${barras([{nome:'Chegaram no CRM',cor:'#1E5FA8',vals:dias.map(x=>x.crm)},{nome:'Fechados',cor:'#2E7D4E',vals:dias.map(x=>x.fech)}],dias.map(x=>x.d.slice(8)+'/'+x.d.slice(5,7)))}</div>
   </div>
-  <div class="card" style="margin-bottom:14px"><h3>Campanhas</h3>${r.cs.length?`<div class="tbl"><table><thead><tr><th>Campanha</th><th>Tipo</th><th class="hide-m">Nicho</th><th class="num">Investido</th><th class="num hide-m">Freq.</th><th class="num hide-m">CTR</th><th class="num">Result.</th><th class="num">Custo/res.</th><th class="num">CRM</th><th class="num">Fech.</th><th class="num">CAC</th></tr></thead><tbody>
+  <div class="card" style="margin-bottom:14px"><h3>Campanhas</h3>${r.cs.length?`<div class="tbl"><table><thead><tr><th>Campanha</th><th>Tipo</th><th class="hide-m">Nicho</th><th class="num">Investido</th><th class="num hide-m">Freq.</th><th class="num hide-m">CTR</th><th class="num">Result.</th><th class="num">Qualif.</th><th class="num">Custo/res.</th><th class="num">CRM</th><th class="num">Fech.</th><th class="num">CAC</th></tr></thead><tbody>
     ${r.cs.map(c=>{const caro=r.cpr&&c.cpr&&c.cpr>r.cpr*1.5,bom=r.cpr&&c.cpr&&c.cpr<r.cpr*.7;return `<tr><td class="strong">${c.ativa===true?'🟢':c.ativa===false?'⚪':''} ${esc(c.campanha)}<div class="small muted">${esc(c.tipo||'')}</div></td>
       <td><select data-traf-tipo="${esc(c.campanha)}"><option value="">—</option>${['Teste','Escala'].map(x=>`<option${c.tipoCamp===x?' selected':''}>${x}</option>`).join('')}</select></td>
       <td class="hide-m"><select data-traf-nicho="${esc(c.campanha)}" style="max-width:150px"><option value="">—</option>${db.produtos.map(p=>`<option${c.nicho===p?' selected':''}>${esc(p)}</option>`).join('')}</select></td>
       <td class="num">${brl(c.gasto)}</td><td class="num hide-m ${c.freq>3.2?'c-bad':''}">${c.freq?num(c.freq,1):'—'}</td><td class="num hide-m ${c.ctr!=null&&c.ctr<.8?'c-bad':''}">${c.ctr!=null?num(c.ctr,2)+'%':'—'}</td>
-      <td class="num">${num(c.resultados,0)}</td><td class="num strong" style="color:${caro?'var(--red)':bom?'var(--green)':'inherit'}">${c.cpr!=null?brl(c.cpr):'—'}</td>
+      <td class="num">${num(c.resultados,0)}</td><td class="num">${c.qualificados?num(c.qualificados,0):'—'}</td><td class="num strong" style="color:${caro?'var(--red)':bom?'var(--green)':'inherit'}">${c.cpr!=null?brl(c.cpr):'—'}</td>
       <td class="num">${c.crm||'—'}</td><td class="num">${c.fech||'—'}</td><td class="num">${c.fech?brl(c.gasto/c.fech):'—'}</td></tr>`;}).join('')}</tbody></table></div>
     <div class="small muted" style="margin-top:8px">🟢 ativa · ⚪ inativa (conforme a última importação). CRM e fechamentos por campanha usam o campo <b>"Campanha (Meta)"</b> do atendimento.${r.semCampanha?` ${r.semCampanha} atendimento(s) do período estão sem campanha.`:''}</div>`:'<div class="empty">Nenhuma campanha neste período / filtro.</div>'}</div>
   <div class="grid g-2">
     <div class="card"><h3>Por nicho</h3>${r.nichos.length?`<div class="tbl"><table><thead><tr><th>Nicho</th><th class="num">Investido</th><th class="num">Chegaram</th><th class="num">Fechados</th><th class="num">CAC</th><th class="num">Honorários</th></tr></thead><tbody>
       ${r.nichos.map(n=>`<tr><td class="strong">${esc(n.nicho)}</td><td class="num">${brl(n.gasto)}</td><td class="num">${n.leads}</td><td class="num">${n.fech}</td><td class="num">${n.fech&&n.gasto?brl(n.gasto/n.fech):'—'}</td><td class="num" style="color:${!n.gasto?'inherit':n.hon>=n.gasto?'var(--green)':'var(--red)'}">${brl(n.hon)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Sem dados</div>'}</div>
     <div class="card"><h3>Fechados no período <small>CRM · origem Meta</small></h3>${r.fechados.length?r.fechados.sort((a,b)=>dataFechou(b).localeCompare(dataFechou(a))).map(l=>`<div class="ev"><div class="body" data-act="editLead" data-id="${l.id}"><div class="t">${esc(l.nome)}</div><div class="small muted">${fd(dataFechou(l))} · ${esc(l.produto||'')}${l.campanha?' · '+esc(l.campanha):''}</div></div><div class="num strong">${brl(valorFechou(l))}</div></div>`).join(''):'<div class="empty">Nenhum fechamento no período</div>'}</div>
-  </div>`;
+  </div>
+  <div class="card" style="margin-top:14px"><h3>✏️ Lançamentos do período <small>edite data, investimento, resultados, leads e qualificados</small><button class="btn btn-gold btn-sm" data-act="trafNovo">+ Lançamento manual</button></h3>
+    ${(()=>{const ls=db.trafego.filter(t=>t.fim>=f.de&&t.inicio<=f.ate).sort((a,b)=>b.inicio.localeCompare(a.inicio)||a.campanha.localeCompare(b.campanha));
+      return ls.length?`<div class="tbl" style="max-height:420px;overflow:auto"><table><thead><tr><th>Data</th><th>Campanha</th><th class="num">Investido</th><th class="num">Result.</th><th class="num">Leads</th><th class="num">Qualif.</th><th class="hide-m">Obs.</th><th></th></tr></thead><tbody>
+      ${ls.slice(0,300).map(t=>`<tr data-act="trafEditar" data-id="${t.id}"><td class="small">${fd(t.inicio)}${t.fim!==t.inicio?' a '+fd(t.fim):''}</td><td class="strong small">${esc(t.campanha)}${t.manual?' <span class="pill p-gray">manual</span>':''}</td><td class="num">${brl(t.gasto)}</td><td class="num">${num(t.resultados||0,0)}</td><td class="num">${num(t.leads||0,0)}</td><td class="num">${num(t.qualificados||0,0)}</td><td class="hide-m small muted">${esc(t.obs||'')}</td><td class="num"><button class="btn btn-ghost btn-sm" data-act="trafEditar" data-id="${t.id}">Editar</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Nenhum lançamento no período</div>';})()}</div>`;
 };
 function textoAnaliseTrafego(){
   const f=filtroTrafego();const r=resumoTrafego(f.de,f.ate,f);const dur=diasEntre(f.de,f.ate)+1;const ant=resumoTrafego(addDays(-dur,f.de),addDays(-1,f.de),f);
@@ -189,7 +204,23 @@ function textoAnaliseTrafego(){
   L.push('','FUNIL DE QUEM CHEGOU NO PERÍODO: '+(Object.entries(etapas).map(([e,n])=>e+': '+n).join(' · ')||'sem dados'));
   return L.join('\n');
 }
+function editTrafego(id){
+  const t=id?db.trafego.find(x=>x.id===id):{inicio:today(),fim:today(),campanha:'',gasto:0,resultados:0,leads:0,qualificados:0,ativa:true,manual:true};
+  const camps=[...new Set(db.trafego.map(x=>x.campanha))].sort();
+  form(id?'Editar lançamento de tráfego':'Novo lançamento de tráfego',[
+    {k:'inicio',l:'Data (início)',t:'date',req:1},{k:'fim',l:'Data (fim)',t:'date',req:1},
+    {k:'campanha',l:'Campanha',req:1,full:1,list:camps},
+    {k:'gasto',l:'Investido / orçamento (R$)',t:'number'},{k:'resultados',l:'Resultados (conversas)',t:'number'},
+    {k:'leads',l:'Leads que vieram',t:'number'},{k:'qualificados',l:'Leads qualificados',t:'number'},
+    {k:'impressoes',l:'Impressões',t:'number'},{k:'cliques',l:'Cliques no link',t:'number'},
+    {k:'ativaSel',l:'Campanha ativa?',t:'select',o:[['1','Sim'],['0','Não'],['','—']]},{k:'tipoCamp',l:'Tipo',t:'select',o:[['','—'],['Teste','Teste'],['Escala','Escala']]},
+    {k:'nicho',l:'Nicho',t:'select',o:db.produtos},{k:'obs',l:'Observações (ex.: leads frios, pausada no dia 10…)',t:'textarea',full:1,rows:2}],
+    {...t,ativaSel:t.ativa===true?'1':t.ativa===false?'0':''},v=>{if(v.fim<v.inicio)v.fim=v.inicio;v.ativa=v.ativaSel===''?null:v.ativaSel==='1';delete v.ativaSel;
+      if(id)Object.assign(t,v);else db.trafego.push({...v,id:'tm'+uid(),conta:'',conjunto:'',anuncio:'',alcance:0,tipo:'',conversas:0,manual:true,importado:today()});},
+    id&&(()=>{db.trafego=db.trafego.filter(x=>x.id!==id);}));
+}
 const TRAF_ACOES={
+  trafEditar:id=>editTrafego(id),trafNovo:()=>editTrafego(),
   trafImportar:()=>$('#file-trafego').click(),
   trafPer:k=>{const f=filtroTrafego(),h=today();
     if(k==='hoje'){f.de=h;f.ate=h;}else if(k==='7'){f.de=addDays(-6,h);f.ate=h;}else if(k==='30'){f.de=addDays(-29,h);f.ate=h;}

@@ -244,6 +244,20 @@ function scriptsPadrao(){
 }
 
 /* dados de demonstração acrescentados na versão 6 */
+function seedConteudo(d){
+  const C=[['Desempregada tem direito a salário-maternidade?','Salário-maternidade','Publicado',-9,['TikTok','Instagram'],18400,1320,96,410,520,210,7],
+    ['3 erros que fazem o INSS negar o salário-maternidade','Salário-maternidade','Publicado',-5,['TikTok','Instagram','YouTube'],9200,640,51,180,300,95,4],
+    ['Grávida pode ser demitida? Estabilidade da gestante','Trabalhista','Publicado',-2,['TikTok'],3100,220,18,40,70,31,1],
+    ['MEI tem direito a salário-maternidade?','Salário-maternidade','Agendado',1,['TikTok','Instagram'],0],
+    ['Como tirar o CNIS pelo celular','INSS / previdenciário','Edição',3,['TikTok','YouTube'],0],
+    ['Um dia no escritório','Bastidores do escritório','Gravação',4,['Instagram'],0],
+    ['BPC/LOAS: quem tem direito','BPC / LOAS','Roteiro',6,['TikTok'],0],
+    ['Respondendo as perguntas da semana','Dúvidas frequentes','Ideia',0,['TikTok'],0]];
+  d.conteudos=C.map((a,i)=>({id:'ct'+i,titulo:a[0],tema:a[1],etapa:a[2],plataformas:a[4],formato:'Vídeo curto (TikTok/Reels/Shorts)',responsaveis:['u1'],editorId:'u3',
+    dataPublicacao:a[2]==='Ideia'?'':addDays(a[3]),hora:'19:00',dataGravacao:a[2]==='Ideia'?'':addDays(Math.min(a[3]-2,a[3])),dataEdicao:a[2]==='Ideia'?'':addDays(a[3]-1),
+    views:a[5]||'',curtidas:a[6]||'',comentarios:a[7]||'',compart:a[8]||'',salvos:a[9]||'',seguidores:a[10]||'',leadsGerados:a[11]||'',conformeOAB:a[2]==='Publicado',
+    gancho:'',roteiro:'',criado:addDays(-12),criadoPor:'u1',historico:[{em:Date.now()-86400000*(i+1),por:'u1',etapa:a[2]}]}));
+}
 function seedV6(d){
   const P='parceiro@costaadv.com';
   const em={u1:'admin@escritorio.com',u2:'saturnino@escritorio.com',u3:'estagiario@escritorio.com',u4:'secretaria@escritorio.com'};

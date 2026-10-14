@@ -13,7 +13,34 @@
 | **Verificação em duas etapas** (Google/Microsoft Authenticator) | Configurações → Verificação em duas etapas |
 | **Backup diário automático** (30 dias guardados no servidor + envio por e-mail) | Configurações → Backup automático diário |
 | **Aplicativo no celular** (ícone na tela) e **notificações** | Configurações → Aplicativo no celular |
-| **Tráfego pago (Meta)** dia a dia, ativas/inativas, teste/escala, fechamentos pelo CRM | Menu Gestão → Tráfego pago |
+| **Tráfego pago (Meta)** dia a dia, ativas/inativas, teste/escala, fechamentos pelo CRM; edição de data, orçamento, leads e qualificados (na importação e depois) | Menu Gestão → Tráfego pago |
+| **Conferência de petições**: a conferir → em correção → conferida → pronta para protocolar → protocolada; o prazo entra na agenda de quem redigiu e de quem confere | Menu Jurídico → Conferência de petições |
+| **Audiências e perícias**: próximas, passadas sem resultado, checklist (cliente avisado, testemunhas, documentos), link da sala e aviso ao cliente pelo WhatsApp | Menu Jurídico → Audiências |
+| **Tarefas com horário** ("até as 14h") | Formulário da tarefa → Até que horas |
+| **Assistente de voz**: fale a tarefa e ela é criada com responsável, cliente, data, hora e urgência | Botão 🎙️ no topo |
+| **Resumo do dia** de cada pessoa da equipe (copiar para o WhatsApp) | Menu Principal → Resumo do dia |
+| **Produção de conteúdo**: ideias, roteiro, gravação, edição, agendamento e publicação (TikTok, Instagram, YouTube…), calendário, banco de ideias, resultados e roteiro com IA | Menu Clientes → Produção de conteúdo |
+| **Chamadas de voz e vídeo próprias** no escritório virtual (por sala e ligação privada), com compartilhamento de tela | Escritório virtual → 📞 |
+| **Notificações push** no celular e no computador, mesmo com o sistema fechado | Configurações → Aplicativo no celular → Ativar notificações push |
+
+## 🔔 Notificações push
+Cada pessoa ativa em cada aparelho: **Configurações → Aplicativo no celular → 🔔 Ativar notificações push** e escolhe o que quer receber.
+- **Tarefas**: tarefa nova para você (🔴 quando urgente), aviso 1 hora antes e na hora em que a tarefa vence, petição para conferir, petição que voltou para correção ou ficou pronta.
+- **Prazos**: audiência/compromisso novo para você, aviso 1 hora antes, e o "☀️ Bom dia" com o que vence hoje e amanhã e o que está em atraso (dias úteis, a partir das 7h30).
+- **Mensagens**: chat do escritório virtual, "bater na porta" e ligações (só quando a pessoa não está com o sistema aberto).
+- **Portal**: mensagem ou arquivo enviado por cliente.
+- **Metas e ranking**: meta batida, "falta pouco" (90%) e troca de liderança no ranking.
+- **Resumo do dia** às 18h, para administração e advogados.
+
+No **iPhone**, primeiro adicione o sistema à Tela de Início (Safari → Compartilhar → Adicionar à Tela de Início), abra pelo ícone e só então ative.
+
+**Para os avisos de horário funcionarem também quando ninguém está com o sistema aberto** (à noite, fim de semana): no cPanel, abra **Trabalhos Cron**, escolha **a cada 5 minutos** e cole o comando que aparece em Configurações → Aplicativo no celular → "Administração" (começa com `curl -s "https://…/api.php?acao=cron&k=…"`).
+
+## 📞 Chamadas de voz e vídeo
+- Na sala: botão 📞 no mapa ou "Chamada da sala" na conversa da sala. Quem está no escritório virtual vê que há chamada acontecendo.
+- Privada: abra a conversa com a pessoa (Privado) e toque em 📞 (voz) ou 🎥 (vídeo). A pessoa vê "fulano está te ligando" e recebe o push.
+- Durante a chamada: microfone, câmera, compartilhar tela (no computador), ampliar e sair. O painel continua aberto enquanto você usa o resto do sistema.
+- O áudio e o vídeo vão direto entre os aparelhos e não são gravados. Se em alguma rede (por exemplo 4G) a chamada não conectar, configure um servidor TURN em Configurações → Escritório virtual → Avançado, ou use o link do Meet da sala como alternativa.
 
 ## O que precisa de conta em serviço externo
 As chaves são coladas em **Configurações → Integrações**, só por administradora. Elas ficam guardadas apenas no servidor, e ninguém da equipe consegue lê-las depois.

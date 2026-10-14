@@ -32,7 +32,10 @@ function badges(){
   n('nb-docs',db.documentos.filter(d=>!d.recebido).length);
   n('nb-sm',ehParceiro()?0:guiasPendentes(7).length);
   n('nb-esc',totalNaoLidas());
-  verificarAvisosAparelho();
+  n('nb-cont',db.conteudos.filter(contAtrasado).length);
+  n('nb-pet',db.peticoes.filter(p=>p.conferenteId===db.usuarioAtual&&p.status==='A conferir').length);
+  n('nb-aud',db.eventos.filter(e=>ehAudiencia(e)&&!e.feito&&diff(e.data)>=0&&diff(e.data)<=1).length);
+  verificarAvisosAparelho();avisosMetaRanking();
   $('#brand-nome').textContent=(db.escritorio.nome||'Escritório').replace(/\s+Advocacia(\s+e\s+Consultoria)?$/i,'');
 }
 function userBox(){
@@ -109,9 +112,9 @@ const A={
   duplicarModelo:id=>{const m=db.modelos.find(x=>x.id===id);db.modelos.push({...m,id:uid(),nome:m.nome+' (cópia)',padrao:false});save();render();toast('Modelo duplicado');},
   restaurarModelos:()=>{let n=0;modelosPadrao().forEach(m=>{if(!db.modelos.some(x=>x.nome===m.nome)){db.modelos.push(m);n++;}});save();render();toast(n?n+' modelo(s) restaurado(s)':'Todos os modelos padrão já existem');},
   tabProc:k=>{ui.tabProc=k;render();},procView:k=>{ui.procView=k;render();},
-  setFase:k=>{const i=k.indexOf('|');const p=proc(k.slice(0,i));p.fase=k.slice(i+1);save();render();toast('Fase atualizada ✓');},
+  setFase:k=>{const i=k.indexOf('|');const p=proc(k.slice(0,i));p.fase=k.slice(i+1);if(p.tipo==='Administrativo'&&['Deferido','Indeferido'].includes(p.fase)&&p.status==='Em andamento')p.status=p.fase;save();render();toast('Fase atualizada ✓');},
   tabSm:k=>{ui.tabSm=k;render();},novoSm:()=>editSm(),novoSmCli:id=>editSm(null,{clienteId:id}),editSm:id=>editSm(id),
-  setSmStatus:k=>{const i=k.indexOf('|');const c=db.sm.find(x=>x.id===k.slice(0,i));c.status=k.slice(i+1);save();render();toast('Etapa atualizada ✓');},
+  setSmStatus:k=>{const i=k.indexOf('|');const c=db.sm.find(x=>x.id===k.slice(0,i));c.status=k.slice(i+1);if(c.status==='Deferido'&&!c.dataDeferimento){c.dataDeferimento=today();setTimeout(()=>editSm(c.id),400);}save();render();toast('Etapa atualizada ✓');},
   novaGuia:id=>editGuia(id),editGuia:k=>{const[s,g]=k.split('|');editGuia(s,g);},gerarGuias:id=>gerarGuias(id),
   guiaEmitida:k=>{const[s,gid]=k.split('|');const g=db.sm.find(x=>x.id===s).guias.find(x=>x.id===gid);g.emitidaEm=today();save();render();toast('Guia marcada como emitida ✓');},
   guiaPaga:k=>{const[s,gid]=k.split('|');const g=db.sm.find(x=>x.id===s).guias.find(x=>x.id===gid);g.pagaEm=today();if(!g.emitidaEm)g.emitidaEm=today();save();render();toast('Guia paga ✓');},
@@ -155,19 +158,19 @@ const A={
   kmove:k=>{const[kind,id,col]=k.split(':');moveCard(kind,id,col);},
   agView:v=>{ui.agendaView=v;render();},
   agMes:d=>{ui.agendaMes=ymAdd(ui.agendaMes,+d);render();},
-  salvarEsc:()=>{['nome','cnpj','oab','email','tel','cidade','endereco'].forEach(k=>db.escritorio[k]=$('#esc_'+k).value.trim());db.escritorio.salarioMinimo=parseFloat($('#esc_salarioMinimo').value)||db.escritorio.salarioMinimo;
-    if($('#esc_saldoInicial')){db.escritorio.saldoInicial=parseFloat($('#esc_saldoInicial').value)||0;db.escritorio.saldoInicialData=$('#esc_saldoInicialData').value;}
+  salvarEsc:()=>{['nome','cnpj','oab','email','tel','cidade','endereco'].forEach(k=>db.escritorio[k]=$('#esc_'+k).value.trim());db.escritorio.salarioMinimo=parseValor($('#esc_salarioMinimo').value)||db.escritorio.salarioMinimo;
+    if($('#esc_saldoInicial')){db.escritorio.saldoInicial=parseValor($('#esc_saldoInicial').value)||0;db.escritorio.saldoInicialData=$('#esc_saldoInicialData').value;}
     save();render();toast('Dados do escritório salvos ✓');},
   salvarProd:()=>{const l=$('#produtos-txt').value.split('\n').map(s=>s.trim()).filter(Boolean);db.produtos=[...new Set(l)];save();render();toast('Produtos salvos ✓');},
   novoUsr:()=>editUsuario(),editUsr:id=>editUsuario(id),
   novaConta:()=>editConta(),editConta:i=>editConta({...contasCache[+i],senha:''}),
   trocarSenha:()=>{api('senha',{atual:$('#s-atual').value,nova:$('#s-nova').value}).then(()=>{toast('Senha alterada ✓');$('#s-atual').value='';$('#s-nova').value='';}).catch(e=>toast(e.msg||'Não foi possível trocar a senha',1));},
-  sair:()=>{document.querySelectorAll('.confete').forEach(c=>c.remove());escParar();api('sair',{}).finally(()=>{clearInterval(tPuxar);sessao=null;G.token=null;db=vazio();contasCache=null;location.hash='painel';render();mostrarLogin();});},
+  sair:async()=>{document.querySelectorAll('.confete').forEach(c=>c.remove());if(RTC.canal)await rtcSair();escParar();if(modo==='servidor'&&pushSuportado()){const sub=await pushAssinatura();if(sub)await api('push',{op:'remover',endpoint:sub.endpoint}).catch(()=>{});}PUSH=null;api('sair',{}).finally(()=>{clearInterval(tPuxar);sessao=null;G.token=null;db=vazio();contasCache=null;location.hash='painel';render();mostrarLogin();});},
   exportar:()=>download('backup-escritorio-'+today()+'.json',JSON.stringify({...db,usuarioAtual:undefined},null,1),'application/json'),
   importar:()=>$('#file-import').click(),
   importarXls:()=>$('#file-xlsx').click(),importarWa:()=>importarWhatsApp(),
 };
-Object.assign(A,ESC_ACOES,TRAF_ACOES,FLUXO_ACOES,LEMB_ACOES,INTEG_ACOES,SEG_ACOES,{portalAba:id=>{ui.tabCli='portal';location.hash='cliente/'+id;render();},smLembretes:()=>{ui.tabSm='lembretes';location.hash='sm';render();}});
+Object.assign(A,PET_AUD_ACOES,VOZ_ACOES,CONT_ACOES,RTC_ACOES,ESC_ACOES,TRAF_ACOES,FLUXO_ACOES,LEMB_ACOES,INTEG_ACOES,SEG_ACOES,{portalAba:id=>{ui.tabCli='portal';location.hash='cliente/'+id;render();},smLembretes:()=>{ui.tabSm='lembretes';location.hash='sm';render();}});
 function lerTipos(){document.querySelectorAll('[data-tipo-nome]').forEach(el=>{const i=+el.dataset.tipoNome;if(db.tiposEvento[i])db.tiposEvento[i].nome=el.value.trim();});
   document.querySelectorAll('[data-tipo-cor]').forEach(el=>{const i=+el.dataset.tipoCor;if(db.tiposEvento[i])db.tiposEvento[i].cor=el.value;});}
 function lancarFixas(ym,ids){

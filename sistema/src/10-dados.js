@@ -8,7 +8,7 @@
 let db;
 let modo='local',sessao=null;
 const ui={page:'painel',id:null,agendaView:'lista',agendaMes:today().slice(0,7),f:{},tabCli:'processos',tabProc:'Judicial',procView:'lista',tabSm:'casos',tabDoc:'gerador'};
-const COLS=['clientes','processos','eventos','tarefas','leads','lancamentos','documentos','notas','contratos','despesasFixas','usuarios','sm','scripts','modelos','trafego','requisitorios','nps','recados'];
+const COLS=['clientes','processos','eventos','tarefas','leads','lancamentos','documentos','notas','contratos','despesasFixas','usuarios','sm','scripts','modelos','trafego','requisitorios','nps','recados','peticoes','conteudos'];
 const SINGLES=['escritorio','metas','produtos','tiposEvento','indAjustes','indExtras','salas','fluxos'];
 const COLS_FIN=['lancamentos','contratos','despesasFixas','trafego','requisitorios'];
 /* parceiro: só a parceria (clientes, processos, prazos, tarefas e honorários) — sem CRM, salário-maternidade, documentos, modelos e scripts */
@@ -20,7 +20,7 @@ const CONFIG_PARC=['escritorio','produtos','tiposEvento','salas'];
 
 function vazio(){return {versao:6,escritorio:{nome:'Martins & Saturnino Advocacia e Consultoria',cnpj:'',oab:'',email:'',tel:'',endereco:'',cidade:'',saldoInicial:0,saldoInicialData:'',logo:'',googleClientId:'',salarioMinimo:1518},
   metas:{...METAS_PADRAO},produtos:PRODUTOS_PADRAO.slice(),tiposEvento:TIPOS_EVT_PADRAO.map(([nome,cor])=>({nome,cor})),indAjustes:{},indExtras:[],salas:salasPadrao(),fluxos:{},
-  usuarioAtual:'',usuarios:[],clientes:[],processos:[],eventos:[],tarefas:[],leads:[],lancamentos:[],documentos:[],notas:[],contratos:[],despesasFixas:[],sm:[],scripts:[],modelos:[],trafego:[],requisitorios:[],nps:[],recados:[]};}
+  usuarioAtual:'',usuarios:[],clientes:[],processos:[],eventos:[],tarefas:[],leads:[],lancamentos:[],documentos:[],notas:[],contratos:[],despesasFixas:[],sm:[],scripts:[],modelos:[],trafego:[],requisitorios:[],nps:[],recados:[],peticoes:[],conteudos:[]};}
 function migrar(d){
   const v=vazio();for(const k in v)if(d[k]===undefined||d[k]===null)d[k]=v[k];
   d.escritorio={...v.escritorio,...d.escritorio};if(d.escritorio.nome==='Martins & Saturnino Advocacia')d.escritorio.nome=v.escritorio.nome;d.metas={...METAS_PADRAO,...d.metas};
@@ -209,7 +209,7 @@ async function entrar(u){
     if(!db.produtos.some(p=>norm(p)==='direito digital'))db.produtos.push('Direito digital');iniciarFluxos();}
   save();if(!location.hash)location.hash='painel';render();
   clearInterval(tPuxar);if(modo==='servidor')tPuxar=setInterval(()=>puxar(false),20000);
-  escIniciar();INTEG=null;carregarIntegracoes();
+  escIniciar();INTEG=null;carregarIntegracoes();PUSH=null;setTimeout(sincronizarPush,1500);
   setTimeout(checarMetas,600);
 }
 async function iniciar(){
@@ -382,7 +382,7 @@ function seed(){
   d.notas=[{id:uid(),clienteId:'c1',data:addDays(-9),autor:'u1',texto:'Cliente informou que o parto foi antecipado. Atualizar documentos.'},
     {id:uid(),clienteId:'c3',data:addDays(-4),autor:'u2',texto:'Explicada a sentença por telefone; cliente autorizou o recurso.'},
     {id:uid(),clienteId:'c7',data:addDays(-25),autor:'u2',texto:'Contrato assinado + partido de R$ 3.500/mês.'}];
-  seedV6(d);
+  seedV6(d);seedConteudo(d);
   return d;
 }
 

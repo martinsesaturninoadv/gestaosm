@@ -57,6 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'enviar'
             $tid = nuc_uid();
             nuc_gravar($pdo, 'tarefas', $tid, ['id' => $tid, 'titulo' => 'Conferir documento enviado pelo portal — ' . ($cliente['nome'] ?? ''), 'status' => 'todo', 'prioridade' => 'Média',
                 'prazo' => date('Y-m-d', strtotime('+1 day')), 'responsavelId' => '', 'clienteId' => $cid, 'processoId' => '', 'obs' => $doc['nome'], 'parceiro' => $cliente['parceiro'] ?? '']);
+            try { nuc_push($pdo, nuc_equipe($pdo, ['admin']), 'portal', '📎 ' . ($cliente['nome'] ?? 'Cliente') . ' enviou um arquivo pelo portal', (string) $f['name'], '#cliente/' . $cid); } catch (Throwable $e) { }
             $msg = 'ok:Recebemos o seu arquivo. Obrigado! 😊';
         }
     }
@@ -88,6 +89,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'respond
         $tid = nuc_uid();
         nuc_gravar($pdo, 'tarefas', $tid, ['id' => $tid, 'titulo' => 'Responder mensagem do portal — ' . ($cliente['nome'] ?? ''), 'status' => 'todo', 'prioridade' => 'Alta',
             'prazo' => date('Y-m-d', strtotime('+1 day')), 'responsavelId' => '', 'clienteId' => $cid, 'processoId' => '', 'obs' => mb_substr($texto, 0, 300), 'parceiro' => $cliente['parceiro'] ?? '']);
+        try {
+            $ids = nuc_emails_por_id($pdo);
+            $para = array_merge(nuc_equipe($pdo, ['admin']), array_filter([$ids[$cliente['responsavelId'] ?? ''] ?? null]));
+            nuc_push($pdo, $para, 'portal', '💬 Mensagem de ' . ($cliente['nome'] ?? 'cliente') . ' no portal', mb_substr($texto, 0, 160), '#cliente/' . $cid, null, 'high');
+        } catch (Throwable $e) { /* o aviso nunca impede o envio da mensagem */ }
         $msg = 'ok:Mensagem enviada ao escritório. Responderemos em breve. 😊';
     }
 }

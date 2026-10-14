@@ -21,7 +21,7 @@ function form(title,fields,data,onSave,onDelete,nota){
     else if(f.t==='multi'){const sel=Array.isArray(v)?v:[];
       inp=`<div class="multi" id="${id}">${normOpts(f.o).map(([ov,ol])=>`<label class="chk"><input type="checkbox" value="${esc(ov)}"${sel.includes(ov)?' checked':''}> ${esc(ol)}</label>`).join('')}</div>`;}
     else if(f.t==='check')return `<label class="chk${f.full?' full':''}"><input type="checkbox" id="${id}"${v?' checked':''}> ${esc(f.l)}</label>`;
-    else inp=`<input id="${id}" type="${f.t||'text'}" value="${esc(v)}"${f.t==='number'?' step="any" min="0"':''}${f.ph?` placeholder="${esc(f.ph)}"`:''}${f.list?` list="dl_${f.k}"`:''}>${f.list?`<datalist id="dl_${f.k}">${normOpts(f.list).map(([o])=>`<option value="${esc(o)}">`).join('')}</datalist>`:''}`;
+    else inp=`<input id="${id}" type="${f.t==='number'?'text':f.t||'text'}" value="${esc(f.t==='number'?valorCampo(v):v)}"${f.t==='number'?' inputmode="decimal" autocomplete="off"':''}${f.ph?` placeholder="${esc(f.ph)}"`:''}${f.list?` list="dl_${f.k}"`:''}>${f.list?`<datalist id="dl_${f.k}">${normOpts(f.list).map(([o])=>`<option value="${esc(o)}">`).join('')}</datalist>`:''}`;
     return `<label${cls}>${esc(f.l)}${f.req?' *':''}${inp}${f.dica?`<span class="small muted" style="font-weight:400">${f.dica}</span>`:''}</label>`;
   }).join('')+'</div>';
   const btns=[];
@@ -29,7 +29,7 @@ function form(title,fields,data,onSave,onDelete,nota){
   btns.push({l:'Cancelar',c:'btn-ghost',fn:closeModal});
   btns.push({l:'Salvar',c:'btn-brand',fn:()=>{
     const out={};let ok=true;
-    fields.forEach(f=>{if(f.t==='sec')return;const el=$('#f_'+f.k);let v=f.t==='multi'?[...el.querySelectorAll('input:checked')].map(i=>i.value):f.t==='check'?el.checked:f.t==='number'?(el.value===''?(f.vazio??0):parseFloat(el.value)||0):el.value.trim();
+    fields.forEach(f=>{if(f.t==='sec')return;const el=$('#f_'+f.k);let v=f.t==='multi'?[...el.querySelectorAll('input:checked')].map(i=>i.value):f.t==='check'?el.checked:f.t==='number'?(el.value.trim()===''?(f.vazio??0):(isNaN(parseValor(el.value))?(el.classList.add('err'),ok=false,0):parseValor(el.value))):el.value.trim();
       el.classList.remove('err');if(f.req&&(v===''||v===null||(Array.isArray(v)&&!v.length))){el.classList.add('err');ok=false;}out[f.k]=v;});
     if(!ok){toast('Preencha os campos obrigatórios',1);return;}
     if(onSave(out)===false)return;
@@ -91,7 +91,8 @@ function editProcesso(id,pre){
     {t:'sec',l:'Administrativo (se requerimento)'},
     {k:'orgaoAdm',l:'Órgão',t:'select',o:ORGAOS_ADM},{k:'protocolo',l:'Nº do protocolo / requerimento'},
     {k:'der',l:'DER — data de entrada do requerimento',t:'date'},{k:'prazoAnalise',l:'Prazo esperado de resposta',t:'date'}],
-    p,v=>{if(!fasesDe(v.tipo).includes(v.fase))v.fase=fasesDe(v.tipo)[0];const nid=upsert('processos',id,v,{andamentos:[]});if(!id)location.hash='processo/'+nid;},
+    p,v=>{if(!fasesDe(v.tipo).includes(v.fase))v.fase=fasesDe(v.tipo)[0];
+      if(v.tipo==='Administrativo'&&['Deferido','Indeferido'].includes(v.fase)&&v.status==='Em andamento'&&p.fase!==v.fase)v.status=v.fase;const nid=upsert('processos',id,v,{andamentos:[]});if(!id)location.hash='processo/'+nid;},
     id&&(()=>{db.processos=db.processos.filter(x=>x.id!==id);if(ui.page==='processo')location.hash='processos';}));
 }
 function editEvento(id,pre){
@@ -116,7 +117,7 @@ function editTarefa(id,pre){
   const t=id?db.tarefas.find(x=>x.id===id):{status:'todo',prioridade:'Média',prazo:addDays(2),responsavelId:db.usuarioAtual,...pre};
   form(id?'Editar tarefa':'Nova tarefa',[
     {k:'titulo',l:'Tarefa',req:1,full:1},{k:'status',l:'Status',t:'select',o:TSTATUS,req:1},{k:'prioridade',l:'Prioridade',t:'select',o:PRIOR,req:1},
-    {k:'prazo',l:'Prazo',t:'date'},{k:'clienteId',l:'Cliente',t:'select',o:O.clientes},
+    {k:'prazo',l:'Prazo',t:'date'},{k:'hora',l:'Até que horas',t:'time'},{k:'clienteId',l:'Cliente',t:'select',o:O.clientes,full:1},
     {k:'responsaveis',l:'Responsáveis (marque uma ou mais pessoas)',t:'multi',o:O.usuarios,full:1,req:1},
     {k:'processoId',l:'Processo',t:'select',o:O.processos,full:1},{k:'obs',l:'Detalhes',t:'textarea',full:1,rows:2}],
     {...t,responsaveis:respDe(t)},v=>{v.responsavelId=v.responsaveis[0]||'';if(v.status==='done'&&t.status!=='done'){v.concluidoEm=today();v.concluidoPor=quemConclui(v);}if(v.status!=='done')v.concluidoEm='';upsert('tarefas',id,v);},id&&(()=>{db.tarefas=db.tarefas.filter(x=>x.id!==id);}));
@@ -252,9 +253,12 @@ function editSm(id,pre){
     {k:'crianca',l:'Nome da criança'},{k:'carenciaMeses',l:'Carência exigida (nº de contribuições)',t:'number',dica:'CLT, doméstica e avulsa: em regra, sem carência. Contribuinte individual, facultativa e MEI: confira as regras vigentes.'},
     {t:'sec',l:'INSS'},
     {k:'qualidadeAte',l:'Qualidade de segurada até',t:'date'},{k:'der',l:'DER — data do requerimento',t:'date'},
+    {t:'sec',l:'✅ Quando o benefício for deferido'},{k:'dataDeferimento',l:'Data do deferimento',t:'date',dica:'Preenchida sozinha ao mudar para Deferido.'},{k:'dib',l:'DIB — início do benefício',t:'date'},
+    {k:'valorConcedido',l:'Valor total concedido (R$)',t:'number'},{k:'previsaoPagamento',l:'Previsão do pagamento',t:'date'},{k:'pagoClienteEm',l:'Pago à cliente em',t:'date'},
     {k:'nb',l:'NB / protocolo'},{k:'beneficioEstimado',l:'Valor total estimado do benefício (R$)',t:'number'},
     {k:'obs',l:'Observações',t:'textarea',full:1,rows:2}],
-    c,v=>{if(v.status==='Aguardando o parto'&&v.dataParto){v.status='Pronto para protocolo';setTimeout(()=>toast('Parto informado: caso movido para "Pronto para protocolo" 👶'),300);}
+    c,v=>{if(v.status==='Deferido'&&!v.dataDeferimento)v.dataDeferimento=today();
+      if(v.status==='Aguardando o parto'&&v.dataParto){v.status='Pronto para protocolo';setTimeout(()=>toast('Parto informado: caso movido para "Pronto para protocolo" 👶'),300);}
       const nid=upsert('sm',id,v,{guias:[]});if(!id)location.hash='sm/'+nid;},id&&(()=>{db.sm=db.sm.filter(x=>x.id!==id);if(ui.page==='sm'&&ui.id)location.hash='sm';}),
     'Cadastre também os documentos padrão do salário-maternidade no checklist do cliente (botão na ficha do caso).');
 }

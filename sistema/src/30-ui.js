@@ -3,7 +3,7 @@
    ========================================================= */
 const pill=(t,c)=>`<span class="pill ${c}">${esc(t)}</span>`;
 const pStatusLanc=s=>pill(s,s==='Pago'?'p-green':s==='Atrasado'?'p-red':'p-amber');
-const pStatusProc=s=>pill(s,s==='Em andamento'?'p-blue':s==='Ganho'||s==='Acordo'?'p-green':s==='Perdido'?'p-red':'p-gray');
+const pStatusProc=s=>pill(s,s==='Em andamento'?'p-blue':s==='Ganho'||s==='Acordo'||s==='Deferido'?'p-green':s==='Perdido'||s==='Indeferido'?'p-red':'p-gray');
 const pPrior=p=>pill(p,p==='Alta'?'p-red':p==='Média'?'p-amber':'p-gray');
 const pTipoEvt=t=>tagTipo(t);
 const pEtapa=e=>pill(e,e==='Fechado'||e==='Cliente'?'p-green':e==='Perdido'?'p-red':e==='Em recuperação'?'p-amber':e==='Proposta enviada'?'p-blue':'p-gray');

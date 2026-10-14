@@ -7,7 +7,7 @@ const FASES_JUD=['Inicial / Distribuição','Citação','Contestação / réplic
 const FASES_ADM=['Requerimento a protocolar','Protocolado — em análise','Em exigência','Perícia / avaliação agendada','Deferido','Indeferido','Recurso administrativo','Encerrado'];
 const FASES=FASES_JUD.concat(FASES_ADM.filter(f=>f!=='Encerrado'));
 const fasesDe=tipo=>tipo==='Administrativo'?FASES_ADM:FASES_JUD;
-const STATUS_PROC=['Em andamento','Suspenso','Ganho','Acordo','Perdido','Arquivado'];
+const STATUS_PROC=['Em andamento','Deferido','Indeferido','Suspenso','Ganho','Acordo','Perdido','Arquivado'];
 const INSTANCIAS=['1º grau','2º grau / Turma Recursal','Tribunais superiores (STJ/STF/TST)'];
 const POLOS=['Ativo (autor / requerente)','Passivo (réu / requerido)','Terceiro interessado'];
 const ORGAOS_ADM=['INSS','Receita Federal','Procon','Detran','Prefeitura','Banco / instituição financeira','Plataforma digital','Outro'];
@@ -17,7 +17,7 @@ const LUCROS='Distribuição de lucros';
 const CAT_DESP=['Aluguel','Energia elétrica','Telefonia / internet','Sistemas','Tráfego — Google','Tráfego — Facebook/Instagram','Agência / marketing','Indicações pagas','Contador','Folha de pagamento','Pró-labore','Impostos','Taxa de cartão','Taxa de boleto','Tarifas bancárias','Empresa de TI','Copa','Correios','Material de expediente','Manutenção / extraordinárias','Equipamentos','Capacitação','Custas processuais','Repasse a parceiro',LUCROS,'Outras despesas'];
 const FORMAS=['PIX','Boleto','Cartão','Cheque','Transferência','Dinheiro','Recorrência'];
 const ETAPAS=['Novo contato','Em atendimento','Proposta enviada','Em recuperação','Fechado','Perdido','Encaminhado a parceiro'];
-const ORIGENS=['Google Ads','Facebook / Instagram Ads','Instagram orgânico','Indicação de cliente','Indicação de parceiro','Site','Outro'];
+const ORIGENS=['Google Ads','Facebook / Instagram Ads','Instagram orgânico','TikTok orgânico','YouTube orgânico','Indicação de cliente','Indicação de parceiro','Site','Outro'];
 const AMBITOS=['Judicial','Administrativo','Administrativo + Judicial','Extrajudicial / consultivo'];
 const SEXOS=['Feminino','Masculino','Outro'];
 const UFS='AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ');
@@ -36,7 +36,7 @@ const GPS_CODIGOS=[['1007','Contribuinte individual — 20%',20],['1163','Contri
 const SM_DOCS=['RG e CPF da segurada','Certidão de nascimento da criança (ou atestado/termo de guarda)','CNIS atualizado','Comprovante de residência','Carteira de trabalho / contratos','Comprovantes de recolhimento (guias pagas)','Declaração de atividade rural / autodeclaração (se rural)','Comprovante de inscrição MEI e DAS pagos (se MEI)'];
 const SCRIPT_CATS=['Primeiro atendimento','Qualificação','Objeções','Fechamento','Pós-venda','Pedido de indicação','Aniversário','Cobrança','Recuperação de contato','Datas e avisos'];
 const MODELO_CATS=['Contrato de honorários','Proposta de honorários','Procuração','Declaração','Recibo','Notificação','Outro'];
-const TITLES={painel:'Painel',escritorio:'Escritório virtual',trafego:'Tráfego pago (Meta Ads)',requisitorios:'RPV, precatórios e alvarás',agenda:'Agenda e compromissos',tarefas:'Tarefas',clientes:'Clientes',cliente:'Cliente',registro:'Registro histórico de clientes',processos:'Contencioso e administrativo',processo:'Processo',sm:'Salário-maternidade',smcaso:'Caso de salário-maternidade',documentos:'Documentos e modelos',scripts:'Scripts de atendimento',atendimentos:'Atendimentos (CRM)',financeiro:'Contas a receber e pagar',previsao:'Previsão de recebimentos',fixas:'Despesas fixas',fluxo:'Fluxo de caixa',contratos:'Contratos e metas',parcerias:'Parcerias',indicadores:'Indicadores mensais',relatorios:'Relatórios',config:'Configurações'};
+const TITLES={painel:'Painel',escritorio:'Escritório virtual',trafego:'Tráfego pago (Meta Ads)',conteudo:'Produção de conteúdo',requisitorios:'RPV, precatórios e alvarás',peticoes:'Conferência de petições',audiencias:'Audiências',agenda:'Agenda e compromissos',tarefas:'Tarefas',resumo:'Resumo do dia',clientes:'Clientes',cliente:'Cliente',registro:'Registro histórico de clientes',processos:'Contencioso e administrativo',processo:'Processo',sm:'Salário-maternidade',smcaso:'Caso de salário-maternidade',documentos:'Documentos e modelos',scripts:'Scripts de atendimento',atendimentos:'Atendimentos (CRM)',financeiro:'Contas a receber e pagar',previsao:'Previsão de recebimentos',fixas:'Despesas fixas',fluxo:'Fluxo de caixa',contratos:'Contratos e metas',parcerias:'Parcerias',indicadores:'Indicadores mensais',relatorios:'Relatórios',config:'Configurações'};
 const PAG_FIN=['financeiro','previsao','fixas','fluxo','contratos','indicadores','relatorios'];
 const XLSX_URL='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
 
@@ -144,3 +144,12 @@ const SALAS_ORDEM=['recepcao','joyce','vitoria','comercial','reuniao','copa'];
 const SALA_PARCEIRO='reuniao';
 function salasPadrao(){return {recepcao:{nome:'Recepção',meet:''},joyce:{nome:'Sala da Dra. Joyce',meet:''},vitoria:{nome:'Sala da Dra. Vitória',meet:''},
   comercial:{nome:'Comercial',meet:''},reuniao:{nome:'Sala de Reunião',meet:''},copa:{nome:'Copa',meet:''}};}
+
+/* valores digitados no padrão brasileiro: "1.500,50", "1500,5", "1500.50" e "1.500" (milhar) */
+function parseValor(v){
+  if(typeof v==='number')return v;let s=String(v??'').replace(/R\$|\s| /g,'').trim();if(!s||s==='-')return NaN;
+  if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');
+  else if(/^-?\d{1,3}(\.\d{3})+$/.test(s))s=s.replace(/\./g,'');
+  const n=parseFloat(s);return isFinite(n)?n:NaN;
+}
+const valorCampo=v=>v===''||v==null?'':typeof v==='number'?String(v).replace('.',','):String(v);
