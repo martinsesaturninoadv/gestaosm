@@ -22,6 +22,19 @@
 | **Produção de conteúdo**: ideias, roteiro, gravação, edição, agendamento e publicação (TikTok, Instagram, YouTube…), calendário, banco de ideias, resultados e roteiro com IA | Menu Clientes → Produção de conteúdo |
 | **Chamadas de voz e vídeo próprias** no escritório virtual (por sala e ligação privada), com compartilhamento de tela | Escritório virtual → 📞 |
 | **Notificações push** no celular e no computador, mesmo com o sistema fechado | Configurações → Aplicativo no celular → Ativar notificações push |
+| **Acordo nos processos judiciais**: fase e situação "Acordo", valor, parcelas, homologação, honorários e lançamento no financeiro | Página do processo → 🤝 Registrar acordo (ou fase "Acordo") |
+| **Arquivos dentro do sistema** (sem Drive): Word, PDF, imagens e vídeos de até 2 GB, guardados fora da pasta pública | Conferência de petições (abra a petição) e Produção de conteúdo |
+| **Editora de vídeo**: login próprio que só vê a Produção de conteúdo; recebe o vídeo bruto, envia o editado, conversa por conteúdo | Configurações → Contas de acesso → perfil "Editor(a) de vídeo" |
+| **Comemorações**: sons, faixa de conquista, confete e "+pontos"; conquistas dos colegas no canto da tela; marcos de 50/75/90/100% da meta | Configurações → Sons e animações |
+
+## 🎬 Editora de vídeo
+1. Em **Configurações → Contas de acesso**, crie a conta da editora com o perfil **Editor(a) de vídeo**. Ela entra só na Produção de conteúdo, no Escritório virtual (conversa privada e Sala de Reunião) e nas Configurações.
+2. No conteúdo, escolha **Quem edita** e anexe o **material bruto** (o vídeo gravado). O conteúdo vai para **Edição** e ela recebe o aviso.
+3. Ela baixa o bruto, edita e anexa o **vídeo editado**. O conteúdo vai sozinho para **Revisão** e vocês recebem o aviso.
+4. Na página do conteúdo, assista à edição e clique em **✅ Aprovar edição** (vai para Agendado) ou **↩ Pedir ajustes** (volta para a editora com o que mudar).
+5. Cada conteúdo tem a sua **💬 conversa**: quem participa (quem grava, quem edita e quem criou) recebe o aviso das mensagens.
+
+Vídeos grandes são enviados em partes de 2 MB, então passam pelo limite de upload da hospedagem. Os arquivos ocupam espaço do plano da HostGator: apague os brutos antigos de vez em quando (🗑 ao lado do arquivo).
 
 ## 🔔 Notificações push
 Cada pessoa ativa em cada aparelho: **Configurações → Aplicativo no celular → 🔔 Ativar notificações push** e escolhe o que quer receber.
@@ -29,7 +42,9 @@ Cada pessoa ativa em cada aparelho: **Configurações → Aplicativo no celular 
 - **Prazos**: audiência/compromisso novo para você, aviso 1 hora antes, e o "☀️ Bom dia" com o que vence hoje e amanhã e o que está em atraso (dias úteis, a partir das 7h30).
 - **Mensagens**: chat do escritório virtual, "bater na porta" e ligações (só quando a pessoa não está com o sistema aberto).
 - **Portal**: mensagem ou arquivo enviado por cliente.
-- **Metas e ranking**: meta batida, "falta pouco" (90%) e troca de liderança no ranking.
+- **Metas e ranking**: 50%, 75%, 90% e meta batida, e troca de liderança no ranking.
+- **Conquistas da equipe**: contrato fechado, benefício deferido, acordo, processo ganho, petição protocolada, conteúdo publicado e a tarefa que você pediu concluída.
+- **Produção de conteúdo**: vídeo para editar, edição pronta para revisar, ajustes pedidos e edição aprovada.
 - **Resumo do dia** às 18h, para administração e advogados.
 
 No **iPhone**, primeiro adicione o sistema à Tela de Início (Safari → Compartilhar → Adicionar à Tela de Início), abra pelo ícone e só então ative.

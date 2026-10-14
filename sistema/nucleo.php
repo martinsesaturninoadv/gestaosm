@@ -208,7 +208,7 @@ function nuc_push(PDO $pdo, array $emails, string $tipo, string $titulo, string 
 function nuc_equipe(PDO $pdo, array $papeis = []): array
 {
     $out = [];
-    foreach ($pdo->query("SELECT email, papel FROM usuarios WHERE ativo = 1 AND papel <> 'parceiro'") as $u) {
+    foreach ($pdo->query("SELECT email, papel FROM usuarios WHERE ativo = 1 AND papel NOT IN ('parceiro', 'editor')") as $u) {
         if (!$papeis || in_array($u['papel'], $papeis, true)) $out[] = mb_strtolower($u['email']);
     }
     return $out;

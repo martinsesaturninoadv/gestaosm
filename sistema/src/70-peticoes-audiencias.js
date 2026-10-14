@@ -21,19 +21,20 @@ function editPeticao(id,pre){
     {k:'clienteId',l:'Cliente',t:'select',o:O.clientes},{k:'processoId',l:'Processo',t:'select',o:O.processos},
     {k:'autorId',l:'Quem redigiu',t:'select',o:O.usuarios},{k:'conferenteId',l:'Quem vai conferir',t:'select',o:O.usuarios},
     {k:'prazo',l:'Protocolar até (vai para a agenda)',t:'date'},{k:'hora',l:'Horário limite',t:'time'},
-    {k:'link',l:'Link do arquivo (Drive / Docs)',t:'url',full:1,ph:'https://docs.google.com/…'},
+    {t:'sec',html:id?`<div class="dgroup" style="margin:8px 0 4px">📎 Arquivo da petição (guardado no sistema)</div>${anexosBox('peticoes',pt)}`:'<div class="hint" style="margin:8px 0 0">📎 Depois de salvar, a petição abre de novo para você <b>anexar o arquivo</b> (Word ou PDF) direto no sistema.</div>'},
+    {k:'link',l:'Ou link do arquivo (Drive / Docs), se preferir',t:'url',full:1,ph:'https://docs.google.com/…'},
     {k:'apontamentos',l:'Apontamentos da conferência (o que corrigir)',t:'textarea',full:1,rows:3},{k:'obs',l:'Observações',t:'textarea',full:1,rows:2}],
     pt,v=>{if(v.processoId&&!v.clienteId)v.clienteId=proc(v.processoId)?.clienteId||'';
       const mudou=id&&v.status!==pt.status;const alvo=id?pt:{...v};
       if(id)Object.assign(pt,v);else{alvo.id=uid();alvo.criado=today();alvo.criadoPor=db.usuarioAtual;alvo.historico=[];db.peticoes.push(alvo);}
       const o=id?pt:alvo;if(mudou||!id)(o.historico=o.historico||[]).push({em:Date.now(),por:db.usuarioAtual,status:o.status});
       if(o.status==='Conferida'&&!o.conferidaEm)o.conferidaEm=today();if(o.status==='Protocolada'&&!o.protocoladaEm)o.protocoladaEm=today();
-      sincronizarAgendaPeticao(o);},
+      sincronizarAgendaPeticao(o);if(!id)setTimeout(()=>{editPeticao(o.id);toast('Petição criada ✓ Agora anexe o arquivo 📎');},350);},
     id&&(()=>{const e=pt.eventoId;db.peticoes=db.peticoes.filter(x=>x.id!==id);if(e)db.eventos=db.eventos.filter(x=>x.id!==e);}));
 }
 function moverPeticao(id,st){const pt=db.peticoes.find(x=>x.id===id);if(!pt)return;pt.status=st;(pt.historico=pt.historico||[]).push({em:Date.now(),por:db.usuarioAtual,status:st});
   if(st==='Conferida'&&!pt.conferidaEm)pt.conferidaEm=today();if(st==='Protocolada'&&!pt.protocoladaEm)pt.protocoladaEm=today();sincronizarAgendaPeticao(pt);
-  if(st==='Protocolada')toast('Protocolada ✓ — prazo marcado como cumprido na agenda 🎉');}
+  if(st==='Protocolada')celebrarEvento('peticao','Petição protocolada!','O prazo foi marcado como cumprido na agenda');}
 const petUrgente=pt=>pt.status!=='Protocolada'&&pt.prazo&&diff(pt.prazo)<=1;
 V.peticoes=()=>{
   const f=ui.f.pet||(ui.f.pet={quem:'',ver:'quadro'});const me=db.usuarioAtual;
@@ -44,7 +45,7 @@ V.peticoes=()=>{
     <div class="meta">${p.prazo?(p.status==='Protocolada'?'protocolada '+fd(p.protocoladaEm||p.prazo):prazoTxt(p.prazo)+(p.hora?' · até '+esc(p.hora):'')):'sem prazo'}</div>
     <div class="small" style="margin-top:3px">✍️ ${esc(nomeUsr(p.autorId))}${p.conferenteId?' → 🔎 '+esc(nomeUsr(p.conferenteId)):''}</div>
     ${p.apontamentos&&p.status==='Em correção'?`<div class="small" style="margin-top:4px;color:var(--red)">⚠ ${esc(p.apontamentos.slice(0,90))}</div>`:''}
-    ${p.link?`<a class="small" href="${esc(p.link)}" target="_blank" rel="noopener">📄 Abrir arquivo</a>`:''}`;
+    ${(p.anexos||[]).length?`<a class="small" href="${anxUrl(p.anexos[p.anexos.length-1].id)}" data-act="anxVer" data-id="peticoes|${p.id}|${p.anexos[p.anexos.length-1].id}">📎 ${esc(p.anexos[p.anexos.length-1].nome)}${p.anexos.length>1?' (+'+(p.anexos.length-1)+')':''}</a> `:''}${p.link?`<a class="small" href="${esc(p.link)}" target="_blank" rel="noopener">📄 Drive</a>`:''}`;
   return `<div class="grid g-kpi">${kpi('Para eu conferir',paraMim,'',paraMim?'bad':'good')}${kpi('A conferir (todas)',db.peticoes.filter(p=>p.status==='A conferir').length)}${kpi('Em correção',db.peticoes.filter(p=>p.status==='Em correção').length)}
     ${kpi('Prontas para protocolar',db.peticoes.filter(p=>p.status==='Pronta para protocolar').length)}${kpi('Vencendo (até amanhã)',urg,'',urg?'bad':'good')}</div>
   <div class="toolbar"><select data-f="pet.quem"><option value="">Todas as petições</option><option value="conferir"${f.quem==='conferir'?' selected':''}>🔎 Que eu confiro</option><option value="minhas"${f.quem==='minhas'?' selected':''}>✍️ Que eu redigi</option></select>

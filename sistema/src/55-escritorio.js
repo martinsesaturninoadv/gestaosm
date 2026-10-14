@@ -17,7 +17,7 @@ const CABELOS=['Curto','Longo','Coque','Cacheado','Raspado'];
 
 const meuEmailEsc=()=>norm(sessao?.email||'');
 const salaNome=id=>db.salas?.[id]?.nome||salasPadrao()[id]?.nome||id;
-const podeSala=id=>!ehParceiro()||id===SALA_PARCEIRO;
+const podeSala=id=>!ehExterno()||id===SALA_PARCEIRO;
 const canalDm=(a,b)=>'dm:'+[norm(a),norm(b)].sort().join('|');
 const chaveLidas=()=>'msadv_lidas_'+meuEmailEsc();
 function hashTxt(s){let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))|0;return Math.abs(h);}
@@ -101,8 +101,8 @@ function escMontar(){
 /* ---------- estado local ---------- */
 function escCarregarEu(){
   let eu=null;try{eu=JSON.parse(localStorage.getItem('msadv_esc_eu_'+meuEmailEsc())||'null');}catch(e){}
-  if(!eu||!SALA_GEO[eu.sala]||!podeSala(eu.sala)){const s=ehParceiro()?SALA_PARCEIRO:'recepcao';const[x,y]=pontoNaSala(s);eu={sala:s,x,y,status:'disponivel'};}
-  ESC.eu=eu;ESC.aba=ehParceiro()?'sala':'geral';
+  if(!eu||!SALA_GEO[eu.sala]||!podeSala(eu.sala)){const s=ehExterno()?SALA_PARCEIRO:'recepcao';const[x,y]=pontoNaSala(s);eu={sala:s,x,y,status:'disponivel'};}
+  ESC.eu=eu;ESC.aba=ehExterno()?'sala':'geral';
   try{ESC.lidas=JSON.parse(localStorage.getItem(chaveLidas())||'null');}catch(e){ESC.lidas=null;}
 }
 function escGuardarEu(){try{localStorage.setItem('msadv_esc_eu_'+meuEmailEsc(),JSON.stringify(ESC.eu));}catch(e){}}
@@ -138,18 +138,20 @@ function escProcessar(r){
     if(!ESC.lidas){ESC.lidas={};ESC.msgs.forEach(m=>{if(m.em>(ESC.lidas[m.canal]||0))ESC.lidas[m.canal]=m.em;});escGuardarLidas();}}
   else novas.forEach(escNotificar);
   if(ui.page==='escritorio'&&$('#esc-root'))escAtualizar(false,novas);
+  if(ui.page==='conteudo'&&ui.id&&novas.some(m=>m.canal==='cont:'+ui.id))contAtualizarConversa();
   badges();
 }
 
 /* ---------- conversas ---------- */
 function escCanalAtual(){
-  if(ESC.aba==='geral')return ehParceiro()?'':'geral';
+  if(ESC.aba==='geral')return ehExterno()?'':'geral';
   if(ESC.aba==='sala')return 'sala:'+ESC.eu.sala;
   return ESC.dm?canalDm(meuEmailEsc(),ESC.dm):'';
 }
-function canaisVisiveis(){const me=meuEmailEsc();return c=>c==='geral'?!ehParceiro():c.startsWith('sala:')?c==='sala:'+ESC.eu?.sala:c.startsWith('dm:')&&c.slice(3).split('|').includes(me);}
+function canaisVisiveis(){const me=meuEmailEsc();return c=>c==='geral'?!ehExterno():c.startsWith('cont:')?!ehParceiro()&&!!db.conteudos.find(x=>'cont:'+x.id===c):c.startsWith('sala:')?c==='sala:'+ESC.eu?.sala:c.startsWith('dm:')&&c.slice(3).split('|').includes(me);}
 function naoLidas(canal){const me=meuEmailEsc(),l=(ESC.lidas||{})[canal]||0;return ESC.msgs.filter(m=>m.canal===canal&&m.de!==me&&m.tipo!=='emote'&&m.em>l).length;}
-function totalNaoLidas(){if(!ESC.lidas)return 0;const ok=canaisVisiveis();return [...new Set(ESC.msgs.map(m=>m.canal))].filter(ok).reduce((s,c)=>s+naoLidas(c),0);}
+function totalNaoLidas(){if(!ESC.lidas)return 0;const ok=canaisVisiveis();return [...new Set(ESC.msgs.map(m=>m.canal))].filter(c=>ok(c)&&!c.startsWith('cont:')).reduce((s,c)=>s+naoLidas(c),0);}
+function naoLidasConteudo(){if(!ESC.lidas)return 0;return [...new Set(ESC.msgs.map(m=>m.canal))].filter(c=>c.startsWith('cont:')&&db.conteudos.some(x=>'cont:'+x.id===c)).reduce((s,c)=>s+naoLidas(c),0);}
 function escMarcarLida(){
   if(ui.page!=='escritorio'||document.hidden||!ESC.lidas)return;const c=escCanalAtual();if(!c)return;
   const ult=ESC.msgs.filter(m=>m.canal===c).reduce((s,m)=>Math.max(s,m.em),0);if(ult>(ESC.lidas[c]||0)){ESC.lidas[c]=ult;escGuardarLidas();}
@@ -166,7 +168,7 @@ function escRenderChat(){
   const abas=$('#esc-abas');if(!abas)return;
   const me=meuEmailEsc(),sala='sala:'+ESC.eu.sala,ndm=pessoasDm().reduce((s,p)=>s+p.n,0);
   const nb=n=>n?`<span class="nb">${n}</span>`:'';
-  abas.innerHTML=(ehParceiro()?'':`<button class="tab ${ESC.aba==='geral'?'active':''}" data-act="escAba" data-id="geral">💬 Geral${nb(naoLidas('geral'))}</button>`)
+  abas.innerHTML=(ehExterno()?'':`<button class="tab ${ESC.aba==='geral'?'active':''}" data-act="escAba" data-id="geral">💬 Geral${nb(naoLidas('geral'))}</button>`)
     +`<button class="tab ${ESC.aba==='sala'?'active':''}" data-act="escAba" data-id="sala">📍 ${esc(salaNome(ESC.eu.sala))}${nb(naoLidas(sala))}</button>`
     +`<button class="tab ${ESC.aba==='dm'?'active':''}" data-act="escAba" data-id="dm">🔒 Privado${nb(ndm)}</button>`;
   const cab=$('#esc-cab'),box=$('#esc-msgs'),form=$('#esc-form');
@@ -278,6 +280,9 @@ function escNotificar(m){
   const vendo=ui.page==='escritorio'&&!document.hidden&&escCanalAtual()===m.canal;
   if(document.hidden&&(m.tipo==='toc'||m.canal.startsWith('dm:')))notificar(m.tipo==='toc'?'🚪 '+m.nome+' está batendo na sua porta':'💬 '+m.nome,m.tipo==='toc'?'Escritório virtual':m.texto.slice(0,120),'chat-'+m.canal);
   if(m.tipo==='toc'){escSom(true);toastAcao(`🚪 ${m.nome} está batendo na sua porta`,'Ir até lá',()=>{location.hash='escritorio';escIrAte(m.de);});return;}
+  if(m.canal.startsWith('cont:')){const cid=m.canal.slice(5);if(ui.page==='conteudo'&&ui.id===cid&&!document.hidden)return;const c=db.conteudos.find(x=>x.id===cid);
+    escSom(true);if(document.hidden)notificar('💬 '+m.nome+' — '+(c?.titulo||'conteúdo'),m.texto.slice(0,120),'chat-'+m.canal);
+    toastAcao(`💬 ${m.nome} em “${(c?.titulo||'conteúdo').slice(0,40)}”: ${m.texto.length>60?m.texto.slice(0,58)+'…':m.texto}`,'Abrir',()=>{location.hash='conteudo/'+cid;});return;}
   if(vendo)return;
   escSom(m.canal.startsWith('dm:'));
   if(m.canal.startsWith('dm:'))toastAcao(`💬 ${m.nome}: ${m.texto.length>70?m.texto.slice(0,68)+'…':m.texto}`,'Responder',()=>{location.hash='escritorio';ESC.aba='dm';ESC.dm=m.de;setTimeout(escRenderChat,50);});
@@ -346,7 +351,7 @@ function cardSalasConfig(){
 
 /* ---------- demonstração: colegas simulados e regras iguais às do servidor ---------- */
 function escCanalOk(u,canal){
-  const parc=u.papel==='parceiro';
+  const parc=['parceiro','editor'].includes(u.papel);if(canal.startsWith('cont:'))return u.papel!=='parceiro';
   if(canal==='geral')return !parc;
   let m=canal.match(/^sala:([a-z]+)$/);if(m)return SALAS_ORDEM.includes(m[1])&&(!parc||m[1]===SALA_PARCEIRO);
   m=canal.match(/^dm:([^|]+)\|([^|]+)$/);if(m){const eu=norm(u.email);return m[1]!==m[2]&&(m[1]===eu||m[2]===eu);}

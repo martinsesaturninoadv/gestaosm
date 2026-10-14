@@ -50,10 +50,11 @@ function enriquecerV6(d){
   if(!d.usuarios.some(u=>/parceir/i.test(u.papel)))d.usuarios.push({id:'u6',nome:'Dr. Rafael Costa',papel:'Parceiro',oab:'OAB/RJ 000.006',email:'parceiro@costaadv.com'});
   return d;
 }
-function papelDeMembro(u,i){const p=norm(u.papel);if(/parceir/.test(p))return 'parceiro';if(/estagi/.test(p))return 'estagiario';if(/administrativo|financ|secret/.test(p))return 'financeiro';if(i===0||/socio|admin/.test(p))return 'admin';return 'advogado';}
+function papelDeMembro(u,i){const p=norm(u.papel);if(/parceir/.test(p))return 'parceiro';if(/editor|edicao/.test(p))return 'editor';if(/estagi/.test(p))return 'estagiario';if(/administrativo|financ|secret/.test(p))return 'financeiro';if(i===0||/socio|admin/.test(p))return 'admin';return 'advogado';}
 
 /* ---------- regras de acesso (iguais às do api.php) ---------- */
 function regraLeitura(u,col,id,dados){
+  if(u.papel==='editor')return col==='config'?['escritorio','salas'].includes(id):['conteudos','usuarios'].includes(col);
   if(u.papel==='estagiario'&&COLS_FIN.includes(col))return false;
   if(u.papel==='parceiro'){
     if(col==='config')return CONFIG_PARC.includes(id);
@@ -65,6 +66,7 @@ function regraLeitura(u,col,id,dados){
 function regraEscrita(u,col,id,novo,antigo){
   if(col!=='config'&&!COLS.includes(col))return false;
   if(col==='config'&&!SINGLES.includes(id))return false;
+  if(u.papel==='editor')return col==='conteudos'&&novo!==null;
   if(u.papel==='estagiario'&&(COLS_FIN.includes(col)||(col==='config'&&id==='metas')))return false;
   if(u.papel==='parceiro'){
     if(!COLS_PARC.includes(col)||col==='contratos'||col==='lancamentos')return false;
@@ -170,7 +172,7 @@ function enviar(){
 function puxar(inicial){
   if(!sessao)return Promise.resolve();
   return api('dados',null,'&desde='+(inicial?0:Math.max(0,ultimoSync-3000))).then(r=>{
-    let mudou=false;const atual=inicial?{}:chaves();
+    let mudou=false;const atual=inicial?{}:chaves();const feitos=[];
     r.registros.forEach(x=>{
       const k=x.colecao+'|'+x.id;
       if(!inicial&&k in atual&&snap[k]!==JSON.stringify(atual[k]))return; // alteração local ainda não enviada: a local vence
@@ -179,11 +181,12 @@ function puxar(inicial){
       mudou=true;
       if(x.colecao==='config'){if(!x.excluido&&SINGLES.includes(x.id))db[x.id]=x.dados;}
       else if(COLS.includes(x.colecao)){const arr=db[x.colecao];const i=arr.findIndex(o=>o.id===x.id);
+        if(!inicial&&!x.excluido){const cq=conquistaRemota(x.colecao,i>=0?arr[i]:null,x.dados);if(cq)feitos.push(cq);}
         if(x.excluido){if(i>=0)arr.splice(i,1);}else if(i>=0)arr[i]=x.dados;else arr.push(x.dados);}
       if(x.excluido)delete snap[k];else snap[k]=novo;
     });
     ultimoSync=r.agora;
-    if(mudou&&!inicial){migrar(db);renderSeguro();}
+    if(mudou&&!inicial){migrar(db);renderSeguro();if(feitos.length)feedEquipe(feitos);}
   }).catch(()=>{});
 }
 function renderSeguro(){
@@ -203,7 +206,7 @@ async function entrar(u){
   await puxar(true);migrar(db);
   // primeira vez no banco: grava a configuração padrão
   let m=db.usuarios.find(x=>x.email&&norm(x.email)===norm(u.email));
-  if(!m&&u.papel!=='parceiro'){m={id:uid(),nome:u.nome,papel:papelNome(u.papel).replace(/ —.*/,''),oab:'',email:u.email};db.usuarios.push(m);}
+  if(!m&&!['parceiro','editor'].includes(u.papel)){m={id:uid(),nome:u.nome,papel:papelNome(u.papel).replace(/ —.*/,''),oab:'',email:u.email};db.usuarios.push(m);}
   db.usuarioAtual=m?m.id:'';
   if(['admin','advogado'].includes(u.papel)){if(!db.modelos.length)db.modelos=modelosPadrao();if(!db.scripts.length)db.scripts=scriptsPadrao();
     if(!db.produtos.some(p=>norm(p)==='direito digital'))db.produtos.push('Direito digital');iniciarFluxos();}
@@ -233,6 +236,8 @@ const papel=()=>sessao?sessao.papel:'';
 const podeFin=()=>['admin','advogado','financeiro'].includes(papel());
 const ehAdmin=()=>papel()==='admin';
 const ehParceiro=()=>papel()==='parceiro';
+const ehEditor=()=>papel()==='editor';
+const ehExterno=()=>ehParceiro()||ehEditor();
 const meuEmail=()=>sessao?norm(sessao.email):'';
 const parceiros=()=>db.usuarios.filter(u=>/parceir/i.test(u.papel)&&u.email);
 

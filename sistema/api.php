@@ -42,7 +42,16 @@ const CONFIG_PARCEIRO = ['escritorio', 'produtos', 'tiposEvento', 'salas'];
 const SALAS = ['recepcao', 'joyce', 'vitoria', 'reuniao', 'copa', 'comercial'];
 const SALA_PARCEIRO = 'reuniao';
 const STATUS_SALA = ['disponivel', 'atendimento', 'ausente', 'foco'];
-const PAPEIS = ['admin', 'advogado', 'estagiario', 'financeiro', 'parceiro'];
+const PAPEIS = ['admin', 'advogado', 'estagiario', 'financeiro', 'parceiro', 'editor'];
+// Perfil "editor" (editora de vídeo): só a produção de conteúdo, o nome da equipe e o escritório virtual (conversa privada e sala de reunião)
+const CONFIG_EDITOR = ['escritorio', 'salas'];
+function externo(array $u): bool { return in_array($u['papel'], ['parceiro', 'editor'], true); }
+// Anexos guardados no próprio sistema (fora da pasta pública): extensões aceitas e coleções que podem ter anexos
+const ANEXO_EXT = ['pdf', 'doc', 'docx', 'odt', 'rtf', 'txt', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'gif',
+    'mp4', 'mov', 'm4v', 'webm', 'avi', 'mkv', '3gp', 'mp3', 'm4a', 'wav', 'ogg', 'aac', 'srt', 'zip', 'psd', 'prproj', 'aep', 'xml'];
+const ANEXO_COLECOES = ['peticoes', 'conteudos', 'processos', 'clientes', 'documentos', 'tarefas'];
+const ANEXO_MAX = 2147483648; // 2 GB por arquivo
+const ANEXO_PARTE = 2097152;  // o navegador envia em pedaços de 2 MB (passa pelo limite de upload da hospedagem)
 
 function minusculo(?string $s): string { return mb_strtolower(trim((string) $s)); }
 function doParceiro($d, string $email): bool
@@ -56,6 +65,10 @@ function podeLer(array $u, string $col, string $id, $dados): bool
 {
     if ($col === 'config' && in_array($id, ['segredos', 'vapid'], true)) return false; // chaves: só no servidor
     if ($u['papel'] === 'estagiario' && in_array($col, COLECOES_FINANCEIRAS, true)) return false;
+    if ($u['papel'] === 'editor') {
+        if ($col === 'config') return in_array($id, CONFIG_EDITOR, true);
+        return in_array($col, ['conteudos', 'usuarios'], true);
+    }
     if ($u['papel'] === 'parceiro') {
         if ($col === 'config') return in_array($id, CONFIG_PARCEIRO, true);
         if (in_array($col, COLECOES_LIVRES_PARCEIRO, true)) return true;
@@ -69,6 +82,7 @@ function podeGravar(array $u, string $col, string $id, $novo, $antigo): bool
     if (!in_array($col, COLECOES, true)) return false;
     if ($col === 'config' && !in_array($id, CONFIG_IDS, true)) return false; // "segredos" não está na lista: só pelo endpoint próprio
     if ($u['papel'] === 'estagiario' && (in_array($col, COLECOES_FINANCEIRAS, true) || ($col === 'config' && $id === 'metas'))) return false;
+    if ($u['papel'] === 'editor') return $col === 'conteudos' && $novo !== null; // edita os conteúdos, não apaga
     if ($u['papel'] === 'parceiro') {
         if (!in_array($col, COLECOES_PARCERIA, true) || $col === 'contratos' || $col === 'lancamentos') return false;
         $dele = fn($d) => doParceiro($d, $u['email']);
@@ -80,9 +94,10 @@ function podeGravar(array $u, string $col, string $id, $novo, $antigo): bool
 /* chat: "geral", "sala:<id>" ou "dm:<email>|<email>" (conversa privada só é lida pelas duas pessoas) */
 function canalPermitido(array $u, string $canal): bool
 {
-    $parceiro = $u['papel'] === 'parceiro';
+    $parceiro = externo($u);
     if ($canal === 'geral') return !$parceiro;
     if (preg_match('/^sala:([a-z]+)$/', $canal, $m)) return in_array($m[1], SALAS, true) && (!$parceiro || $m[1] === SALA_PARCEIRO);
+    if (preg_match('/^cont:[\w-]{1,60}$/', $canal)) return $u['papel'] !== 'parceiro'; // conversa de um conteúdo (equipe e editora)
     if (preg_match('/^dm:([^|]+)\|([^|]+)$/', $canal, $m)) {
         $eu = minusculo($u['email']);
         return $m[1] !== $m[2] && ($m[1] === $eu || $m[2] === $eu) && filter_var($m[1], FILTER_VALIDATE_EMAIL) && filter_var($m[2], FILTER_VALIDATE_EMAIL);
@@ -172,6 +187,10 @@ function criarTabelas(PDO $pdo, bool $mysql): void
     $pdo->exec("CREATE TABLE IF NOT EXISTS mensagens (
         id $auto, canal VARCHAR(400) NOT NULL, de_uid INT NOT NULL, de_email VARCHAR(190) NOT NULL, de_nome VARCHAR(120) NOT NULL,
         texto TEXT NOT NULL, tipo VARCHAR(10) NOT NULL, em BIGINT NOT NULL)$fim");
+    // anexos guardados no próprio sistema (petições, vídeos da produção de conteúdo…)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS anexos (
+        id VARCHAR(40) NOT NULL PRIMARY KEY, colecao VARCHAR(40) NOT NULL, registro VARCHAR(60) NOT NULL, nome VARCHAR(255) NOT NULL,
+        mime VARCHAR(100) NOT NULL, tamanho BIGINT NOT NULL, por_email VARCHAR(190) NOT NULL, em BIGINT NOT NULL)$fim");
     // chamadas de voz/vídeo do escritório virtual: quem está em cada chamada e a sinalização (WebRTC) entre os navegadores
     $pdo->exec("CREATE TABLE IF NOT EXISTS rtc_participantes (
         chamada VARCHAR(190) NOT NULL, email VARCHAR(190) NOT NULL, nome VARCHAR(120) NOT NULL, visto BIGINT NOT NULL, PRIMARY KEY (chamada, email))$fim");
@@ -372,6 +391,7 @@ function depois(callable $f): void
 /* push quando alguém recebe tarefa, petição para conferir ou compromisso */
 function avisosDeMudancas(PDO $pdo, array $u, array $mud): void
 {
+    $checarMetas = false;
     $email = nuc_emails_por_id($pdo);
     $eu = minusculo($u['email']);
     $quem = fn(array $ids) => array_values(array_diff(array_filter(array_map(fn($i) => $email[$i] ?? null, $ids)), [$eu]));
@@ -391,27 +411,99 @@ function avisosDeMudancas(PDO $pdo, array $u, array $mud): void
                 nuc_push($pdo, $quem([$novo['autorId']]), 'tarefa', $st === 'Em correção' ? '✏️ Petição voltou para correção' : '✅ Petição conferida' . ($st === 'Pronta para protocolar' ? ': pronta para protocolar' : ''),
                     ($novo['titulo'] ?? '') . ($st === 'Em correção' && !empty($novo['apontamentos']) ? ' — ' . mb_substr((string) $novo['apontamentos'], 0, 120) : ''), '#peticoes', 'petst:' . $id . ':' . $st . ':' . nuc_ms());
         }
+        $eqMenosEu = array_values(array_diff(nuc_equipe($pdo), [$eu]));
+        $cliNome = function (array $r) use ($pdo): string { $c = !empty($r['clienteId']) ? nuc_ler($pdo, 'clientes', (string) $r['clienteId']) : null; return (string) ($c['nome'] ?? ''); };
+        if ($col === 'tarefas' && ($novo['status'] ?? '') === 'done' && $ant && ($ant['status'] ?? '') !== 'done' && ($p = $quem([(string) ($novo['criadoPor'] ?? '')])))
+            nuc_push($pdo, $p, 'conquista', '✅ ' . $u['nome'] . ' concluiu a tarefa que você pediu', (string) ($novo['titulo'] ?? ''), '#tarefas', 'tarok:' . $id);
+        if ($col === 'peticoes' && ($novo['status'] ?? '') === 'Protocolada' && ($ant['status'] ?? '') !== 'Protocolada')
+            nuc_push($pdo, $quem([(string) ($novo['autorId'] ?? ''), (string) ($novo['conferenteId'] ?? '')]), 'conquista', '📨 Petição protocolada', (string) ($novo['titulo'] ?? '') . ' · ' . $u['nome'], '#peticoes', 'petprot:' . $id);
+        if ($col === 'contratos' && !$ant) {
+            nuc_push($pdo, $eqMenosEu, 'conquista', '🎉 ' . $u['nome'] . ' fechou um contrato!', $cliNome($novo) ?: 'Novo contrato de honorários', '#painel', 'ctr:' . $id, 'high');
+            $checarMetas = true;
+        }
+        if ($col === 'leads' && !$ant) $checarMetas = true;
+        if ($col === 'sm' && ($novo['status'] ?? '') === 'Deferido' && ($ant['status'] ?? '') !== 'Deferido')
+            nuc_push($pdo, $eqMenosEu, 'conquista', '✅ Benefício deferido! 🎉', $cliNome($novo) . ' · ' . $u['nome'], '#sm/' . $id, 'smdef:' . $id, 'high');
+        if ($col === 'processos' && ($ant['status'] ?? '') !== ($novo['status'] ?? '') && in_array($novo['status'] ?? '', ['Ganho', 'Acordo', 'Deferido'], true)) {
+            $tt = ['Ganho' => '🏆 Processo ganho!', 'Acordo' => '🤝 Acordo fechado!', 'Deferido' => '✅ Requerimento deferido!'][$novo['status']];
+            nuc_push($pdo, $eqMenosEu, 'conquista', $tt, $cliNome($novo) . ' · ' . $u['nome'], '#processo/' . $id, 'proc:' . $id . ':' . $novo['status'], 'high');
+        }
+        if ($col === 'conteudos') {
+            $et = (string) ($novo['etapa'] ?? ''); $etAnt = (string) ($ant['etapa'] ?? '');
+            $tit = '“' . mb_substr((string) ($novo['titulo'] ?? ''), 0, 60) . '”';
+            $url = '#conteudo/' . $id;
+            $editora = $quem([(string) ($novo['editorId'] ?? '')]);
+            $equipe = $quem(array_merge((array) ($novo['responsaveis'] ?? []), [(string) ($novo['criadoPor'] ?? '')]));
+            if ($et === 'Edição' && ($etAnt !== 'Edição' || ($ant['editorId'] ?? '') !== ($novo['editorId'] ?? '')))
+                nuc_push($pdo, $editora, 'tarefa', $etAnt === 'Revisão' ? '↩ Ajustes pedidos na edição' : '✂️ Vídeo para você editar', $tit . (!empty($novo['dataEdicao']) ? ' — entregar até ' . nuc_data((string) $novo['dataEdicao']) : '') . ' · ' . $u['nome'], $url, 'cted:' . $id . ':' . nuc_ms(), 'high');
+            elseif ($et === 'Revisão' && $etAnt !== 'Revisão')
+                nuc_push($pdo, $equipe, 'tarefa', '👀 Edição pronta para revisar', $tit . ' · enviado por ' . $u['nome'], $url, 'ctrev:' . $id . ':' . nuc_ms(), 'high');
+            elseif (in_array($et, ['Agendado', 'Publicado'], true) && $etAnt === 'Revisão')
+                nuc_push($pdo, $editora, 'conquista', '✅ Sua edição foi aprovada!', $tit . ' · ' . $u['nome'], $url, 'ctok:' . $id . ':' . nuc_ms());
+            elseif ($et === 'Publicado' && $etAnt !== 'Publicado')
+                nuc_push($pdo, array_values(array_unique(array_merge($editora, $equipe))), 'conquista', '🚀 Conteúdo publicado!', $tit, $url, 'ctpub:' . $id);
+            elseif ($et === $etAnt && !empty($novo['editorId']) && ($ant['editorId'] ?? '') !== $novo['editorId'] && in_array($et, ['Ideia', 'Roteiro', 'Gravação'], true))
+                nuc_push($pdo, $editora, 'tarefa', '🎬 Novo conteúdo com você na edição', $tit . ' (etapa: ' . $et . ')', $url, 'ctatr:' . $id . ':' . ($novo['editorId'] ?? ''));
+        }
         if ($col === 'eventos' && empty($novo['feito']) && ($novo['data'] ?? '') >= date('Y-m-d')) {
             $para = $quem(array_diff(nuc_resp($novo), $ant ? nuc_resp($ant) : []));
             $aud = preg_match('/audi|per[ií]cia/i', (string) ($novo['tipo'] ?? ''));
             if ($para && empty($novo['peticaoId'])) nuc_push($pdo, $para, 'prazo', $aud ? '🏛 Nova audiência para você' : '📅 Novo ' . mb_strtolower((string) ($novo['tipo'] ?? 'compromisso')) . ' para você', ($novo['titulo'] ?? '') . $quando($novo, 'data'), '#agenda', 'evnovo:' . $id . ':' . md5(implode(',', $para)), $aud ? 'high' : 'normal');
         }
     }
+    if ($checarMetas) avisosMetas($pdo);
 }
 /* push de mensagem do chat para quem não está com o sistema aberto */
+/* marcos da meta do mês (50%, 75%, 90% e batida): cada marco é avisado uma única vez para a equipe */
+function avisosMetas(PDO $pdo): void
+{
+    $m = nuc_config($pdo, 'metas');
+    $ym = date('Y-m'); $ini = $ym . '-01'; $fim = date('Y-m-t');
+    $no = fn($d) => ($d = substr((string) $d, 0, 10)) >= $ini && $d <= $fim;
+    $ks = array_filter(nuc_listar($pdo, 'contratos'), fn($k) => $no($k['data'] ?? ''));
+    $atend = count(array_filter(nuc_listar($pdo, 'leads'), fn($l) => $no(($l['primeiroContato'] ?? '') ?: ($l['criado'] ?? ''))))
+        + count(array_filter(nuc_listar($pdo, 'clientes'), fn($c) => empty($c['leadId']) && $no($c['criado'] ?? '')));
+    $lista = [['qtd', 'Contratos fechados', count($ks), (float) ($m['qtd'] ?? 0), false],
+        ['valor', 'Valor contratado', array_sum(array_map(fn($k) => (float) ($k['valorTotal'] ?? 0), $ks)), (float) ($m['valorTotal'] ?? 0), true],
+        ['atend', 'Novos atendimentos', $atend, (float) ($m['atendimentos'] ?? 0), false]];
+    foreach ($lista as [$id, $nome, $atual, $meta, $fin]) {
+        if ($meta <= 0) continue;
+        $p = $atual / $meta * 100;
+        foreach ([100, 90, 75, 50] as $marco) {
+            if ($p < $marco) continue;
+            $chave = "meta:$ym:$id:$marco";
+            if ($marco === 100) $tit = '🏆 Meta batida: ' . $nome . '!';
+            else $tit = '🔥 ' . $marco . '% da meta: ' . $nome;
+            $txt = $marco === 100 ? ($fin ? 'A equipe bateu a meta do mês. Parabéns, time! 🎉' : 'Chegamos a ' . round($atual) . ' de ' . round($meta) . '. Parabéns, time! 🎉')
+                : ($fin ? 'Falta pouco para bater a meta do mês. Bora!' : 'Já são ' . round($atual) . ' de ' . round($meta) . '. Faltam ' . max(0, round($meta - $atual)) . '. Bora!');
+            nuc_push($pdo, nuc_equipe($pdo), 'meta', $tit, $txt, '#painel', $chave, $marco === 100 ? 'high' : 'normal');
+            foreach ([90, 75, 50] as $menor) if ($menor < $marco) nuc_push_marcar($pdo, "meta:$ym:$id:$menor"); // não avisa marcos menores depois
+            break;
+        }
+    }
+}
 function avisoChat(PDO $pdo, array $u, string $canal, string $texto, string $tipo, int $agora): void
 {
     $eu = minusculo($u['email']);
     if (preg_match('/^dm:([^|]+)\|([^|]+)$/', $canal, $m)) $para = [$m[1] === $eu ? $m[2] : $m[1]];
     elseif ($canal === 'geral' || strpos($canal, 'sala:') === 0) $para = nuc_equipe($pdo);
+    elseif (strpos($canal, 'cont:') === 0) {
+        $c = nuc_ler($pdo, 'conteudos', substr($canal, 5));
+        if (!$c) return;
+        $ids = nuc_emails_por_id($pdo);
+        $para = array_values(array_filter(array_map(fn($i) => $ids[$i] ?? null, array_merge((array) ($c['responsaveis'] ?? []), [$c['editorId'] ?? '', $c['criadoPor'] ?? '']))));
+        $tituloCont = (string) ($c['titulo'] ?? 'conteúdo');
+    }
     else return;
     $st = $pdo->prepare('SELECT email FROM presenca WHERE visto > ?');
     $st->execute([$agora - 45000]);
     $online = array_map('mb_strtolower', $st->fetchAll(PDO::FETCH_COLUMN));
     $sala = strpos($canal, 'sala:') === 0 ? ' na ' . str_replace('sala:', 'sala ', $canal) : ($canal === 'geral' ? ' no chat geral' : '');
     $titulo = $tipo === 'toc' ? '🚪 ' . $u['nome'] . ' bateu na sua porta' : '💬 ' . $u['nome'] . $sala;
+    $url = '#escritorio';
+    if (isset($tituloCont)) { $titulo = '💬 ' . $u['nome'] . ' em “' . mb_substr($tituloCont, 0, 50) . '”'; $url = '#' . str_replace('cont:', 'conteudo/', $canal); }
     foreach (array_diff($para, $online, [$eu]) as $e) {
-        nuc_push($pdo, [$e], 'msg', $titulo, $tipo === 'toc' ? 'Toque para abrir o escritório virtual' : mb_substr($texto, 0, 200), '#escritorio', 'msg|' . $canal . '|' . $e . '|' . intdiv($agora, 120000), 'high');
+        nuc_push($pdo, [$e], 'msg', $titulo, $tipo === 'toc' ? 'Toque para abrir o escritório virtual' : mb_substr($texto, 0, 200), $url, 'msg|' . $canal . '|' . $e . '|' . intdiv($agora, 120000), 'high');
     }
 }
 
@@ -546,7 +638,7 @@ switch ($acao) {
                 if (!podeGravar($u, $col, $id, $r['dados'] ?? null, $ant && !$ant['excluido'] ? $ant['dados'] : null)) continue;
                 $st->execute([$col, $id, json_encode($r['dados'] ?? null, JSON_UNESCAPED_UNICODE), 0, $agora, $uid]);
                 registrar($pdo, $uid, 'salvar', $col, $id);
-                if (in_array($col, ['tarefas', 'peticoes', 'eventos'], true)) $mud[] = [$col, $id, $r['dados'] ?? null, $ant && !$ant['excluido'] ? $ant['dados'] : null];
+                if (in_array($col, ['tarefas', 'peticoes', 'eventos', 'conteudos', 'contratos', 'leads', 'sm', 'processos'], true)) $mud[] = [$col, $id, $r['dados'] ?? null, $ant && !$ant['excluido'] ? $ant['dados'] : null];
                 $n++;
             }
             foreach (($b['exclusoes'] ?? []) as $r) {
@@ -584,7 +676,7 @@ switch ($acao) {
         $u = usuarioLogado($pdo);
         $b = corpo();
         $agora = agoraMs();
-        $parceiro = $u['papel'] === 'parceiro';
+        $parceiro = externo($u);
         if (is_array($b['presenca'] ?? null)) {
             $p = $b['presenca'];
             $sala = in_array($p['sala'] ?? '', SALAS, true) ? $p['sala'] : 'recepcao';
@@ -638,6 +730,93 @@ switch ($acao) {
         $chamadas = [];
         foreach ($cham as $canal => $pessoas) $chamadas[] = ['canal' => $canal, 'pessoas' => $pessoas];
         responder(['ok' => true, 'agora' => $agora, 'presencas' => $pres, 'mensagens' => $msgs, 'chamadas' => $chamadas]);
+
+    case 'upload': // arquivo enviado em pedaços (o corpo da requisição é o pedaço do arquivo)
+        if ($metodo !== 'POST') erro('Método inválido.', 405);
+        $u = usuarioLogado($pdo);
+        $col = (string) ($_GET['col'] ?? '');
+        $reg = (string) ($_GET['reg'] ?? '');
+        $up = (string) ($_GET['up'] ?? '');
+        $nome = trim(str_replace(["\0", '/', '\\'], '', mb_substr((string) ($_GET['nome'] ?? 'arquivo'), 0, 200)));
+        $ext = strtolower(pathinfo($nome, PATHINFO_EXTENSION));
+        $total = (int) ($_GET['total'] ?? 0);
+        $ini = (int) ($_GET['ini'] ?? 0);
+        if (!in_array($col, ANEXO_COLECOES, true) || !preg_match('/^[\w-]{1,60}$/', $reg) || !preg_match('/^[a-f0-9]{16,32}$/', $up)) erro('Envio inválido.');
+        if (!in_array($ext, ANEXO_EXT, true)) erro('Tipo de arquivo não aceito (.' . $ext . ').');
+        if ($total <= 0 || $total > ANEXO_MAX) erro('Arquivo muito grande (máximo 2 GB).');
+        $ant = nuc_ler($pdo, $col, $reg);
+        if ($ant ? !podeLer($u, $col, $reg, $ant) || !podeGravar($u, $col, $reg, $ant, $ant) : !podeGravar($u, $col, $reg, ['parceiro' => $u['email']], null)) erro('Sem permissão para anexar aqui.', 403);
+        $dir = nuc_pasta($cfg, 'anexos');
+        $tmp = $dir . '/tmp-' . $up . '-' . (int) $u['id'] . '.part';
+        clearstatcache();
+        $atual = is_file($tmp) ? filesize($tmp) : 0;
+        if ($ini !== $atual) responder(['ok' => false, 'erro' => 'Fora de ordem', 'continuar' => $atual], 409);
+        $pedaco = file_get_contents('php://input');
+        if ($pedaco === false || strlen($pedaco) === 0 || strlen($pedaco) > ANEXO_PARTE + 1024) erro('Pedaço inválido.');
+        if ($atual + strlen($pedaco) > $total) erro('Tamanho não confere.');
+        file_put_contents($tmp, $pedaco, FILE_APPEND | LOCK_EX);
+        $atual += strlen($pedaco);
+        if ($atual < $total) responder(['ok' => true, 'recebido' => $atual]);
+        $id = nuc_uid() . bin2hex(random_bytes(4));
+        rename($tmp, $dir . '/' . $id . '.bin');
+        foreach (glob($dir . '/tmp-*.part') ?: [] as $velho) if (filemtime($velho) < time() - 86400) @unlink($velho); // envios abandonados
+        $mimes = ['pdf' => 'application/pdf', 'jpg' => 'image/jpeg', 'jpeg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp', 'gif' => 'image/gif', 'heic' => 'image/heic',
+            'mp4' => 'video/mp4', 'm4v' => 'video/mp4', 'mov' => 'video/quicktime', 'webm' => 'video/webm', 'mkv' => 'video/x-matroska', 'avi' => 'video/x-msvideo', '3gp' => 'video/3gpp',
+            'mp3' => 'audio/mpeg', 'm4a' => 'audio/mp4', 'wav' => 'audio/wav', 'ogg' => 'audio/ogg', 'aac' => 'audio/aac', 'txt' => 'text/plain', 'srt' => 'text/plain', 'csv' => 'text/csv',
+            'doc' => 'application/msword', 'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'];
+        $mime = $mimes[$ext] ?? 'application/octet-stream';
+        $em = agoraMs();
+        $pdo->prepare('INSERT INTO anexos (id, colecao, registro, nome, mime, tamanho, por_email, em) VALUES (?,?,?,?,?,?,?,?)')
+            ->execute([$id, $col, $reg, $nome, $mime, $total, minusculo($u['email']), $em]);
+        registrar($pdo, (int) $u['id'], 'anexo', $col, $reg);
+        responder(['ok' => true, 'anexo' => ['id' => $id, 'nome' => $nome, 'mime' => $mime, 'tamanho' => $total, 'por' => minusculo($u['email']), 'em' => $em]]);
+
+    case 'anexo': // baixar ou assistir (com suporte a avançar o vídeo)
+        $u = usuarioLogado($pdo);
+        $st = $pdo->prepare('SELECT * FROM anexos WHERE id = ?');
+        $st->execute([(string) ($_GET['id'] ?? '')]);
+        $a = $st->fetch();
+        if (!$a) erro('Arquivo não encontrado.', 404);
+        $reg = nuc_ler($pdo, $a['colecao'], $a['registro']);
+        if ($reg ? !podeLer($u, $a['colecao'], $a['registro'], $reg) : minusculo($u['email']) !== $a['por_email']) erro('Sem permissão.', 403);
+        $arq = nuc_pasta($cfg, 'anexos') . '/' . $a['id'] . '.bin';
+        if (!is_file($arq)) erro('Arquivo não encontrado no servidor.', 404);
+        $tam = filesize($arq);
+        $ini = 0; $fim = $tam - 1;
+        if (preg_match('/bytes=(\d*)-(\d*)/', $_SERVER['HTTP_RANGE'] ?? '', $m) && ($m[1] !== '' || $m[2] !== '')) {
+            if ($m[1] === '') { $ini = max(0, $tam - (int) $m[2]); } else { $ini = (int) $m[1]; if ($m[2] !== '') $fim = min($fim, (int) $m[2]); }
+            if ($ini > $fim || $ini >= $tam) { http_response_code(416); header('Content-Range: bytes */' . $tam); exit; }
+            http_response_code(206);
+            header("Content-Range: bytes $ini-$fim/$tam");
+        }
+        $inline = empty($_GET['baixar']) && preg_match('#^(image/(jpeg|png|webp|gif)|video/|audio/|application/pdf)#', $a['mime']);
+        header('Content-Type: ' . $a['mime']);
+        header('Accept-Ranges: bytes');
+        header('Content-Length: ' . ($fim - $ini + 1));
+        header('Cache-Control: private, max-age=3600');
+        header("Content-Disposition: " . ($inline ? 'inline' : 'attachment') . "; filename*=UTF-8''" . rawurlencode($a['nome']));
+        header("Content-Security-Policy: default-src 'none'; media-src 'self'; img-src 'self'; style-src 'unsafe-inline'");
+        while (ob_get_level()) ob_end_clean();
+        $f = fopen($arq, 'rb');
+        fseek($f, $ini);
+        $falta = $fim - $ini + 1;
+        while ($falta > 0 && !feof($f)) { $buf = fread($f, (int) min(1048576, $falta)); echo $buf; $falta -= strlen($buf); flush(); }
+        fclose($f);
+        exit;
+
+    case 'anexoApagar':
+        if ($metodo !== 'POST') erro('Método inválido.', 405);
+        $u = usuarioLogado($pdo);
+        $b = corpo();
+        $st = $pdo->prepare('SELECT * FROM anexos WHERE id = ?');
+        $st->execute([(string) ($b['id'] ?? '')]);
+        $a = $st->fetch();
+        if (!$a) responder(['ok' => true]);
+        if ($u['papel'] !== 'admin' && minusculo($u['email']) !== $a['por_email']) erro('Só quem enviou (ou a administração) pode apagar este arquivo.', 403);
+        @unlink(nuc_pasta($cfg, 'anexos') . '/' . $a['id'] . '.bin');
+        $pdo->prepare('DELETE FROM anexos WHERE id = ?')->execute([$a['id']]);
+        registrar($pdo, (int) $u['id'], 'anexo_apagar', $a['colecao'], $a['registro']);
+        responder(['ok' => true]);
 
     case 'rtc': // sinalização das chamadas: o áudio e o vídeo vão direto entre os navegadores
         if ($metodo !== 'POST') erro('Método inválido.', 405);
@@ -742,7 +921,7 @@ switch ($acao) {
             if (!preg_match('#^https://[^\s]+$#', $ep) || strlen($ep) > 1000 || empty($k['p256dh']) || empty($k['auth'])) erro('Assinatura inválida.');
             if (strlen(nuc_b64ud((string) $k['p256dh'])) !== 65 || strlen(nuc_b64ud((string) $k['auth'])) < 16) erro('Chaves do aparelho inválidas.');
             $prefs = [];
-            foreach (['msg', 'tarefa', 'prazo', 'meta', 'resumo', 'portal'] as $t) $prefs[$t] = !isset($b['prefs'][$t]) || !empty($b['prefs'][$t]);
+            foreach (['msg', 'tarefa', 'prazo', 'meta', 'resumo', 'portal', 'conquista'] as $t) $prefs[$t] = !isset($b['prefs'][$t]) || !empty($b['prefs'][$t]);
             $pdo->prepare('DELETE FROM push_assinaturas WHERE eh = ?')->execute([hash('sha256', $ep)]);
             $pdo->prepare('INSERT INTO push_assinaturas (eh, email, endpoint, p256dh, auth, prefs, aparelho, criado_em) VALUES (?,?,?,?,?,?,?,?)')
                 ->execute([hash('sha256', $ep), $eu, $ep, (string) $k['p256dh'], (string) $k['auth'], json_encode($prefs), mb_substr((string) ($b['aparelho'] ?? ''), 0, 120), agoraMs()]);
@@ -750,7 +929,7 @@ switch ($acao) {
         }
         if ($op === 'prefs') {
             $prefs = [];
-            foreach (['msg', 'tarefa', 'prazo', 'meta', 'resumo', 'portal'] as $t) $prefs[$t] = !empty($b['prefs'][$t]);
+            foreach (['msg', 'tarefa', 'prazo', 'meta', 'resumo', 'portal', 'conquista'] as $t) $prefs[$t] = !empty($b['prefs'][$t]);
             $pdo->prepare('UPDATE push_assinaturas SET prefs = ? WHERE eh = ? AND email = ?')->execute([json_encode($prefs), hash('sha256', $ep), $eu]);
             responder(['ok' => true, 'prefs' => $prefs]);
         }
@@ -767,7 +946,7 @@ switch ($acao) {
     case 'avisar': // metas e ranking (detectados no painel): avisa a equipe uma única vez por chave
         if ($metodo !== 'POST') erro('Método inválido.', 405);
         $u = usuarioLogado($pdo);
-        if ($u['papel'] === 'parceiro') erro('Sem permissão.', 403);
+        if (externo($u)) erro('Sem permissão.', 403);
         $b = corpo();
         $tipo = in_array($b['tipo'] ?? '', ['meta', 'ranking'], true) ? $b['tipo'] : '';
         $chave = (string) ($b['chave'] ?? '');
@@ -801,7 +980,7 @@ switch ($acao) {
     case 'zapsignStatus':
         if ($metodo !== 'POST') erro('Método inválido.', 405);
         $u = usuarioLogado($pdo);
-        if ($u['papel'] === 'parceiro') erro('Sem permissão.', 403);
+        if (externo($u)) erro('Sem permissão.', 403);
         $s = segredos($pdo);
         if (empty($s['zapsignToken'])) erro('Configure o token da ZapSign em Configurações → Integrações.');
         $api = !empty($s['zapsignSandbox']) ? 'https://sandbox.api.zapsign.com.br/api/v1' : 'https://api.zapsign.com.br/api/v1';
@@ -871,7 +1050,7 @@ switch ($acao) {
     case 'escavador':
         if ($metodo !== 'POST') erro('Método inválido.', 405);
         $u = usuarioLogado($pdo);
-        if ($u['papel'] === 'parceiro') erro('Sem permissão.', 403);
+        if (externo($u)) erro('Sem permissão.', 403);
         $s = segredos($pdo);
         if (empty($s['escavadorToken'])) erro('Configure o token do Escavador em Configurações → Integrações.');
         $num = preg_replace('/[^0-9.\-]/', '', (string) (corpo()['numero'] ?? ''));
@@ -888,7 +1067,7 @@ switch ($acao) {
     case 'ia':
         if ($metodo !== 'POST') erro('Método inválido.', 405);
         $u = usuarioLogado($pdo);
-        if ($u['papel'] === 'parceiro') erro('Sem permissão.', 403);
+        if (externo($u) && !($u['papel'] === 'editor' && (corpo()['modo'] ?? '') === 'conteudo')) erro('Sem permissão.', 403);
         $s = segredos($pdo);
         if (empty($s['anthropicKey'])) erro('Configure a chave da IA (Claude) em Configurações → Integrações.');
         $b = corpo();

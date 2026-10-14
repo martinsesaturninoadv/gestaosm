@@ -3,9 +3,15 @@
    ========================================================= */
 const KEY_V5='msadv_gestao_v5',KEY_V4='msadv_gestao_v4',KEY_STORE='msadv_gestao_v6_demo',KEY_SESSAO='msadv_gestao_v6_sessao';
 const AREAS=['Previdenciário','Trabalhista','Cível','Família','Consumidor','Direito digital','Tributário','Empresarial','Criminal'];
-const FASES_JUD=['Inicial / Distribuição','Citação','Contestação / réplica','Instrução','Sentença','Recurso','Cumprimento de sentença','Execução / RPV-precatório','Encerrado'];
+const FASES_JUD=['Inicial / Distribuição','Citação','Contestação / réplica','Instrução','Sentença','Recurso','Acordo','Cumprimento de sentença','Execução / RPV-precatório','Encerrado'];
 const FASES_ADM=['Requerimento a protocolar','Protocolado — em análise','Em exigência','Perícia / avaliação agendada','Deferido','Indeferido','Recurso administrativo','Encerrado'];
 const FASES=FASES_JUD.concat(FASES_ADM.filter(f=>f!=='Encerrado'));
+/* efeitos de mudar a fase: decisão administrativa e acordo mudam a situação; acordo pede os dados */
+function aplicarFase(p,fase){
+  const ant=p.fase;p.fase=fase;if(ant===fase)return;
+  if(p.tipo==='Administrativo'&&['Deferido','Indeferido'].includes(fase)&&p.status==='Em andamento')p.status=fase;if(fase==='Deferido')celebrarEvento('deferido','Requerimento deferido!',nomeCli(p.clienteId));
+  if(p.tipo==='Judicial'&&fase==='Acordo'){if(p.status==='Em andamento')p.status='Acordo';celebrarEvento('acordo','Acordo fechado!',nomeCli(p.clienteId));if(!p.valorAcordo)setTimeout(()=>{toast('🤝 Acordo! Preencha os dados do acordo.');editAcordo(p.id);},350);}
+}
 const fasesDe=tipo=>tipo==='Administrativo'?FASES_ADM:FASES_JUD;
 const STATUS_PROC=['Em andamento','Deferido','Indeferido','Suspenso','Ganho','Acordo','Perdido','Arquivado'];
 const INSTANCIAS=['1º grau','2º grau / Turma Recursal','Tribunais superiores (STJ/STF/TST)'];
@@ -21,7 +27,7 @@ const ORIGENS=['Google Ads','Facebook / Instagram Ads','Instagram orgânico','Ti
 const AMBITOS=['Judicial','Administrativo','Administrativo + Judicial','Extrajudicial / consultivo'];
 const SEXOS=['Feminino','Masculino','Outro'];
 const UFS='AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ');
-const PAPEIS=[['admin','Administrador(a)'],['advogado','Advogado(a)'],['financeiro','Financeiro / administrativo'],['estagiario','Estagiário(a) — sem financeiro'],['parceiro','Parceiro — só os casos da parceria']];
+const PAPEIS=[['admin','Administrador(a)'],['advogado','Advogado(a)'],['financeiro','Financeiro / administrativo'],['estagiario','Estagiário(a) — sem financeiro'],['parceiro','Parceiro — só os casos da parceria'],['editor','Editor(a) de vídeo — só a produção de conteúdo']];
 const papelNome=p=>(PAPEIS.find(x=>x[0]===p)||['',p||''])[1];
 const PRODUTOS_PADRAO=['Salário-maternidade','Previdenciário (outros)','Trabalhista','Família','Consumidor','Cível','Direito digital','Tributário','Empresarial'];
 const METAS_PADRAO={qtd:20,valorTotal:55000,entradas:25000,ticket:2500,entradaMedia:1000,parcelasMedia:5,parcelaMedia:300,atendimentos:60,premio:'Batendo a meta do mês: happy hour da equipe e bônus de R$ 300 para quem mais pontuar!'};

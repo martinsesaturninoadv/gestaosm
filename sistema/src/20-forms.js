@@ -91,8 +91,9 @@ function editProcesso(id,pre){
     {t:'sec',l:'Administrativo (se requerimento)'},
     {k:'orgaoAdm',l:'Órgão',t:'select',o:ORGAOS_ADM},{k:'protocolo',l:'Nº do protocolo / requerimento'},
     {k:'der',l:'DER — data de entrada do requerimento',t:'date'},{k:'prazoAnalise',l:'Prazo esperado de resposta',t:'date'}],
-    p,v=>{if(!fasesDe(v.tipo).includes(v.fase))v.fase=fasesDe(v.tipo)[0];
-      if(v.tipo==='Administrativo'&&['Deferido','Indeferido'].includes(v.fase)&&v.status==='Em andamento'&&p.fase!==v.fase)v.status=v.fase;const nid=upsert('processos',id,v,{andamentos:[]});if(!id)location.hash='processo/'+nid;},
+    p,v=>{if(!fasesDe(v.tipo).includes(v.fase))v.fase=fasesDe(v.tipo)[0];if(v.status!==p.status&&['Ganho','Deferido'].includes(v.status))setTimeout(()=>celebrarEvento(v.status==='Ganho'?'ganho':'deferido',v.status==='Ganho'?'Processo ganho!':'Requerimento deferido!',nomeCli(v.clienteId)),200);
+      const novaFase=v.fase;v.fase=p.fase;if(id){Object.assign(p,{...v,fase:p.fase});aplicarFase(p,novaFase);v.fase=p.fase;v.status=p.status;}else v.fase=novaFase;
+      if(!id&&v.tipo==='Administrativo'&&['Deferido','Indeferido'].includes(v.fase)&&v.status==='Em andamento')v.status=v.fase;if(!id&&v.fase==='Acordo'&&v.status==='Em andamento')v.status='Acordo';const nid=upsert('processos',id,v,{andamentos:[]});if(!id)location.hash='processo/'+nid;},
     id&&(()=>{db.processos=db.processos.filter(x=>x.id!==id);if(ui.page==='processo')location.hash='processos';}));
 }
 function editEvento(id,pre){
@@ -107,7 +108,7 @@ function editEvento(id,pre){
     {...e,responsaveis:respDe(e)},v=>{v.responsavelId=v.responsaveis[0]||'';if(v.processoId&&!v.clienteId)v.clienteId=proc(v.processoId)?.clienteId||'';
       if(!db.tiposEvento.some(t=>norm(t.nome)===norm(v.tipo)))db.tiposEvento.push({nome:v.tipo,cor:corNova()});
       else v.tipo=db.tiposEvento.find(t=>norm(t.nome)===norm(v.tipo)).nome;
-      if(v.feito&&!e.feito){v.feitoEm=today();v.feitoPor=db.usuarioAtual;}if(!v.feito)v.feitoEm='';
+      if(v.feito&&!e.feito){v.feitoEm=today();v.feitoPor=db.usuarioAtual;setTimeout(()=>celebrarEvento('prazo','Prazo cumprido!',v.titulo),200);}if(!v.feito)v.feitoEm='';
       upsert('eventos',id,v);},
     id&&(()=>{db.eventos=db.eventos.filter(x=>x.id!==id);}));
 }
@@ -120,7 +121,7 @@ function editTarefa(id,pre){
     {k:'prazo',l:'Prazo',t:'date'},{k:'hora',l:'Até que horas',t:'time'},{k:'clienteId',l:'Cliente',t:'select',o:O.clientes,full:1},
     {k:'responsaveis',l:'Responsáveis (marque uma ou mais pessoas)',t:'multi',o:O.usuarios,full:1,req:1},
     {k:'processoId',l:'Processo',t:'select',o:O.processos,full:1},{k:'obs',l:'Detalhes',t:'textarea',full:1,rows:2}],
-    {...t,responsaveis:respDe(t)},v=>{v.responsavelId=v.responsaveis[0]||'';if(v.status==='done'&&t.status!=='done'){v.concluidoEm=today();v.concluidoPor=quemConclui(v);}if(v.status!=='done')v.concluidoEm='';upsert('tarefas',id,v);},id&&(()=>{db.tarefas=db.tarefas.filter(x=>x.id!==id);}));
+    {...t,responsaveis:respDe(t)},v=>{v.responsavelId=v.responsaveis[0]||'';if(v.status==='done'&&t.status!=='done'){v.concluidoEm=today();v.concluidoPor=quemConclui(v);setTimeout(()=>celebrarEvento('tarefa','Tarefa concluída!',v.titulo),200);}if(v.status!=='done')v.concluidoEm='';upsert('tarefas',id,v);},id&&(()=>{db.tarefas=db.tarefas.filter(x=>x.id!==id);}));
 }
 function editLead(id){
   const l=id?db.leads.find(x=>x.id===id):{etapa:'Novo contato',origem:'',primeiroContato:today(),ultimoContato:today()};
@@ -173,7 +174,7 @@ function editContrato(id,pre){
     const gerar=v.gerar;delete v.gerar;
     const nid=upsert('contratos',id,v);
     if(!id){const c=cli(v.clienteId);if(c){c.status='Ativo';if(!c.produto)c.produto=v.produto;}
-      if(gerar)db.lancamentos.push(...gerarParcelas(ctr(nid)));setTimeout(checarMetas,400);}
+      if(gerar)db.lancamentos.push(...gerarParcelas(ctr(nid)));setTimeout(()=>celebrarEvento('contrato','Contrato fechado!',nomeCli(v.clienteId)),250);}
   },id&&(async()=>{const abertas=db.lancamentos.filter(l=>l.contratoId===id&&!l.pago);
       if(abertas.length&&await confirmar(`Excluir também as ${abertas.length} parcela(s) em aberto deste contrato no financeiro?`,'Excluir parcelas'))db.lancamentos=db.lancamentos.filter(l=>!(l.contratoId===id&&!l.pago));
       db.contratos=db.contratos.filter(x=>x.id!==id);}),
@@ -257,7 +258,7 @@ function editSm(id,pre){
     {k:'valorConcedido',l:'Valor total concedido (R$)',t:'number'},{k:'previsaoPagamento',l:'Previsão do pagamento',t:'date'},{k:'pagoClienteEm',l:'Pago à cliente em',t:'date'},
     {k:'nb',l:'NB / protocolo'},{k:'beneficioEstimado',l:'Valor total estimado do benefício (R$)',t:'number'},
     {k:'obs',l:'Observações',t:'textarea',full:1,rows:2}],
-    c,v=>{if(v.status==='Deferido'&&!v.dataDeferimento)v.dataDeferimento=today();
+    c,v=>{if(v.status==='Deferido'&&!v.dataDeferimento)v.dataDeferimento=today();if(v.status==='Deferido'&&c.status!=='Deferido')setTimeout(()=>celebrarEvento('deferido','Benefício deferido!',nomeCli(v.clienteId||c.clienteId)),200);
       if(v.status==='Aguardando o parto'&&v.dataParto){v.status='Pronto para protocolo';setTimeout(()=>toast('Parto informado: caso movido para "Pronto para protocolo" 👶'),300);}
       const nid=upsert('sm',id,v,{guias:[]});if(!id)location.hash='sm/'+nid;},id&&(()=>{db.sm=db.sm.filter(x=>x.id!==id);if(ui.page==='sm'&&ui.id)location.hash='sm';}),
     'Cadastre também os documentos padrão do salário-maternidade no checklist do cliente (botão na ficha do caso).');

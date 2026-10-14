@@ -2,11 +2,13 @@
    RENDER / ROTEAMENTO
    ========================================================= */
 const PAGINAS_PARCEIRO=['painel','escritorio','tarefas','parcerias','config','cliente','processo'];
+const PAGINAS_EDITOR=['conteudo','escritorio','config'];
 function render(){
   if(!db)return;
   const [page,id]=(location.hash.slice(1)||'painel').split('/');
   ui.page=V[page]?page:'painel';ui.id=id||null;
   if(ehParceiro()&&!PAGINAS_PARCEIRO.includes(ui.page))ui.page='painel';
+  if(ehEditor()&&!PAGINAS_EDITOR.includes(ui.page)){ui.page='conteudo';ui.id=null;}
   let title=TITLES[ui.page];
   if(ui.page==='cliente'&&cli(ui.id))title=cli(ui.id).nome;
   if(ui.page==='processo'&&proc(ui.id))title=(proc(ui.id).tipo==='Judicial'?'Processo ':'Requerimento ')+proc(ui.id).numero;
@@ -22,6 +24,8 @@ function render(){
   document.querySelectorAll('[data-fin]').forEach(el=>el.style.display=podeFin()?'':'none');
   document.querySelectorAll('[data-noparc]').forEach(el=>el.style.display=ehParceiro()?'none':'');
   document.querySelectorAll('[data-parc]').forEach(el=>el.style.display=ehParceiro()||(podeFin()&&parceiros().length)?'':'none');
+  if(ehEditor()){document.querySelectorAll('#nav .ni').forEach(a=>a.style.display=PAGINAS_EDITOR.includes(a.getAttribute('href').slice(1))?'':'none');document.querySelectorAll('#nav .ns').forEach(el=>el.style.display='none');}
+  document.querySelectorAll('[data-act="quickAdd"],[data-act="voz"]').forEach(el=>el.style.display=ehEditor()?'none':'');
   badges();userBox();
 }
 function badges(){
@@ -32,7 +36,7 @@ function badges(){
   n('nb-docs',db.documentos.filter(d=>!d.recebido).length);
   n('nb-sm',ehParceiro()?0:guiasPendentes(7).length);
   n('nb-esc',totalNaoLidas());
-  n('nb-cont',db.conteudos.filter(contAtrasado).length);
+  n('nb-cont',db.conteudos.filter(contAtrasado).length+naoLidasConteudo()+(ehEditor()?db.conteudos.filter(c=>c.editorId===db.usuarioAtual&&c.etapa==='Edição').length:0));
   n('nb-pet',db.peticoes.filter(p=>p.conferenteId===db.usuarioAtual&&p.status==='A conferir').length);
   n('nb-aud',db.eventos.filter(e=>ehAudiencia(e)&&!e.feito&&diff(e.data)>=0&&diff(e.data)<=1).length);
   verificarAvisosAparelho();avisosMetaRanking();
@@ -56,7 +60,7 @@ const A={
   novoProc:()=>editProcesso(),editProc:id=>editProcesso(id),novoProcCli:id=>editProcesso(null,{clienteId:id}),
   novoEv:()=>editEvento(),editEv:id=>editEvento(id),novoEvData:d=>editEvento(null,{data:d}),
   novoEvProc:id=>editEvento(null,{processoId:id,clienteId:proc(id)?.clienteId}),novoEvCli:id=>editEvento(null,{clienteId:id}),
-  toggleEv:id=>{const e=db.eventos.find(x=>x.id===id);e.feito=!e.feito;e.feitoEm=e.feito?today():'';e.feitoPor=e.feito?db.usuarioAtual:'';save();render();toast(e.feito?'Cumprido! +'+PONTOS.prazo+' pontos ✓':'Reaberto');},
+  toggleEv:id=>{const e=db.eventos.find(x=>x.id===id);e.feito=!e.feito;e.feitoEm=e.feito?today():'';e.feitoPor=e.feito?db.usuarioAtual:'';save();render();if(e.feito)celebrarEvento('prazo','Prazo cumprido!',e.titulo);else toast('Reaberto');},
   novaTar:()=>editTarefa(),editTar:id=>editTarefa(id),novaTarProc:id=>editTarefa(null,{processoId:id,clienteId:proc(id)?.clienteId}),
   novoLead:()=>editLead(),editLead:id=>editLead(id),
   converter:id=>{const l=db.leads.find(x=>x.id===id);const nid=uid();
@@ -112,9 +116,9 @@ const A={
   duplicarModelo:id=>{const m=db.modelos.find(x=>x.id===id);db.modelos.push({...m,id:uid(),nome:m.nome+' (cópia)',padrao:false});save();render();toast('Modelo duplicado');},
   restaurarModelos:()=>{let n=0;modelosPadrao().forEach(m=>{if(!db.modelos.some(x=>x.nome===m.nome)){db.modelos.push(m);n++;}});save();render();toast(n?n+' modelo(s) restaurado(s)':'Todos os modelos padrão já existem');},
   tabProc:k=>{ui.tabProc=k;render();},procView:k=>{ui.procView=k;render();},
-  setFase:k=>{const i=k.indexOf('|');const p=proc(k.slice(0,i));p.fase=k.slice(i+1);if(p.tipo==='Administrativo'&&['Deferido','Indeferido'].includes(p.fase)&&p.status==='Em andamento')p.status=p.fase;save();render();toast('Fase atualizada ✓');},
+  setFase:k=>{const i=k.indexOf('|');const p=proc(k.slice(0,i));aplicarFase(p,k.slice(i+1));save();render();toast('Fase atualizada ✓');},
   tabSm:k=>{ui.tabSm=k;render();},novoSm:()=>editSm(),novoSmCli:id=>editSm(null,{clienteId:id}),editSm:id=>editSm(id),
-  setSmStatus:k=>{const i=k.indexOf('|');const c=db.sm.find(x=>x.id===k.slice(0,i));c.status=k.slice(i+1);if(c.status==='Deferido'&&!c.dataDeferimento){c.dataDeferimento=today();setTimeout(()=>editSm(c.id),400);}save();render();toast('Etapa atualizada ✓');},
+  setSmStatus:k=>{const i=k.indexOf('|');const c=db.sm.find(x=>x.id===k.slice(0,i));c.status=k.slice(i+1);if(c.status==='Deferido'&&!c.dataDeferimento){c.dataDeferimento=today();celebrarEvento('deferido','Benefício deferido!',nomeCli(c.clienteId));setTimeout(()=>editSm(c.id),1800);}save();render();toast('Etapa atualizada ✓');},
   novaGuia:id=>editGuia(id),editGuia:k=>{const[s,g]=k.split('|');editGuia(s,g);},gerarGuias:id=>gerarGuias(id),
   guiaEmitida:k=>{const[s,gid]=k.split('|');const g=db.sm.find(x=>x.id===s).guias.find(x=>x.id===gid);g.emitidaEm=today();save();render();toast('Guia marcada como emitida ✓');},
   guiaPaga:k=>{const[s,gid]=k.split('|');const g=db.sm.find(x=>x.id===s).guias.find(x=>x.id===gid);g.pagaEm=today();if(!g.emitidaEm)g.emitidaEm=today();save();render();toast('Guia paga ✓');},
@@ -170,7 +174,7 @@ const A={
   importar:()=>$('#file-import').click(),
   importarXls:()=>$('#file-xlsx').click(),importarWa:()=>importarWhatsApp(),
 };
-Object.assign(A,PET_AUD_ACOES,VOZ_ACOES,CONT_ACOES,RTC_ACOES,ESC_ACOES,TRAF_ACOES,FLUXO_ACOES,LEMB_ACOES,INTEG_ACOES,SEG_ACOES,{portalAba:id=>{ui.tabCli='portal';location.hash='cliente/'+id;render();},smLembretes:()=>{ui.tabSm='lembretes';location.hash='sm';render();}});
+Object.assign(A,FX_ACOES,ANX_ACOES,ACORDO_ACOES,PET_AUD_ACOES,VOZ_ACOES,CONT_ACOES,RTC_ACOES,ESC_ACOES,TRAF_ACOES,FLUXO_ACOES,LEMB_ACOES,INTEG_ACOES,SEG_ACOES,{portalAba:id=>{ui.tabCli='portal';location.hash='cliente/'+id;render();},smLembretes:()=>{ui.tabSm='lembretes';location.hash='sm';render();}});
 function lerTipos(){document.querySelectorAll('[data-tipo-nome]').forEach(el=>{const i=+el.dataset.tipoNome;if(db.tiposEvento[i])db.tiposEvento[i].nome=el.value.trim();});
   document.querySelectorAll('[data-tipo-cor]').forEach(el=>{const i=+el.dataset.tipoCor;if(db.tiposEvento[i])db.tiposEvento[i].cor=el.value;});}
 function lancarFixas(ym,ids){

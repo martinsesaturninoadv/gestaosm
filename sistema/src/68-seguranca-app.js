@@ -59,7 +59,7 @@ function verificarAvisosAparelho(){
 }
 
 /* ---------- notificações PUSH (chegam com o sistema fechado) ---------- */
-const PUSH_TIPOS=[['tarefa','☑ Tarefas e petições para mim (e urgências)'],['prazo','📅 Prazos, audiências e o "bom dia" com o que vence'],['msg','💬 Mensagens do escritório virtual'],['portal','📨 Mensagens e arquivos de clientes no portal'],['meta','🏆 Metas batidas e ranking'],['resumo','📋 Resumo do dia da equipe (18h)']];
+const PUSH_TIPOS=[['tarefa','☑ Tarefas e petições para mim (e urgências)'],['prazo','📅 Prazos, audiências e o "bom dia" com o que vence'],['msg','💬 Mensagens do escritório virtual'],['portal','📨 Mensagens e arquivos de clientes no portal'],['meta','🏆 Metas (50%, 75%, 90% e batida) e ranking'],['conquista','🎉 Conquistas da equipe (contrato fechado, deferimento, acordo, tarefa que você pediu concluída)'],['resumo','📋 Resumo do dia da equipe (18h)']];
 let PUSH=null;
 const pushSuportado=()=>'serviceWorker' in navigator&&'PushManager' in window&&!!window.Notification&&window.isSecureContext;
 function b64uParaU8(s){const b=atob((s+'='.repeat((4-s.length%4)%4)).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(b,c=>c.charCodeAt(0));}
@@ -97,12 +97,10 @@ function cardPush(){
 /* metas e ranking: quem perceber primeiro avisa a equipe (o servidor evita aviso repetido) */
 let ultAvisoMeta=0;
 function avisosMetaRanking(){
-  if(modo!=='servidor'||!sessao||ehParceiro()||!db||Date.now()-ultAvisoMeta<120000)return;ultAvisoMeta=Date.now();
+  if(modo!=='servidor'||!sessao||ehExterno()||!db||Date.now()-ultAvisoMeta<120000)return;ultAvisoMeta=Date.now();
   const ym=today().slice(0,7);const ja=k=>{try{if(localStorage.getItem('av|'+k))return true;localStorage.setItem('av|'+k,'1');}catch(e){}return false;};
   const enviar=(tipo,chave,titulo,texto)=>{if(!ja(chave))api('avisar',{tipo,chave,titulo,texto}).catch(()=>{});};
-  statusMetas(ym).forEach(m=>{if(!m.meta)return;const p=m.atual/m.meta;
-    if(p>=1)enviar('meta','meta:'+ym+':'+m.id,'🏆 Meta batida: '+m.nome+'!',m.fin?'A equipe bateu a meta do mês. Parabéns, time! 🎉':'Chegamos a '+m.fmt(m.atual)+' de '+m.fmt(m.meta)+'. Parabéns, time! 🎉');
-    else if(p>=0.9)enviar('meta','meta:'+ym+':'+m.id+':90','🔥 Falta pouco: '+m.nome,'Já estamos em '+Math.round(p*100)+'% da meta do mês. Bora fechar!');});
+  // as metas (50%, 75%, 90% e batida) são avisadas pelo servidor quando o contrato/atendimento é salvo
   const prod=produtividade(ym);const l=prod[0];
   if(l&&l.pontos>0&&(!prod[1]||prod[1].pontos<l.pontos)){let ant=null;try{ant=localStorage.getItem('rk_lider|'+ym);localStorage.setItem('rk_lider|'+ym,l.u.id);}catch(e){}
     if(ant&&ant!==l.u.id)enviar('ranking','ranking:'+today()+':'+l.u.id,'🥇 '+l.u.nome+' assumiu a liderança do ranking!',l.pontos+' pontos no mês'+(prod[1]?' · '+prod[1].u.nome+' vem logo atrás com '+prod[1].pontos:'')+'. Quem vai recuperar? 💪');}

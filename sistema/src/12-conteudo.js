@@ -253,7 +253,7 @@ function seedConteudo(d){
     ['Um dia no escritório','Bastidores do escritório','Gravação',4,['Instagram'],0],
     ['BPC/LOAS: quem tem direito','BPC / LOAS','Roteiro',6,['TikTok'],0],
     ['Respondendo as perguntas da semana','Dúvidas frequentes','Ideia',0,['TikTok'],0]];
-  d.conteudos=C.map((a,i)=>({id:'ct'+i,titulo:a[0],tema:a[1],etapa:a[2],plataformas:a[4],formato:'Vídeo curto (TikTok/Reels/Shorts)',responsaveis:['u1'],editorId:'u3',
+  d.conteudos=C.map((a,i)=>({id:'ct'+i,titulo:a[0],tema:a[1],etapa:a[2],plataformas:a[4],formato:'Vídeo curto (TikTok/Reels/Shorts)',responsaveis:['u1'],editorId:'u7',
     dataPublicacao:a[2]==='Ideia'?'':addDays(a[3]),hora:'19:00',dataGravacao:a[2]==='Ideia'?'':addDays(Math.min(a[3]-2,a[3])),dataEdicao:a[2]==='Ideia'?'':addDays(a[3]-1),
     views:a[5]||'',curtidas:a[6]||'',comentarios:a[7]||'',compart:a[8]||'',salvos:a[9]||'',seguidores:a[10]||'',leadsGerados:a[11]||'',conformeOAB:a[2]==='Publicado',
     gancho:'',roteiro:'',criado:addDays(-12),criadoPor:'u1',historico:[{em:Date.now()-86400000*(i+1),por:'u1',etapa:a[2]}]}));
@@ -262,7 +262,7 @@ function seedV6(d){
   const P='parceiro@costaadv.com';
   const em={u1:'admin@escritorio.com',u2:'saturnino@escritorio.com',u3:'estagiario@escritorio.com',u4:'secretaria@escritorio.com'};
   d.usuarios.forEach(u=>u.email=em[u.id]||u.email);
-  d.usuarios.push({id:'u5',nome:'Dra. Vitória',papel:'Advogado(a)',oab:'OAB/SP 000.005',email:'vitoria@escritorio.com'},{id:'u6',nome:'Dr. Rafael Costa',papel:'Parceiro',oab:'OAB/RJ 000.006',email:P});
+  d.usuarios.push({id:'u5',nome:'Dra. Vitória',papel:'Advogado(a)',oab:'OAB/SP 000.005',email:'vitoria@escritorio.com'},{id:'u6',nome:'Dr. Rafael Costa',papel:'Parceiro',oab:'OAB/RJ 000.006',email:P},{id:'u7',nome:'Lara Mendes',papel:'Editora de vídeo',oab:'',email:'editora@escritorio.com'});
   d.clientes.find(c=>c.id==='c6').parceiro=P;
   d.contratos.find(k=>k.id==='k3').parceriaPct=30;
   const lp=d.leads.find(l=>l.nome==='Patrícia Gomes');if(lp)lp.parceiro=P;

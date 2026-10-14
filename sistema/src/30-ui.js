@@ -57,18 +57,22 @@ function barras(series,rotulos,fmt,empilhado,alt=170){
 }
 
 /* ---------- produtividade, pontos e pins ---------- */
-const PONTOS={tarefa:10,prazo:15,contrato:50,atendimento:5,andamento:3};
+const PONTOS={tarefa:10,prazo:15,contrato:50,atendimento:5,andamento:3,deferido:30};
+/* data em que o benefício foi deferido (casos antigos sem a data: usa a DER ou o cadastro) */
+const dataDefSm=c=>c.dataDeferimento||(['Deferido','Concluído'].includes(c.status)?(c.der||c.criado||''):'');
+const deferidosSm=prefixo=>db.sm.filter(c=>dataDefSm(c).startsWith(prefixo));
 function produtividade(ym){
   const no=d=>d&&String(d).startsWith(ym);
-  const linhas=db.usuarios.filter(u=>!/parceir/i.test(u.papel)).map(u=>{
+  const linhas=db.usuarios.filter(u=>!/parceir|editor/i.test(u.papel)).map(u=>{
     const tarefas=db.tarefas.filter(t=>t.status==='done'&&(t.concluidoPor||t.responsavelId)===u.id&&no(t.concluidoEm)).length;
     const prazos=db.eventos.filter(e=>e.feito&&(e.feitoPor||e.responsavelId)===u.id&&no(e.feitoEm||e.data)).length;
     const contratos=db.contratos.filter(k=>k.responsavelId===u.id&&no(k.data)).length;
     const atend=db.leads.filter(l=>l.criadoPor===u.id&&no(l.primeiroContato||l.criado)).length+db.clientes.filter(c=>c.criadoPor===u.id&&!c.leadId&&no(c.criado)).length;
     const andam=sumBy(db.processos,p=>(p.andamentos||[]).filter(a=>a.autor===u.id&&no(a.data)).length);
+    const deferidos=db.sm.filter(c=>c.responsavelId===u.id&&no(dataDefSm(c))).length;
     const atrasados=db.eventos.filter(e=>!e.feito&&ehResp(e,u.id)&&diff(e.data)<0).length+db.tarefas.filter(t=>t.status!=='done'&&ehResp(t,u.id)&&t.prazo&&diff(t.prazo)<0).length;
-    const pontos=tarefas*PONTOS.tarefa+prazos*PONTOS.prazo+contratos*PONTOS.contrato+atend*PONTOS.atendimento+andam*PONTOS.andamento;
-    return {u,tarefas,prazos,contratos,atend,andam,atrasados,pontos,pins:[]};
+    const pontos=tarefas*PONTOS.tarefa+prazos*PONTOS.prazo+contratos*PONTOS.contrato+atend*PONTOS.atendimento+andam*PONTOS.andamento+deferidos*PONTOS.deferido;
+    return {u,tarefas,prazos,contratos,atend,andam,deferidos,atrasados,pontos,pins:[]};
   }).sort((a,b)=>b.pontos-a.pontos);
   linhas.forEach((l,i)=>{
     if(i===0&&l.pontos>0)l.pins.push(['🏆','Líder do mês']);
@@ -77,6 +81,7 @@ function produtividade(ym){
     if(l.atend>=3)l.pins.push(['🤝','Captador(a): '+l.atend+' atendimentos']);
     if(l.prazos>=2&&!l.atrasados)l.pins.push(['⚡','Prazos em dia']);
     if(l.andam>=3)l.pins.push(['📚','Processos atualizados']);
+    if(l.deferidos>=1)l.pins.push(['✅','Benefício(s) deferido(s): '+l.deferidos]);
   });
   return linhas;
 }
@@ -101,11 +106,12 @@ function confete(ms=3200){
     if(t-t0<ms)requestAnimationFrame(quadro);else cv.remove();})(t0);
 }
 function celebrar(titulo,texto){
+  sfx('fanfarra');
   if(!window.matchMedia||!matchMedia('(prefers-reduced-motion: reduce)').matches)confete();
   modal('',`<div class="celebra"><div class="trofeu">🏆</div><h2>${esc(titulo)}</h2><p>${esc(texto||'')}</p>${db.metas.premio?`<div class="premio">🎁 ${esc(db.metas.premio)}</div>`:''}</div>`,[{l:'Bora pra próxima! 🚀',c:'btn-gold',fn:closeModal}]);
 }
 function checarMetas(){
-  if(!sessao||ehParceiro()||!db)return;
+  if(!sessao||ehExterno()||!db)return;checarMarcosMeta();
   const ym=today().slice(0,7);const bat=statusMetas(ym).filter(m=>m.atual>=m.meta&&(!m.fin||podeFin()));
   for(const m of bat){const k='meta_celebrada|'+ym+'|'+m.id+'|'+meuEmail();
     let ja=false;try{ja=!!localStorage.getItem(k);localStorage.setItem(k,'1');}catch(e){}

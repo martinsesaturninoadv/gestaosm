@@ -9,12 +9,12 @@ function kanban(cols,items,kind,cardFn){
     ${its.map(i=>`<div class="kcard" draggable="true" data-drag="${kind}:${i.id}">${cardFn(i)}<div class="kmove">${ci>0?`<button data-act="kmove" data-id="${kind}:${i.id}:${esc(cols[ci-1][0])}" aria-label="Mover para a esquerda">◀</button>`:'<span></span>'}${ci<cols.length-1?`<button data-act="kmove" data-id="${kind}:${i.id}:${esc(cols[ci+1][0])}" aria-label="Mover para a direita">▶</button>`:''}</div></div>`).join('')}</div>`;}).join('')}</div>`;
 }
 function moveCard(kind,id,col){
-  if(kind==='tarefa'){const t=db.tarefas.find(x=>x.id===id);if(t){if(col==='done'&&t.status!=='done'){t.concluidoEm=today();t.concluidoPor=quemConclui(t);toast('Tarefa concluída! +'+PONTOS.tarefa+' pontos 🎉');}if(col!=='done')t.concluidoEm='';t.status=col;}}
+  if(kind==='tarefa'){const t=db.tarefas.find(x=>x.id===id);if(t){if(col==='done'&&t.status!=='done'){t.concluidoEm=today();t.concluidoPor=quemConclui(t);celebrarEvento('tarefa','Tarefa concluída!',t.titulo);}if(col!=='done')t.concluidoEm='';t.status=col;}}
   if(kind==='pet')moverPeticao(id,col);
   if(kind==='cont')moverConteudo(id,col);
-  if(kind==='proc'){const p=proc(id);if(p)p.fase=col;}
-  if(kind==='sm'){const c=db.sm.find(x=>x.id===id);if(c){c.status=col;if(col==='Deferido'&&!c.dataDeferimento){c.dataDeferimento=today();setTimeout(()=>{toast('🎉 Benefício deferido! Complete os dados do deferimento.');editSm(id);},400);}}}
-  if(kind==='lead'){const l=db.leads.find(x=>x.id===id);if(l){l.etapa=col;l.ultimoContato=today();if(col==='Fechado'){if(!l.dataFechamento)l.dataFechamento=today();}else l.dataFechamento='';if(col==='Fechado'&&!l.convertido)setTimeout(()=>toast('Negócio fechado! Use "Converter em cliente" no card.'),300);}}
+  if(kind==='proc'){const p=proc(id);if(p)aplicarFase(p,col);}
+  if(kind==='sm'){const c=db.sm.find(x=>x.id===id);if(c){c.status=col;if(col==='Deferido'&&!c.dataDeferimento){c.dataDeferimento=today();celebrarEvento('deferido','Benefício deferido!',nomeCli(c.clienteId));setTimeout(()=>{editSm(id);},1800);}}}
+  if(kind==='lead'){const l=db.leads.find(x=>x.id===id);if(l){l.etapa=col;l.ultimoContato=today();if(col==='Fechado'){if(!l.dataFechamento)l.dataFechamento=today();}else l.dataFechamento='';if(col==='Fechado'&&!l.convertido){celebrarEvento('contrato','Negócio fechado!',l.nome);setTimeout(()=>toast('Use "Converter em cliente" no card.'),1200);}}}
   save();render();
 }
 V.tarefas=()=>{
@@ -280,7 +280,8 @@ function indicadores(produto){
     ['Casos ativos (atos e processos)',x=>db.processos.filter(p=>okP(cli(p.clienteId)?.produto)&&p.status==='Em andamento'&&(p.distribuicao||'')<=x.fim).length,'int','s'],
     ['Estados em que atuamos',x=>new Set(C().filter(c=>(c.criado||'')<=x.fim&&c.uf).map(c=>c.uf)).size,'int','s'],
     ['Processos novos ajuizados',x=>db.processos.filter(p=>okP(cli(p.clienteId)?.produto)&&p.tipo==='Judicial'&&p.distribuicao>=x.ini&&p.distribuicao<=x.fim).length,'int','f'],
-    ['Acordos realizados',x=>RP(x,l=>l.categoria==='H.O. finais — acordo').length,'int','f'],
+    ['Acordos realizados',x=>{const n=db.processos.filter(p=>okP(cli(p.clienteId)?.produto)&&p.dataAcordo>=x.ini&&p.dataAcordo<=x.fim).length;return n||RP(x,l=>l.categoria==='H.O. finais — acordo').length;},'int','f'],
+    ['Benefícios deferidos (salário-maternidade)',x=>db.sm.filter(c=>okP('Salário-maternidade')&&dataDefSm(c)>=x.ini&&dataDefSm(c)<=x.fim).length,'int','f'],
     ['Honorários com parceria (execução delegada)',x=>sumBy(RP(x,l=>/parceria/i.test(l.categoria)),l=>l.valor),'brl','f'],
     ['Taxas'],
     ['Taxa de inadimplência',x=>{const lim=x.fim<today()?x.fim:addDays(-1);const prev=db.lancamentos.filter(l=>l.tipo==='receita'&&okP(prodLanc(l))&&l.venc>=x.ini&&l.venc<=lim);const t=sumBy(prev,l=>l.valor);
