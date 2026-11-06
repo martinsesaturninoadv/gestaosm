@@ -72,7 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['acao'] ?? '') === 'nps') {
         nuc_gravar($pdo, 'nps', $nid, ['id' => $nid, 'clienteId' => $cid, 'nota' => $nota, 'comentario' => trim(mb_substr((string) ($_POST['comentario'] ?? ''), 0, 2000)), 'indicacao' => $ind['nome'] ? $ind : null, 'em' => nuc_ms()]);
         if ($ind['nome'] !== '') {
             $lid = nuc_uid();
-            nuc_gravar($pdo, 'leads', $lid, ['id' => $lid, 'nome' => $ind['nome'], 'tel' => $ind['tel'], 'origem' => 'Indicação de cliente', 'etapa' => 'Novo contato', 'produto' => '',
+            nuc_gravar($pdo, 'leads', $lid, ['id' => $lid, 'nome' => $ind['nome'], 'tel' => $ind['tel'], 'origem' => 'Indicação de cliente', 'etapa' => nuc_etapa_inicial($pdo), 'produto' => '',
                 'primeiroContato' => date('Y-m-d'), 'ultimoContato' => date('Y-m-d'), 'criado' => date('Y-m-d'), 'obs' => 'Indicado por ' . ($cliente['nome'] ?? '') . ' na pesquisa de satisfação.', 'valor' => 0]);
         }
         $msg = 'ok:Muito obrigado pela sua avaliação! 💛';

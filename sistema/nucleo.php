@@ -285,7 +285,7 @@ function nuc_avisos_periodicos(PDO $pdo, string $pasta, bool $forcar = false): a
         if ($util && $minAgora >= 1080 && $minAgora < 1320) {
             $feitas = count(array_filter($tarefas, fn($t) => ($t['status'] ?? '') === 'done' && substr((string) ($t['concluidoEm'] ?? ''), 0, 10) === $hoje));
             $cumpridos = count(array_filter($eventos, fn($e) => !empty($e['feito']) && substr((string) ($e['feitoEm'] ?? ''), 0, 10) === $hoje));
-            $fech = count(array_filter(nuc_listar($pdo, 'leads'), fn($l) => ($l['etapa'] ?? '') === 'Fechado' && ($l['dataFechamento'] ?? '') === $hoje));
+            $fech = count(array_filter(nuc_listar($pdo, 'leads'), fn($l) => nuc_tipo_etapa($pdo, (string) ($l['etapa'] ?? '')) === 'ganho' && ($l['dataFechamento'] ?? '') === $hoje));
             $n += nuc_push($pdo, nuc_equipe($pdo, ['admin', 'advogado']), 'resumo', '📋 Resumo do dia da equipe', "$feitas tarefa(s) concluída(s), $cumpridos prazo(s)/compromisso(s) cumpridos" . ($fech ? ", $fech contrato(s) fechado(s) 🎉" : '') . '. Toque para ver o que cada pessoa fez.', '#resumo', 'resumo:' . $hoje);
         }
         // limpeza das marcas antigas (60 dias)
@@ -293,4 +293,59 @@ function nuc_avisos_periodicos(PDO $pdo, string $pasta, bool $forcar = false): a
     } catch (Throwable $e) { /* avisos nunca podem derrubar o sistema */ }
     flock($lock, LOCK_UN);
     return ['enviados' => $n];
+}
+
+/* ---------- verificação em duas etapas (TOTP, RFC 6238 — Google Authenticator, Microsoft Authenticator…) ---------- */
+function base32Dec(string $b32): string
+{
+    $alf = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; $bits = ''; $out = '';
+    foreach (str_split(strtoupper(preg_replace('/[^A-Z2-7]/i', '', $b32))) as $c) $bits .= str_pad(decbin(strpos($alf, $c)), 5, '0', STR_PAD_LEFT);
+    foreach (str_split($bits, 8) as $byte) if (strlen($byte) === 8) $out .= chr(bindec($byte));
+    return $out;
+}
+function base32Enc(string $bin): string
+{
+    $alf = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; $bits = ''; $out = '';
+    foreach (str_split($bin) as $c) $bits .= str_pad(decbin(ord($c)), 8, '0', STR_PAD_LEFT);
+    foreach (str_split($bits, 5) as $g) $out .= $alf[bindec(str_pad($g, 5, '0'))];
+    return $out;
+}
+function totpValido(string $segredo, string $codigo): bool
+{
+    $codigo = preg_replace('/\D/', '', $codigo);
+    if (strlen($codigo) !== 6) return false;
+    $chave = base32Dec($segredo); $t = (int) floor(time() / 30);
+    for ($i = -1; $i <= 1; $i++) {
+        $h = hash_hmac('sha1', pack('N*', 0) . pack('N*', $t + $i), $chave, true);
+        $o = ord($h[19]) & 0xf;
+        $n = ((ord($h[$o]) & 0x7f) << 24 | ord($h[$o + 1]) << 16 | ord($h[$o + 2]) << 8 | ord($h[$o + 3])) % 1000000;
+        if (hash_equals(str_pad((string) $n, 6, '0', STR_PAD_LEFT), $codigo)) return true;
+    }
+    return false;
+}
+
+
+/* ---------- funil de atendimento (etapas editáveis na tela; antes da migração vale a lista antiga) ---------- */
+const NUC_FUNIL_LEGADO = [['Novo contato', 'andamento'], ['Em atendimento', 'andamento'], ['Proposta enviada', 'andamento'], ['Em recuperação', 'andamento'],
+    ['Fechado', 'ganho'], ['Perdido', 'perdido'], ['Encaminhado a parceiro', 'parceiro']];
+const NUC_FUNIL_PADRAO = [['Novo lead', 'andamento'], ['Em triagem', 'andamento'], ['Aguardando documentos', 'andamento'], ['Proposta enviada', 'andamento'],
+    ['Negociação', 'andamento'], ['Contrato enviado', 'andamento'], ['Cliente fechado', 'ganho'], ['Perdido', 'perdido'], ['Encaminhado a parceiro', 'parceiro']];
+function nuc_funil(PDO $pdo): array
+{
+    $f = nuc_config($pdo, 'funil');
+    $et = [];
+    foreach ((array) ($f['etapas'] ?? []) as $e) if (is_array($e) && trim((string) ($e['nome'] ?? '')) !== '') $et[] = ['nome' => trim((string) $e['nome']), 'tipo' => in_array($e['tipo'] ?? '', ['andamento', 'ganho', 'perdido', 'parceiro'], true) ? $e['tipo'] : 'andamento'];
+    if (!$et) foreach (NUC_FUNIL_LEGADO as [$n, $t]) $et[] = ['nome' => $n, 'tipo' => $t];
+    return $et;
+}
+function nuc_tipo_etapa(PDO $pdo, string $etapa): string
+{
+    foreach (nuc_funil($pdo) as $e) if ($e['nome'] === $etapa) return $e['tipo'];
+    return 'andamento';
+}
+function nuc_etapa_inicial(PDO $pdo): string { return nuc_funil($pdo)[0]['nome']; }
+function nuc_etapa_do_tipo(PDO $pdo, string $tipo): string
+{
+    foreach (nuc_funil($pdo) as $e) if ($e['tipo'] === $tipo) return $e['nome'];
+    return $tipo === 'ganho' ? 'Fechado' : 'Perdido';
 }

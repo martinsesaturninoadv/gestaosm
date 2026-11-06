@@ -28,8 +28,8 @@ header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
 
 const COLECOES = ['clientes', 'processos', 'eventos', 'tarefas', 'leads', 'lancamentos', 'documentos',
-    'notas', 'contratos', 'despesasFixas', 'usuarios', 'sm', 'scripts', 'modelos', 'trafego', 'requisitorios', 'nps', 'recados', 'peticoes', 'conteudos', 'config'];
-const CONFIG_IDS = ['escritorio', 'metas', 'produtos', 'tiposEvento', 'indAjustes', 'indExtras', 'salas', 'fluxos'];
+    'notas', 'contratos', 'despesasFixas', 'usuarios', 'sm', 'scripts', 'modelos', 'trafego', 'requisitorios', 'nps', 'recados', 'peticoes', 'conteudos', 'anuncios', 'config'];
+const CONFIG_IDS = ['escritorio', 'metas', 'produtos', 'tiposEvento', 'indAjustes', 'indExtras', 'salas', 'fluxos', 'funil', 'waspeed'];
 // Coleções que o perfil "estagiario" não pode ver nem alterar
 const COLECOES_FINANCEIRAS = ['lancamentos', 'contratos', 'despesasFixas', 'trafego', 'requisitorios'];
 // Perfil "parceiro": só vê a parceria — registros com o e-mail dele no campo "parceiro"
@@ -128,6 +128,7 @@ if (!is_file($arqConfig)) {
 }
 $cfg = require $arqConfig;
 require __DIR__ . '/nucleo.php';
+require __DIR__ . '/servico.php';
 
 /* ---------- sessão ---------- */
 $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
@@ -246,34 +247,7 @@ function corpo(): array
 $acao = $_GET['acao'] ?? '';
 $metodo = $_SERVER['REQUEST_METHOD'];
 
-/* ---------- verificação em duas etapas (TOTP, RFC 6238 — Google Authenticator, Microsoft Authenticator…) ---------- */
-function base32Dec(string $b32): string
-{
-    $alf = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; $bits = ''; $out = '';
-    foreach (str_split(strtoupper(preg_replace('/[^A-Z2-7]/i', '', $b32))) as $c) $bits .= str_pad(decbin(strpos($alf, $c)), 5, '0', STR_PAD_LEFT);
-    foreach (str_split($bits, 8) as $byte) if (strlen($byte) === 8) $out .= chr(bindec($byte));
-    return $out;
-}
-function base32Enc(string $bin): string
-{
-    $alf = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; $bits = ''; $out = '';
-    foreach (str_split($bin) as $c) $bits .= str_pad(decbin(ord($c)), 8, '0', STR_PAD_LEFT);
-    foreach (str_split($bits, 5) as $g) $out .= $alf[bindec(str_pad($g, 5, '0'))];
-    return $out;
-}
-function totpValido(string $segredo, string $codigo): bool
-{
-    $codigo = preg_replace('/\D/', '', $codigo);
-    if (strlen($codigo) !== 6) return false;
-    $chave = base32Dec($segredo); $t = (int) floor(time() / 30);
-    for ($i = -1; $i <= 1; $i++) {
-        $h = hash_hmac('sha1', pack('N*', 0) . pack('N*', $t + $i), $chave, true);
-        $o = ord($h[19]) & 0xf;
-        $n = ((ord($h[$o]) & 0x7f) << 24 | ord($h[$o + 1]) << 16 | ord($h[$o + 2]) << 8 | ord($h[$o + 3])) % 1000000;
-        if (hash_equals(str_pad((string) $n, 6, '0', STR_PAD_LEFT), $codigo)) return true;
-    }
-    return false;
-}
+/* verificação em duas etapas (TOTP): funções em nucleo.php (também usadas no login do conector do Claude) */
 
 /* ---------- rotina diária: backup do banco e lembretes automáticos por e-mail ---------- */
 function exportarTudo(PDO $pdo): string
@@ -299,6 +273,7 @@ function rotinaDiaria(PDO $pdo, array $cfg): void
     $dir = nuc_pasta($cfg, 'backups');
     $marca = $dir . '/ultima-rotina.txt';
     if (is_file($marca) && trim((string) file_get_contents($marca)) === date('Y-m-d')) return;
+    try { sv_limpeza($pdo); } catch (Throwable $e) { /* limpeza dos logs da API não pode impedir o resto */ }
     $lock = @fopen($dir . '/rotina.lock', 'c');
     if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) return;
     file_put_contents($marca, date('Y-m-d'));
@@ -638,6 +613,7 @@ switch ($acao) {
                 if (!podeGravar($u, $col, $id, $r['dados'] ?? null, $ant && !$ant['excluido'] ? $ant['dados'] : null)) continue;
                 $st->execute([$col, $id, json_encode($r['dados'] ?? null, JSON_UNESCAPED_UNICODE), 0, $agora, $uid]);
                 registrar($pdo, $uid, 'salvar', $col, $id);
+                if ($col === 'leads' && is_array($r['dados'] ?? null) && sv_migrado($pdo)) { $tt = sv_telefone_e164((string) ($r['dados']['tel'] ?? '')); if ($tt !== '') sv_indexar_tel($pdo, $tt, $id); }
                 if (in_array($col, ['tarefas', 'peticoes', 'eventos', 'conteudos', 'contratos', 'leads', 'sm', 'processos'], true)) $mud[] = [$col, $id, $r['dados'] ?? null, $ant && !$ant['excluido'] ? $ant['dados'] : null];
                 $n++;
             }
@@ -1152,6 +1128,75 @@ PEDIDO:
         $lista = [];
         foreach (array_reverse(glob($dir . '/backup-*.json.gz') ?: []) as $f) $lista[] = ['arquivo' => basename($f), 'tamanho' => filesize($f)];
         responder(['ok' => true, 'backups' => $lista]);
+
+    case 'integracaoApi': // Configurações → API e conector (só administração)
+        $u = usuarioLogado($pdo);
+        if ($u['papel'] !== 'admin') erro('Somente administradores.', 403);
+        $b = $metodo === 'POST' ? corpo() : [];
+        $op = (string) ($b['op'] ?? $_GET['op'] ?? 'estado');
+        $base = ($https ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? '') . rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/'), '/');
+        try {
+            if ($op === 'previa') responder(['ok' => true, 'previa' => mig_previa($pdo)]);
+            if ($op === 'aplicar' && $metodo === 'POST') { $r = mig_aplicar($pdo, $cfg); registrar($pdo, (int) $u['id'], 'migracao_aplicar'); responder($r); }
+            if ($op === 'reverter' && $metodo === 'POST') { $r = mig_reverter($pdo, $cfg); registrar($pdo, (int) $u['id'], 'migracao_reverter'); responder($r); }
+            $mig = mig_estado($pdo);
+            if ($op === 'estado') {
+                $r = ['ok' => true, 'migracao' => $mig, 'base' => $base, 'api' => $base . '/api/v1', 'mcp' => $base . '/api/v1/mcp', 'webhook' => $base . '/api/v1/webhooks/waspeed',
+                    'escopos' => SV_ESCOPOS, 'subpasta' => rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/'), '/') !== ''];
+                if ($mig['aplicada']) {
+                    $r['chaves'] = $pdo->query('SELECT id, nome, prefixo, escopos, criado_em, ultimo_uso, revogada_em FROM api_chaves ORDER BY id DESC')->fetchAll();
+                    $r['webhookToken'] = !empty(nuc_config($pdo, 'segredos')['waspeedTokenHash']);
+                    $r['autorizacoes'] = $pdo->query("SELECT t.familia, t.client_id, MIN(t.criado_em) AS desde, MAX(t.criado_em) AS ultimo, MAX(t.expira) AS expira, u.nome, c.nome AS cliente
+                        FROM oauth_tokens t LEFT JOIN usuarios u ON u.id = t.usuario_id LEFT JOIN oauth_clientes c ON c.client_id = t.client_id
+                        WHERE t.revogado = 0 AND t.tipo = 'renovacao' AND t.expira > " . nuc_ms() . " GROUP BY t.familia, t.client_id, u.nome, c.nome ORDER BY ultimo DESC")->fetchAll();
+                }
+                responder($r);
+            }
+            if (!$mig['aplicada']) erro('Aplique a migração primeiro.', 409);
+            if ($op === 'criarChave' && $metodo === 'POST') {
+                $nome = trim(mb_substr((string) ($b['nome'] ?? ''), 0, 120));
+                $esc = array_values(array_intersect((array) ($b['escopos'] ?? []), SV_ESCOPOS));
+                if ($nome === '' || !$esc) erro('Informe o nome da chave e pelo menos uma permissão.');
+                $chave = 'gsm_' . bin2hex(random_bytes(24));
+                $pdo->prepare('INSERT INTO api_chaves (nome, prefixo, hash, escopos, criado_por, criado_em) VALUES (?,?,?,?,?,?)')
+                    ->execute([$nome, substr($chave, 0, 12), hash('sha256', $chave), implode(' ', $esc), (int) $u['id'], agoraMs()]);
+                registrar($pdo, (int) $u['id'], 'api_chave_criar');
+                responder(['ok' => true, 'chave' => $chave, 'aviso' => 'Copie agora: a chave não aparece de novo.']);
+            }
+            if ($op === 'revogarChave' && $metodo === 'POST') {
+                $pdo->prepare('UPDATE api_chaves SET revogada_em = ? WHERE id = ? AND revogada_em IS NULL')->execute([agoraMs(), (int) ($b['id'] ?? 0)]);
+                registrar($pdo, (int) $u['id'], 'api_chave_revogar');
+                responder(['ok' => true]);
+            }
+            if ($op === 'tokenWebhook' && $metodo === 'POST') {
+                $tok = 'wsp_' . bin2hex(random_bytes(20));
+                $s = segredos($pdo);
+                $s['waspeedTokenHash'] = hash('sha256', $tok);
+                nuc_gravar($pdo, 'config', 'segredos', $s, (int) $u['id']);
+                registrar($pdo, (int) $u['id'], 'webhook_token');
+                responder(['ok' => true, 'token' => $tok, 'url' => $base . '/api/v1/webhooks/waspeed', 'urlComToken' => $base . '/api/v1/webhooks/waspeed?token=' . $tok]);
+            }
+            if ($op === 'revogarAutorizacao' && $metodo === 'POST') {
+                $pdo->prepare('UPDATE oauth_tokens SET revogado = 1 WHERE familia = ?')->execute([(string) ($b['familia'] ?? '')]);
+                registrar($pdo, (int) $u['id'], 'oauth_revogar');
+                responder(['ok' => true]);
+            }
+            if ($op === 'webhookLog') responder(['ok' => true, 'itens' => $pdo->query('SELECT id, em, ip, evento, status, detalhe, lead_id, payload FROM webhook_log ORDER BY id DESC LIMIT 40')->fetchAll()]);
+            if ($op === 'apiLog') responder(['ok' => true, 'itens' => $pdo->query('SELECT em, quem, auth, ip, metodo, rota, status, recurso, ms FROM api_log ORDER BY id DESC LIMIT 200')->fetchAll()]);
+            if ($op === 'testarWebhook' && $metodo === 'POST') { // confere o mapeamento com um JSON colado, sem gravar nada
+                $p = is_array($b['payload'] ?? null) ? $b['payload'] : json_decode((string) ($b['payload'] ?? ''), true);
+                if (!is_array($p)) erro('Cole um JSON válido.');
+                $cfgW = wsp_config($pdo);
+                $x = wsp_extrair($p, $cfgW);
+                $x['telefone_e164'] = sv_telefone_e164($x['telefone']);
+                $x['codigo_anuncio'] = sv_extrair_codigo($x['mensagem'], $pdo);
+                $x['etapa'] = $x['coluna'] !== '' ? (function () use ($pdo, $x, $cfgW) { try { return wsp_etapa_da_coluna($pdo, $x['coluna'], $cfgW) ?: '(sem correspondência)'; } catch (SvErro $e) { return $e->getMessage(); } })() : '';
+                responder(['ok' => true, 'extraido' => $x]);
+            }
+        } catch (SvErro $e) {
+            responder(['ok' => false, 'erro' => $e->getMessage()] + $e->extra, $e->status);
+        }
+        erro('Operação inválida.');
 
     case 'contas':
         $u = usuarioLogado($pdo);

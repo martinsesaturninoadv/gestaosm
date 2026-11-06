@@ -4,8 +4,18 @@ RewriteCond %{HTTPS} off
 RewriteCond %{HTTP:X-Forwarded-Proto} !https
 RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
 
+# API v1, webhook do WaSpeed, conector MCP do Claude e OAuth (tudo atendido pelo api-v1.php)
+# repassa o cabeçalho Authorization (algumas hospedagens o removem antes de chegar ao PHP)
+RewriteCond %{HTTP:Authorization} ^(.+)$
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%1]
+RewriteRule ^api/v1/?(.*)$ api-v1.php?r=$1 [QSA,L]
+RewriteRule ^\.well-known/oauth-protected-resource(/.*)?$ api-v1.php?r=wk/prm [QSA,L]
+RewriteRule ^\.well-known/oauth-authorization-server(/.*)?$ api-v1.php?r=wk/as [QSA,L]
+RewriteRule ^\.well-known/openid-configuration$ api-v1.php?r=wk/as [QSA,L]
+RewriteRule ^oauth/(register|authorize|token|revoke)$ api-v1.php?r=oauth/$1 [QSA,L]
+
 # Bloqueia acesso direto a arquivos sensíveis
-<FilesMatch "^(config\.php|config\.exemplo\.php|nucleo\.php|.*\.sqlite.*|.*\.md|build\.py|.*\.gz|.*\.lock)$">
+<FilesMatch "^(config\.php|config\.exemplo\.php|nucleo\.php|servico\.php|.*\.sqlite.*|.*\.md|build\.py|.*\.gz|.*\.lock)$">
   Require all denied
 </FilesMatch>
 
