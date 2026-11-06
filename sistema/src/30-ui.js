@@ -6,7 +6,7 @@ const pStatusLanc=s=>pill(s,s==='Pago'?'p-green':s==='Atrasado'?'p-red':'p-amber
 const pStatusProc=s=>pill(s,s==='Em andamento'?'p-blue':s==='Ganho'||s==='Acordo'||s==='Deferido'?'p-green':s==='Perdido'||s==='Indeferido'?'p-red':'p-gray');
 const pPrior=p=>pill(p,p==='Alta'?'p-red':p==='Média'?'p-amber':'p-gray');
 const pTipoEvt=t=>tagTipo(t);
-const pEtapa=e=>pill(e,e==='Fechado'||e==='Cliente'?'p-green':e==='Perdido'?'p-red':e==='Em recuperação'?'p-amber':e==='Proposta enviada'?'p-blue':'p-gray');
+const pEtapa=e=>{const t=e==='Cliente'?'ganho':tipoEtapa(e);return pill(e,t==='ganho'?'p-green':t==='perdido'?'p-red':t==='parceiro'?'p-gray':/recupera|negocia/i.test(e)?'p-amber':/proposta|contrato/i.test(e)?'p-blue':'p-gray');};
 function prazoTxt(d){const n=diff(d);if(n<0)return `<span style="color:var(--red);font-weight:600">vencido há ${-n} dia${n===-1?'':'s'}</span>`;if(n===0)return '<span style="color:var(--red);font-weight:600">hoje</span>';if(n===1)return '<span style="color:var(--amber);font-weight:600">amanhã</span>';return `<span class="${n<=5?'strong':'muted'}" style="${n<=5?'color:var(--amber)':''}">em ${n} dias</span>`;}
 function kpi(l,v,s,cls){return `<div class="card kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="s ${cls||''}">${s||'&nbsp;'}</div></div>`;}
 function hbars(items,fmt){const max=Math.max(1,...items.map(i=>i[1]));if(!items.length)return '<div class="empty">Sem dados</div>';

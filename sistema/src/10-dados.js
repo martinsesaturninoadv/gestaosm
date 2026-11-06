@@ -8,8 +8,8 @@
 let db;
 let modo='local',sessao=null;
 const ui={page:'painel',id:null,agendaView:'lista',agendaMes:today().slice(0,7),f:{},tabCli:'processos',tabProc:'Judicial',procView:'lista',tabSm:'casos',tabDoc:'gerador'};
-const COLS=['clientes','processos','eventos','tarefas','leads','lancamentos','documentos','notas','contratos','despesasFixas','usuarios','sm','scripts','modelos','trafego','requisitorios','nps','recados','peticoes','conteudos'];
-const SINGLES=['escritorio','metas','produtos','tiposEvento','indAjustes','indExtras','salas','fluxos'];
+const COLS=['clientes','processos','eventos','tarefas','leads','lancamentos','documentos','notas','contratos','despesasFixas','usuarios','sm','scripts','modelos','trafego','requisitorios','nps','recados','peticoes','conteudos','anuncios'];
+const SINGLES=['escritorio','metas','produtos','tiposEvento','indAjustes','indExtras','salas','fluxos','funil','waspeed'];
 const COLS_FIN=['lancamentos','contratos','despesasFixas','trafego','requisitorios'];
 /* parceiro: só a parceria (clientes, processos, prazos, tarefas e honorários) — sem CRM, salário-maternidade, documentos, modelos e scripts */
 const COLS_PARC=['clientes','processos','eventos','tarefas','notas','contratos','lancamentos'];
@@ -19,8 +19,8 @@ const doParceiro=(x,email)=>!!x&&(norm(x.parceiro)===norm(email)||(Array.isArray
 const CONFIG_PARC=['escritorio','produtos','tiposEvento','salas'];
 
 function vazio(){return {versao:6,escritorio:{nome:'Martins & Saturnino Advocacia e Consultoria',cnpj:'',oab:'',email:'',tel:'',endereco:'',cidade:'',saldoInicial:0,saldoInicialData:'',logo:'',googleClientId:'',salarioMinimo:1518},
-  metas:{...METAS_PADRAO},produtos:PRODUTOS_PADRAO.slice(),tiposEvento:TIPOS_EVT_PADRAO.map(([nome,cor])=>({nome,cor})),indAjustes:{},indExtras:[],salas:salasPadrao(),fluxos:{},
-  usuarioAtual:'',usuarios:[],clientes:[],processos:[],eventos:[],tarefas:[],leads:[],lancamentos:[],documentos:[],notas:[],contratos:[],despesasFixas:[],sm:[],scripts:[],modelos:[],trafego:[],requisitorios:[],nps:[],recados:[],peticoes:[],conteudos:[]};}
+  metas:{...METAS_PADRAO},produtos:PRODUTOS_PADRAO.slice(),tiposEvento:TIPOS_EVT_PADRAO.map(([nome,cor])=>({nome,cor})),indAjustes:{},indExtras:[],salas:salasPadrao(),fluxos:{},funil:{etapas:[]},waspeed:{colunas:{},caminhos:{}},
+  usuarioAtual:'',usuarios:[],clientes:[],processos:[],eventos:[],tarefas:[],leads:[],lancamentos:[],documentos:[],notas:[],contratos:[],despesasFixas:[],sm:[],scripts:[],modelos:[],trafego:[],requisitorios:[],nps:[],recados:[],peticoes:[],conteudos:[],anuncios:[]};}
 function migrar(d){
   const v=vazio();for(const k in v)if(d[k]===undefined||d[k]===null)d[k]=v[k];
   d.escritorio={...v.escritorio,...d.escritorio};if(d.escritorio.nome==='Martins & Saturnino Advocacia')d.escritorio.nome=v.escritorio.nome;d.metas={...METAS_PADRAO,...d.metas};
@@ -28,6 +28,7 @@ function migrar(d){
   if(!Array.isArray(d.tiposEvento)||!d.tiposEvento.length)d.tiposEvento=v.tiposEvento;
   if(typeof d.indAjustes!=='object'||Array.isArray(d.indAjustes))d.indAjustes={};
   if(!Array.isArray(d.indExtras))d.indExtras=[];
+  if(!d.funil||!Array.isArray(d.funil.etapas))d.funil={etapas:[]};if(!d.waspeed||typeof d.waspeed!=='object')d.waspeed={colunas:{},caminhos:{}};
   {const sp=salasPadrao();const s=typeof d.salas==='object'&&d.salas&&!Array.isArray(d.salas)?d.salas:{};d.salas={};for(const k in sp)d.salas[k]={...sp[k],...(s[k]||{})};}
   const mapa={'Honorários contratuais':'H.O. iniciais','Honorários de êxito':'H.O. finais — êxito','Honorários mensais — partido':'Honorários mensais (partido)','Aluguel e condomínio':'Aluguel','Folha / pró-labore':'Folha de pagamento','Software e sistemas':'Sistemas','Marketing / tráfego pago':'Tráfego — Facebook/Instagram','Material e escritório':'Material de expediente'};
   d.lancamentos.forEach(l=>{if(mapa[l.categoria])l.categoria=mapa[l.categoria];if(!l.criado)l.criado=l.venc;});
@@ -388,6 +389,12 @@ function seed(){
     {id:uid(),clienteId:'c3',data:addDays(-4),autor:'u2',texto:'Explicada a sentença por telefone; cliente autorizou o recurso.'},
     {id:uid(),clienteId:'c7',data:addDays(-25),autor:'u2',texto:'Contrato assinado + partido de R$ 3.500/mês.'}];
   seedV6(d);seedConteudo(d);
+  // demonstração já no funil novo (o servidor usa a lista antiga até a migração ser aplicada)
+  const mapa={'Novo contato':'Novo lead','Em atendimento':'Em triagem','Em recuperação':'Negociação','Fechado':'Cliente fechado'};
+  d.funil={etapas:FUNIL_PADRAO.map(([nome,tipo])=>({nome,tipo}))};d.leads.forEach(l=>{if(mapa[l.etapa])l.etapa=mapa[l.etapa];if(l.etapa==='Perdido'&&!l.motivoPerda)l.motivoPerda='Achou caro';});
+  d.anuncios=[{id:'an1',codigo:'SM-01',plataforma:'Meta',campanha:'Salário-maternidade — gestantes',conjunto:'SP 20-35',anuncio:'Vídeo direitos da gestante',area:'Salário-maternidade',inicio:addDays(-30),fim:'',investimento:900,mensagem:'Olá! Vim pelo anúncio [SM-01]'},
+    {id:'an2',codigo:'TRA-01',plataforma:'Meta',campanha:'Trabalhista — demissão',conjunto:'Grande SP',anuncio:'Carrossel verbas',area:'Trabalhista',inicio:addDays(-20),fim:'',investimento:600,mensagem:'Olá! Vim pelo anúncio [TRA-01]'}];
+  d.leads.forEach((l,i)=>{if(/Facebook/.test(l.origem||'')){const a=d.anuncios[i%2];l.codigoAnuncio=a.codigo;l.campanha=a.campanha;l.conjunto=a.conjunto;l.anuncio=a.anuncio;l.plataforma='Meta';l.primeiraMensagem=a.mensagem;}});
   return d;
 }
 

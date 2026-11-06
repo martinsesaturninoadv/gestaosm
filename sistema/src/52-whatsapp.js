@@ -40,9 +40,9 @@ function aplicarImportWa(p){
   const hoje=today(),sm=ehCanalSm(p.canal),prodSm=db.produtos.find(x=>/matern/i.test(x))||'Salário-maternidade';
   p.novos.forEach(x=>{const d=x.data&&x.data<=hoje?x.data:hoje;
     db.leads.push({id:uid(),nome:x.nome||telTxt(x.telBruto)||'Contato do WhatsApp',tel:telTxt(digits(String(x.telBruto).split('@')[0]).replace(/^55(?=\d{10,11}$)/,'')),email:x.email,
-      canal:p.canal,origem:ui.waOrigem||'',produto:sm?prodSm:'',etapa:x.etiquetas?mapEtapa(x.etiquetas):'Novo contato',etiquetas:x.etiquetas,
+      canal:p.canal,origem:ui.waOrigem||'',produto:sm?prodSm:'',etapa:x.etiquetas?mapEtapa(x.etiquetas):etapaInicial(),etiquetas:x.etiquetas,
       primeiroContato:d,ultimoContato:d,valor:0,proposta:'',obs:x.obs,criado:d,criadoPor:db.usuarioAtual||'',importadoWa:hoje});});
-  p.atual.forEach(([l,x])=>{if(x.etiquetas){l.etiquetas=x.etiquetas;const e=mapEtapa(x.etiquetas);if(l.etapa==='Novo contato'&&e!=='Novo contato')l.etapa=e;}if(!l.canal)l.canal=p.canal;if(x.data&&x.data<=hoje&&x.data>(l.ultimoContato||''))l.ultimoContato=x.data;
+  p.atual.forEach(([l,x])=>{if(x.etiquetas){l.etiquetas=x.etiquetas;const e=mapEtapa(x.etiquetas);if(l.etapa===etapaInicial()&&e!==etapaInicial())l.etapa=e;}if(!l.canal)l.canal=p.canal;if(x.data&&x.data<=hoje&&x.data>(l.ultimoContato||''))l.ultimoContato=x.data;
     if(!l.nome||/^contato do whatsapp$/i.test(l.nome))l.nome=x.nome||l.nome;if(x.email&&!l.email)l.email=x.email;});
 }
 function importarWhatsApp(){

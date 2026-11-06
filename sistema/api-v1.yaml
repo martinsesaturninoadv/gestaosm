@@ -1,0 +1,370 @@
+openapi: 3.1.0
+info:
+  title: Sistema de Gestão — API v1
+  version: 1.0.0
+  description: |
+    API do sistema de gestão do escritório (clientes, leads, funil e anúncios).
+
+    - Só por HTTPS. Respostas em JSON (UTF-8).
+    - Autenticação: `Authorization: Bearer <chave>`. A chave de API (gsm_…) é criada em Configurações → API e conector.
+      O token do conector do Claude (gat_…, obtido por OAuth) também é aceito.
+    - Limite: 120 requisições por minuto por chave (resposta 429 com `Retry-After`).
+    - Cada chamada fica registrada (quem, quando, rota, status) por 12 meses. Os valores dos filtros (CPF, telefone) não são gravados no registro.
+    - Erros: `{"ok": false, "erro": "mensagem", "campo": "…"}` com o status HTTP correspondente
+      (400 corpo inválido, 401 sem autenticação, 403 sem permissão, 404 não encontrado, 409 duplicado, 422 dado inválido, 429 limite, 503 API não ativada).
+    - Datas no formato AAAA-MM-DD (também aceita DD/MM/AAAA na entrada). Valores em reais aceitam `1500.5` ou `"1.500,50"`.
+servers:
+  - url: https://gestao.martinsesaturninoadvocacia.com.br/api/v1
+security:
+  - chave: []
+tags:
+  - name: Clientes
+  - name: Leads
+  - name: Funil e anúncios
+  - name: Webhook
+paths:
+  /clientes:
+    get:
+      tags: [Clientes]
+      summary: Buscar clientes (para evitar duplicidade)
+      description: Informe pelo menos um filtro. CPF e telefone são comparados sem pontuação; nome sem acentos e por trecho.
+      parameters:
+        - {name: cpf, in: query, schema: {type: string}}
+        - {name: nome, in: query, schema: {type: string}}
+        - {name: telefone, in: query, schema: {type: string}}
+      responses:
+        '200': {description: Lista, content: {application/json: {schema: {$ref: '#/components/schemas/ListaClientes'}}}}
+        '422': {$ref: '#/components/responses/Invalido'}
+    post:
+      tags: [Clientes]
+      summary: Cadastrar cliente
+      description: Os honorários informados criam um contrato no sistema. Com `lead_id`, liga o cliente ao lead e move o lead para a etapa de cliente fechado.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ClienteEntrada'}}}}
+      responses:
+        '201': {description: Criado, content: {application/json: {schema: {$ref: '#/components/schemas/RespostaCliente'}}}}
+        '409': {description: CPF já cadastrado (traz cliente_id), content: {application/json: {schema: {$ref: '#/components/schemas/Erro'}}}}
+        '422': {$ref: '#/components/responses/Invalido'}
+  /clientes/{id}:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    get:
+      tags: [Clientes]
+      summary: Ver cliente
+      responses:
+        '200': {description: Cliente, content: {application/json: {schema: {$ref: '#/components/schemas/RespostaCliente'}}}}
+        '404': {$ref: '#/components/responses/NaoEncontrado'}
+    patch:
+      tags: [Clientes]
+      summary: Atualizar cliente (só os campos enviados)
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ClienteEntrada'}}}}
+      responses:
+        '200': {description: Atualizado, content: {application/json: {schema: {$ref: '#/components/schemas/RespostaCliente'}}}}
+        '404': {$ref: '#/components/responses/NaoEncontrado'}
+        '409': {description: CPF de outro cliente}
+        '422': {$ref: '#/components/responses/Invalido'}
+  /clientes/{id}/documentos:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    post:
+      tags: [Clientes]
+      summary: Registrar documento gerado (link do Google Docs)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tipo, url]
+              properties:
+                tipo: {type: string, enum: [procuracao, declaracao_hipossuficiencia, contrato_honorarios, outro]}
+                url: {type: string, format: uri, description: Precisa começar com https://}
+                data: {type: string, format: date}
+                titulo: {type: string}
+      responses:
+        '201': {description: Registrado}
+        '404': {$ref: '#/components/responses/NaoEncontrado'}
+        '422': {$ref: '#/components/responses/Invalido'}
+    get:
+      tags: [Clientes]
+      summary: Listar documentos gerados do cliente
+      responses:
+        '200': {description: Lista}
+  /leads:
+    get:
+      tags: [Leads]
+      summary: Listar leads
+      parameters:
+        - {name: etapa, in: query, schema: {type: string}}
+        - {name: telefone, in: query, schema: {type: string}}
+        - {name: desde, in: query, description: Primeiro contato a partir desta data, schema: {type: string, format: date}}
+        - {name: limite, in: query, schema: {type: integer, default: 50, maximum: 200}}
+      responses:
+        '200': {description: Lista, content: {application/json: {schema: {$ref: '#/components/schemas/ListaLeads'}}}}
+    post:
+      tags: [Leads]
+      summary: Registrar lead (cria ou atualiza pelo telefone)
+      description: |
+        O telefone é normalizado para E.164 (+55DD9XXXXXXXX) e é a chave única: se já existir, o lead é atualizado (201 = criado, 200 = atualizado).
+        O código do anúncio é lido de `codigo_anuncio` ou da primeira mensagem ("[BPC-01]") e preenche campanha, conjunto e anúncio pela tabela /anuncios.
+        Sem código, a origem fica "Orgânico / não identificado".
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/LeadEntrada'}}}}
+      responses:
+        '200': {description: Atualizado, content: {application/json: {schema: {$ref: '#/components/schemas/RespostaLead'}}}}
+        '201': {description: Criado, content: {application/json: {schema: {$ref: '#/components/schemas/RespostaLead'}}}}
+        '422': {$ref: '#/components/responses/Invalido'}
+  /leads/{id}:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    get:
+      tags: [Leads]
+      summary: Ver lead (com histórico de etapas e interações)
+      responses:
+        '200': {description: Lead}
+        '404': {$ref: '#/components/responses/NaoEncontrado'}
+  /leads/{id}/etapa:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    patch:
+      tags: [Leads]
+      summary: Mudar a etapa (registra no histórico)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [etapa]
+              properties:
+                etapa: {type: string, description: Nome da etapa (GET /funil/etapas)}
+                motivo: {type: string, description: Obrigatório para etapas do tipo perdido}
+      responses:
+        '200': {description: Etapa alterada (mudou=false se já estava nela)}
+        '404': {$ref: '#/components/responses/NaoEncontrado'}
+        '422': {$ref: '#/components/responses/Invalido'}
+  /leads/{id}/interacoes:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    post:
+      tags: [Leads]
+      summary: Registrar interação (com data_follow_up cria tarefa de follow-up)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resumo]
+              properties:
+                data: {type: string, format: date}
+                canal: {type: string, default: WhatsApp}
+                resumo: {type: string}
+                proximo_passo: {type: string}
+                data_follow_up: {type: string, format: date}
+      responses:
+        '201': {description: Registrada}
+        '404': {$ref: '#/components/responses/NaoEncontrado'}
+        '422': {$ref: '#/components/responses/Invalido'}
+  /leads/{id}/converter:
+    parameters: [{$ref: '#/components/parameters/Id'}]
+    post:
+      tags: [Leads]
+      summary: Converter lead em cliente
+      description: Cria o cliente com os dados do lead (e os campos de cliente enviados), liga os dois e move o lead para a etapa de cliente fechado. Precisa das permissões leads:gravar e clientes:gravar.
+      requestBody: {required: false, content: {application/json: {schema: {$ref: '#/components/schemas/ClienteEntrada'}}}}
+      responses:
+        '201': {description: Cliente criado, content: {application/json: {schema: {$ref: '#/components/schemas/RespostaCliente'}}}}
+        '409': {description: Lead já convertido (traz cliente_id) ou CPF já cadastrado}
+  /funil/etapas:
+    get:
+      tags: [Funil e anúncios]
+      summary: Etapas do funil, na ordem
+      responses:
+        '200':
+          description: Etapas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  etapas:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        ordem: {type: integer}
+                        nome: {type: string}
+                        tipo: {type: string, enum: [andamento, ganho, perdido, parceiro]}
+  /anuncios:
+    get:
+      tags: [Funil e anúncios]
+      summary: Listar anúncios
+      responses:
+        '200': {description: Lista}
+    post:
+      tags: [Funil e anúncios]
+      summary: Cadastrar anúncio (atualiza se o código já existir)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [codigo]
+              properties:
+                codigo: {type: string, example: BPC-01, description: '2 a 5 letras, hífen e 2 ou 3 números'}
+                plataforma: {type: string, default: Meta}
+                campanha: {type: string}
+                conjunto: {type: string}
+                anuncio: {type: string}
+                area_do_direito: {type: string}
+                data_inicio: {type: string, format: date}
+                data_fim: {type: string, format: date}
+                investimento: {type: number}
+                mensagem_pre_preenchida: {type: string}
+      responses:
+        '200': {description: Atualizado}
+        '201': {description: Criado}
+        '422': {$ref: '#/components/responses/Invalido'}
+  /relatorios/anuncios:
+    get:
+      tags: [Funil e anúncios]
+      summary: Leads e clientes fechados por anúncio e por campanha, com taxa de conversão
+      parameters:
+        - {name: desde, in: query, schema: {type: string, format: date}}
+        - {name: ate, in: query, schema: {type: string, format: date}}
+      responses:
+        '200': {description: Relatório}
+  /webhooks/waspeed:
+    post:
+      tags: [Webhook]
+      summary: Eventos do WaSpeed (mensagem, contato, etiqueta, mudança de coluna)
+      description: |
+        Autenticado por token secreto (gerado em Configurações → API e conector), enviado de uma destas formas:
+        cabeçalho `X-Webhook-Token`, `Authorization: Bearer <token>` ou `?token=` na URL.
+        Cria ou atualiza o lead pelo telefone, lê o código do anúncio e espelha a coluna do Kanban do WaSpeed na etapa do sistema.
+        O JSON recebido é guardado (30 dias) para conferência. Aceita um evento ou uma lista de eventos.
+      security: []
+      parameters:
+        - {name: token, in: query, required: false, schema: {type: string}}
+        - {name: X-Webhook-Token, in: header, required: false, schema: {type: string}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '200': {description: 'Processado: resultados com status ok, ignorado ou erro'}
+        '401': {description: Token inválido}
+components:
+  securitySchemes:
+    chave:
+      type: http
+      scheme: bearer
+      description: Chave de API (gsm_…) ou token OAuth do conector (gat_…)
+  parameters:
+    Id: {name: id, in: path, required: true, schema: {type: string}}
+  responses:
+    Invalido: {description: Dado inválido, content: {application/json: {schema: {$ref: '#/components/schemas/Erro'}}}}
+    NaoEncontrado: {description: Não encontrado, content: {application/json: {schema: {$ref: '#/components/schemas/Erro'}}}}
+  schemas:
+    Erro:
+      type: object
+      properties:
+        ok: {type: boolean, example: false}
+        erro: {type: string}
+        campo: {type: string}
+    Endereco:
+      type: object
+      properties:
+        cep: {type: string}
+        logradouro: {type: string}
+        numero: {type: string}
+        complemento: {type: string}
+        bairro: {type: string}
+        cidade: {type: string}
+        uf: {type: string}
+    ClienteEntrada:
+      type: object
+      properties:
+        nome: {type: string, description: Obrigatório no cadastro}
+        nacionalidade: {type: string}
+        estado_civil: {type: string}
+        profissao: {type: string}
+        rg: {type: string}
+        orgao_emissor: {type: string}
+        cpf: {type: string, description: Validado (dígitos verificadores)}
+        data_nascimento: {type: string, format: date}
+        filiacao: {type: string}
+        endereco: {oneOf: [{$ref: '#/components/schemas/Endereco'}, {type: string, description: Endereço em uma linha (o CEP é extraído)}]}
+        email: {type: string}
+        telefone: {type: string}
+        area_do_caso: {type: string}
+        objeto: {type: string}
+        honorarios_valor: {type: number}
+        honorarios_forma: {type: string}
+        honorarios_exito_percentual: {type: number, minimum: 0, maximum: 100}
+        justica_gratuita: {type: boolean}
+        lead_id: {type: string}
+    Cliente:
+      type: object
+      properties:
+        id: {type: string}
+        nome: {type: string}
+        cpf: {type: string}
+        telefone: {type: string, description: E.164}
+        email: {type: string}
+        area_do_caso: {type: string}
+        status: {type: string}
+        lead_id: {type: string}
+        endereco: {$ref: '#/components/schemas/Endereco'}
+        documentos: {type: array, items: {type: object}}
+        contratos: {type: array, items: {type: object}}
+    ListaClientes:
+      type: object
+      properties:
+        total: {type: integer}
+        itens: {type: array, items: {$ref: '#/components/schemas/Cliente'}}
+    RespostaCliente:
+      type: object
+      properties:
+        ok: {type: boolean}
+        cliente: {$ref: '#/components/schemas/Cliente'}
+        contrato_id: {type: [string, 'null']}
+    LeadEntrada:
+      type: object
+      required: [telefone]
+      properties:
+        nome: {type: string}
+        telefone: {type: string}
+        primeira_mensagem: {type: string}
+        data_primeiro_contato: {type: string, format: date}
+        plataforma: {type: string}
+        codigo_anuncio: {type: string}
+        campanha: {type: string}
+        conjunto: {type: string}
+        anuncio: {type: string}
+        area_interesse: {type: string}
+        resumo_triagem: {type: string}
+        responsavel: {type: string, description: Nome ou e-mail de alguém da equipe}
+        email: {type: string}
+        etapa: {type: string}
+        motivo: {type: string}
+    Lead:
+      type: object
+      properties:
+        id: {type: string}
+        nome: {type: string}
+        telefone: {type: string}
+        etapa: {type: string}
+        tipo_etapa: {type: string}
+        origem: {type: string}
+        codigo_anuncio: {type: string}
+        campanha: {type: string}
+        conjunto: {type: string}
+        anuncio: {type: string}
+        historico_etapas: {type: array, items: {type: object}}
+        interacoes: {type: array, items: {type: object}}
+        cliente_id: {type: string}
+    ListaLeads:
+      type: object
+      properties:
+        total: {type: integer}
+        itens: {type: array, items: {$ref: '#/components/schemas/Lead'}}
+    RespostaLead:
+      type: object
+      properties:
+        ok: {type: boolean}
+        lead: {$ref: '#/components/schemas/Lead'}
+        criado: {type: boolean}
+        avisos: {type: array, items: {type: string}}

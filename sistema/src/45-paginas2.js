@@ -4,7 +4,7 @@
 const FRASES=['Cada prazo cumprido é um cliente mais tranquilo.','Pequenas tarefas concluídas hoje viram grandes resultados no fim do mês.','Atendimento rápido fecha contrato: responda os novos contatos primeiro!','Organização é a melhor estratégia processual.','Meta batida é conquista de todo o time. Bora!','Cliente bem informado indica o escritório.','Foco no que vence hoje, olhar no que vence amanhã.'];
 const smCor=s=>/Deferido|Concluído/.test(s)?'p-green':/Indeferido/.test(s)?'p-red':/exigência/i.test(s)?'p-amber':/Protocolado|Pronto/.test(s)?'p-blue':/Recurso/.test(s)?'p-teal':'p-gray';
 const guiaCor=s=>s==='Paga'?'p-green':s==='Vencida'?'p-red':s==='Emitida'?'p-blue':'p-amber';
-const leadsSemRetorno=()=>db.leads.filter(l=>!l.convertido&&!['Fechado','Perdido','Encaminhado a parceiro'].includes(l.etapa)&&diff(l.ultimoContato||l.primeiroContato||l.criado)<=-3);
+const leadsSemRetorno=()=>db.leads.filter(l=>leadAberto(l)&&diff(l.ultimoContato||l.primeiroContato||l.criado)<=-3);
 function guiasPendentes(dias){const out=[];db.sm.forEach(c=>(c.guias||[]).forEach(g=>{const st=guiaStatus(g);if(st!=='Paga'&&diff(g.venc)<=dias)out.push({c,g,st});}));return out.sort((a,b)=>a.g.venc.localeCompare(b.g.venc));}
 function aniversariantes(dias){
   const h=new Date();const lista=[];
@@ -101,7 +101,7 @@ V.painel=()=>{
     <div class="grid g-3">
       <div class="card"><h3>🎂 Aniversariantes da semana</h3>${anivHtml}</div>
       <div class="card"><h3>👶 Salário-maternidade <a class="btn btn-ghost btn-sm" href="#sm">Abrir</a></h3>${smHtml.trim()||'<div class="empty">Nenhum parto previsto ou guia pendente</div>'}</div>
-      <div class="card"><h3>◈ Novos atendimentos <a class="btn btn-ghost btn-sm" href="#atendimentos">CRM</a></h3>${db.leads.filter(l=>l.etapa==='Novo contato').slice(0,6).map(l=>`<div class="ev"><div class="body" data-act="editLead" data-id="${l.id}"><div class="t">${esc(l.nome)}</div><div class="small muted">${esc(l.produto||'')} · ${esc(l.origem||'')} · ${fd(l.primeiroContato||l.criado)}</div></div>${l.tel?`<a class="btn btn-ghost btn-sm" style="text-decoration:none;color:#1F9D55" target="_blank" rel="noopener" href="${waLink(l.tel)}">WhatsApp</a>`:''}</div>`).join('')||'<div class="empty">Nenhum contato novo aguardando</div>'}</div>
+      <div class="card"><h3>◈ Novos atendimentos <a class="btn btn-ghost btn-sm" href="#atendimentos">CRM</a></h3>${db.leads.filter(l=>l.etapa===etapaInicial()).slice(0,6).map(l=>`<div class="ev"><div class="body" data-act="editLead" data-id="${l.id}"><div class="t">${esc(l.nome)}</div><div class="small muted">${esc(l.produto||'')} · ${esc(l.origem||'')} · ${fd(l.primeiroContato||l.criado)}</div></div>${l.tel?`<a class="btn btn-ghost btn-sm" style="text-decoration:none;color:#1F9D55" target="_blank" rel="noopener" href="${waLink(l.tel)}">WhatsApp</a>`:''}</div>`).join('')||'<div class="empty">Nenhum contato novo aguardando</div>'}</div>
     </div>`;
 };
 
@@ -509,7 +509,7 @@ V.config=()=>{
     ${(contasCache||[]).map((c,i)=>`<tr data-act="editConta" data-id="${i}"><td class="strong">${esc(c.nome)}</td><td>${esc(c.email)}</td><td class="small">${esc(papelNome(c.papel))}</td><td>${c.ativo?pill('Ativo','p-green'):pill('Desativado','p-gray')}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">Carregando…</td></tr>'}</tbody></table></div>
     <div class="small muted" style="margin-top:8px">Cada pessoa entra com o próprio e-mail e senha. <b>Estagiário</b> não vê o financeiro; <b>Parceiro</b> vê só os casos da parceria.${modo==='local'?' Na demonstração, a senha de todos é <b>demo1234</b>.':''}</div></div>`:''}
   ${minhaSenha}
-  ${card2FA()}${cardAppCelular()}${cardEfeitos()}${cardBackup()}
+  ${card2FA()}${cardAppCelular()}${cardEfeitos()}${cardBackup()}${cardIntegracaoApi()}
   ${['admin','advogado'].includes(papel())?cardSalasConfig()+cardFluxosConfig()+cardLembretesConfig():''}${cardIntegracoes()}
   <div class="card"><h3>🧑‍⚖️ Equipe (responsáveis e parceiros) <button class="btn btn-gold btn-sm" data-act="novoUsr">+ Membro</button></h3><div class="tbl"><table><thead><tr><th>Nome</th><th>Função</th><th>OAB</th></tr></thead><tbody>
     ${db.usuarios.map(u=>`<tr data-act="editUsr" data-id="${u.id}"><td class="strong">${esc(u.nome)}<div class="small muted">${esc(u.email)}</div></td><td>${esc(u.papel)}</td><td>${esc(u.oab)||'—'}</td></tr>`).join('')}</tbody></table></div></div>

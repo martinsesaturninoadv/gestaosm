@@ -91,7 +91,7 @@ function fracao(t,de,ate){const ini=t.inicio>de?t.inicio:de,fim=t.fim<ate?t.fim:
 function statusCampanhas(){const m={};db.trafego.forEach(t=>{const x=m[t.campanha];if(t.ativa!=null&&(!x||t.fim>=x.fim))m[t.campanha]={fim:t.fim,ativa:t.ativa};});return m;}
 const leadsMeta=()=>db.leads.filter(l=>ehDeAnuncio(l.origem));
 const dataChegada=l=>l.primeiroContato||l.criado||'';
-const dataFechou=l=>l.etapa==='Fechado'?(l.dataFechamento||l.ultimoContato||''):'';
+const dataFechou=l=>leadGanho(l)?(l.dataFechamento||l.ultimoContato||''):'';
 const valorFechou=l=>+l.valorFechado||+l.valor||0;
 function resumoTrafego(de,ate,f){
   f=f||{};const st=statusCampanhas();

@@ -14,7 +14,10 @@ function guessCatDesp(desc){
   for(const[re,c]of R)if(re.test(d))return c;return 'Outras despesas';
 }
 function guessCatRec(desc){const d=norm(desc);if(/sucumb/.test(d))return 'Sucumbência';if(/acordo/.test(d))return 'H.O. finais — acordo';if(/final|exito/.test(d))return 'H.O. finais — êxito';if(/inicia|entrada|parcela/.test(d))return 'H.O. iniciais';if(/\btmp\b/.test(d))return 'TMP';if(/parceria|delegad/.test(d))return 'Parceria (execução delegada)';if(/consulta/.test(d))return 'Consulta';return 'Outras receitas';}
-function mapEtapa(s){const d=norm(s);if(/recupera/.test(d))return 'Em recuperação';if(/fechad|contrat/.test(d))return 'Fechado';if(/perd|desist/.test(d))return 'Perdido';if(/parceir/.test(d))return 'Encaminhado a parceiro';if(/proposta/.test(d))return 'Proposta enviada';if(/atendim|negocia/.test(d))return 'Em atendimento';return 'Novo contato';}
+function mapEtapa(s){const d=norm(s);const ex=etapasLead().find(e=>norm(e)===d);if(ex)return ex;const por=re=>etapasLead().find(e=>re.test(norm(e)));
+  if(/fechad|contrat.*assin|cliente/.test(d))return etapaDoTipo('ganho')||etapaInicial();if(/perd|desist/.test(d))return etapaDoTipo('perdido')||etapaInicial();if(/parceir/.test(d))return etapaDoTipo('parceiro')||etapaInicial();
+  if(/recupera|negocia/.test(d))return por(/negocia|recupera/)||etapaInicial();if(/contrato/.test(d))return por(/contrato/)||etapaInicial();if(/proposta/.test(d))return por(/proposta/)||etapaInicial();
+  if(/document/.test(d))return por(/document/)||etapaInicial();if(/triagem|atendim/.test(d))return por(/triagem|atendim/)||etapaInicial();return etapaInicial();}
 function somaReais(txt){const m=String(txt||'').match(/R\$\s*[\d.,]+/g);return m?m.reduce((s,x)=>s+parseNum(x),0):parseNum(txt);}
 function telTxt(v){if(v==null||v==='')return '';if(typeof v==='number')v=String(Math.round(v));const d=digits(v);if(d.length===11)return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;if(d.length===10)return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;return String(v).trim();}
 function achaCliente(nome){const n=norm(nome);return n?db.clientes.find(c=>norm(c.nome)===n):null;}

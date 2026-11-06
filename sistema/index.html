@@ -533,6 +533,13 @@ table.ind td.editado{font-style:italic;color:var(--brand2)}
 .cont-msgs{max-height:460px;min-height:160px;overflow:auto;display:flex;flex-direction:column;gap:6px}
 .nb-mini{background:#C0392B;color:#fff;border-radius:999px;font-size:10px;padding:1px 6px;vertical-align:middle}
 .card.acordo{border-left:4px solid #2E7D4E}
+/* funil, anúncios e painel da API */
+.fn-linha{display:flex;gap:6px;align-items:center;margin-bottom:6px}.fn-linha input{flex:1;min-width:0}.fn-linha select{max-width:190px}
+.barra-mini{height:8px;background:var(--bg2,#efe9dc);border-radius:99px;overflow:hidden}.barra-mini i{display:block;height:100%;background:#C8A84B}
+.cod-url{font-size:12px;background:var(--bg2,#f3efe6);border-radius:6px;padding:5px 8px;word-break:break-all;flex:1;min-width:0}
+.intapi .dgroup{margin:16px 0 6px}
+.wsp-ev{border-bottom:1px solid var(--line,#eee);padding:6px 0}.wsp-ev pre{max-height:320px;overflow:auto;background:var(--bg2,#f6f3ec);padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-word}
+.lead-hist .ev{padding:4px 0}
 </style>
 </head>
 <body>
@@ -553,6 +560,7 @@ table.ind td.editado{font-style:italic;color:var(--brand2)}
       <a class="ni" href="#atendimentos" data-noparc><span class="ic">◈</span>Atendimentos (CRM)</a>
       <a class="ni" href="#clientes" data-noparc><span class="ic">◉</span>Clientes</a>
       <a class="ni" href="#registro" data-noparc><span class="ic">☰</span>Registro histórico</a>
+      <a class="ni" href="#anuncios" data-noparc><span class="ic">📣</span>Anúncios e origem</a>
       <a class="ni" href="#scripts" data-noparc><span class="ic">✉</span>Scripts de atendimento</a>
       <a class="ni" href="#conteudo" data-noparc><span class="ic">🎬</span>Produção de conteúdo<span class="nb" id="nb-cont"></span></a>
       <div class="ns" data-noparc>Jurídico</div>
@@ -644,8 +652,20 @@ const CAT_REC=['H.O. iniciais','H.O. finais — acordo','H.O. finais — êxito'
 const LUCROS='Distribuição de lucros';
 const CAT_DESP=['Aluguel','Energia elétrica','Telefonia / internet','Sistemas','Tráfego — Google','Tráfego — Facebook/Instagram','Agência / marketing','Indicações pagas','Contador','Folha de pagamento','Pró-labore','Impostos','Taxa de cartão','Taxa de boleto','Tarifas bancárias','Empresa de TI','Copa','Correios','Material de expediente','Manutenção / extraordinárias','Equipamentos','Capacitação','Custas processuais','Repasse a parceiro',LUCROS,'Outras despesas'];
 const FORMAS=['PIX','Boleto','Cartão','Cheque','Transferência','Dinheiro','Recorrência'];
-const ETAPAS=['Novo contato','Em atendimento','Proposta enviada','Em recuperação','Fechado','Perdido','Encaminhado a parceiro'];
-const ORIGENS=['Google Ads','Facebook / Instagram Ads','Instagram orgânico','TikTok orgânico','YouTube orgânico','Indicação de cliente','Indicação de parceiro','Site','Outro'];
+const ETAPAS=['Novo contato','Em atendimento','Proposta enviada','Em recuperação','Fechado','Perdido','Encaminhado a parceiro']; // lista antiga (antes da migração da API)
+/* funil de atendimento: etapas editáveis (Configurações → Funil), cada uma com um tipo: andamento, ganho, perdido ou parceiro */
+const FUNIL_LEGADO=[['Novo contato','andamento'],['Em atendimento','andamento'],['Proposta enviada','andamento'],['Em recuperação','andamento'],['Fechado','ganho'],['Perdido','perdido'],['Encaminhado a parceiro','parceiro']];
+const FUNIL_PADRAO=[['Novo lead','andamento'],['Em triagem','andamento'],['Aguardando documentos','andamento'],['Proposta enviada','andamento'],['Negociação','andamento'],['Contrato enviado','andamento'],['Cliente fechado','ganho'],['Perdido','perdido'],['Encaminhado a parceiro','parceiro']];
+const TIPOS_ETAPA=[['andamento','Em andamento'],['ganho','Cliente fechado (ganho)'],['perdido','Perdido (pede motivo)'],['parceiro','Encaminhado a parceiro']];
+const funil=()=>{const e=typeof db!=='undefined'&&db&&db.funil&&Array.isArray(db.funil.etapas)?db.funil.etapas.filter(x=>x&&x.nome):[];return e.length?e:FUNIL_LEGADO.map(([nome,tipo])=>({nome,tipo}));};
+const etapasLead=()=>funil().map(e=>e.nome);
+const tipoEtapa=n=>(funil().find(e=>e.nome===n)||{tipo:'andamento'}).tipo;
+const etapaInicial=()=>funil()[0].nome;
+const etapaDoTipo=t=>(funil().find(e=>e.tipo===t)||{}).nome||'';
+const leadGanho=l=>tipoEtapa(l.etapa)==='ganho';
+const leadAberto=l=>!l.convertido&&tipoEtapa(l.etapa)==='andamento';
+const ORIGEM_ORGANICA='Orgânico / não identificado';
+const ORIGENS=['Google Ads','Facebook / Instagram Ads','Instagram orgânico','TikTok orgânico','YouTube orgânico','Orgânico / não identificado','Indicação de cliente','Indicação de parceiro','Site','Outro'];
 const AMBITOS=['Judicial','Administrativo','Administrativo + Judicial','Extrajudicial / consultivo'];
 const SEXOS=['Feminino','Masculino','Outro'];
 const UFS='AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ');
@@ -664,7 +684,7 @@ const GPS_CODIGOS=[['1007','Contribuinte individual — 20%',20],['1163','Contri
 const SM_DOCS=['RG e CPF da segurada','Certidão de nascimento da criança (ou atestado/termo de guarda)','CNIS atualizado','Comprovante de residência','Carteira de trabalho / contratos','Comprovantes de recolhimento (guias pagas)','Declaração de atividade rural / autodeclaração (se rural)','Comprovante de inscrição MEI e DAS pagos (se MEI)'];
 const SCRIPT_CATS=['Primeiro atendimento','Qualificação','Objeções','Fechamento','Pós-venda','Pedido de indicação','Aniversário','Cobrança','Recuperação de contato','Datas e avisos'];
 const MODELO_CATS=['Contrato de honorários','Proposta de honorários','Procuração','Declaração','Recibo','Notificação','Outro'];
-const TITLES={painel:'Painel',escritorio:'Escritório virtual',trafego:'Tráfego pago (Meta Ads)',conteudo:'Produção de conteúdo',requisitorios:'RPV, precatórios e alvarás',peticoes:'Conferência de petições',audiencias:'Audiências',agenda:'Agenda e compromissos',tarefas:'Tarefas',resumo:'Resumo do dia',clientes:'Clientes',cliente:'Cliente',registro:'Registro histórico de clientes',processos:'Contencioso e administrativo',processo:'Processo',sm:'Salário-maternidade',smcaso:'Caso de salário-maternidade',documentos:'Documentos e modelos',scripts:'Scripts de atendimento',atendimentos:'Atendimentos (CRM)',financeiro:'Contas a receber e pagar',previsao:'Previsão de recebimentos',fixas:'Despesas fixas',fluxo:'Fluxo de caixa',contratos:'Contratos e metas',parcerias:'Parcerias',indicadores:'Indicadores mensais',relatorios:'Relatórios',config:'Configurações'};
+const TITLES={painel:'Painel',escritorio:'Escritório virtual',trafego:'Tráfego pago (Meta Ads)',anuncios:'Anúncios e origem dos leads',conteudo:'Produção de conteúdo',requisitorios:'RPV, precatórios e alvarás',peticoes:'Conferência de petições',audiencias:'Audiências',agenda:'Agenda e compromissos',tarefas:'Tarefas',resumo:'Resumo do dia',clientes:'Clientes',cliente:'Cliente',registro:'Registro histórico de clientes',processos:'Contencioso e administrativo',processo:'Processo',sm:'Salário-maternidade',smcaso:'Caso de salário-maternidade',documentos:'Documentos e modelos',scripts:'Scripts de atendimento',atendimentos:'Atendimentos (CRM)',financeiro:'Contas a receber e pagar',previsao:'Previsão de recebimentos',fixas:'Despesas fixas',fluxo:'Fluxo de caixa',contratos:'Contratos e metas',parcerias:'Parcerias',indicadores:'Indicadores mensais',relatorios:'Relatórios',config:'Configurações'};
 const PAG_FIN=['financeiro','previsao','fixas','fluxo','contratos','indicadores','relatorios'];
 const XLSX_URL='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
 
@@ -791,8 +811,8 @@ const valorCampo=v=>v===''||v==null?'':typeof v==='number'?String(v).replace('.'
 let db;
 let modo='local',sessao=null;
 const ui={page:'painel',id:null,agendaView:'lista',agendaMes:today().slice(0,7),f:{},tabCli:'processos',tabProc:'Judicial',procView:'lista',tabSm:'casos',tabDoc:'gerador'};
-const COLS=['clientes','processos','eventos','tarefas','leads','lancamentos','documentos','notas','contratos','despesasFixas','usuarios','sm','scripts','modelos','trafego','requisitorios','nps','recados','peticoes','conteudos'];
-const SINGLES=['escritorio','metas','produtos','tiposEvento','indAjustes','indExtras','salas','fluxos'];
+const COLS=['clientes','processos','eventos','tarefas','leads','lancamentos','documentos','notas','contratos','despesasFixas','usuarios','sm','scripts','modelos','trafego','requisitorios','nps','recados','peticoes','conteudos','anuncios'];
+const SINGLES=['escritorio','metas','produtos','tiposEvento','indAjustes','indExtras','salas','fluxos','funil','waspeed'];
 const COLS_FIN=['lancamentos','contratos','despesasFixas','trafego','requisitorios'];
 /* parceiro: só a parceria (clientes, processos, prazos, tarefas e honorários) — sem CRM, salário-maternidade, documentos, modelos e scripts */
 const COLS_PARC=['clientes','processos','eventos','tarefas','notas','contratos','lancamentos'];
@@ -802,8 +822,8 @@ const doParceiro=(x,email)=>!!x&&(norm(x.parceiro)===norm(email)||(Array.isArray
 const CONFIG_PARC=['escritorio','produtos','tiposEvento','salas'];
 
 function vazio(){return {versao:6,escritorio:{nome:'Martins & Saturnino Advocacia e Consultoria',cnpj:'',oab:'',email:'',tel:'',endereco:'',cidade:'',saldoInicial:0,saldoInicialData:'',logo:'',googleClientId:'',salarioMinimo:1518},
-  metas:{...METAS_PADRAO},produtos:PRODUTOS_PADRAO.slice(),tiposEvento:TIPOS_EVT_PADRAO.map(([nome,cor])=>({nome,cor})),indAjustes:{},indExtras:[],salas:salasPadrao(),fluxos:{},
-  usuarioAtual:'',usuarios:[],clientes:[],processos:[],eventos:[],tarefas:[],leads:[],lancamentos:[],documentos:[],notas:[],contratos:[],despesasFixas:[],sm:[],scripts:[],modelos:[],trafego:[],requisitorios:[],nps:[],recados:[],peticoes:[],conteudos:[]};}
+  metas:{...METAS_PADRAO},produtos:PRODUTOS_PADRAO.slice(),tiposEvento:TIPOS_EVT_PADRAO.map(([nome,cor])=>({nome,cor})),indAjustes:{},indExtras:[],salas:salasPadrao(),fluxos:{},funil:{etapas:[]},waspeed:{colunas:{},caminhos:{}},
+  usuarioAtual:'',usuarios:[],clientes:[],processos:[],eventos:[],tarefas:[],leads:[],lancamentos:[],documentos:[],notas:[],contratos:[],despesasFixas:[],sm:[],scripts:[],modelos:[],trafego:[],requisitorios:[],nps:[],recados:[],peticoes:[],conteudos:[],anuncios:[]};}
 function migrar(d){
   const v=vazio();for(const k in v)if(d[k]===undefined||d[k]===null)d[k]=v[k];
   d.escritorio={...v.escritorio,...d.escritorio};if(d.escritorio.nome==='Martins & Saturnino Advocacia')d.escritorio.nome=v.escritorio.nome;d.metas={...METAS_PADRAO,...d.metas};
@@ -811,6 +831,7 @@ function migrar(d){
   if(!Array.isArray(d.tiposEvento)||!d.tiposEvento.length)d.tiposEvento=v.tiposEvento;
   if(typeof d.indAjustes!=='object'||Array.isArray(d.indAjustes))d.indAjustes={};
   if(!Array.isArray(d.indExtras))d.indExtras=[];
+  if(!d.funil||!Array.isArray(d.funil.etapas))d.funil={etapas:[]};if(!d.waspeed||typeof d.waspeed!=='object')d.waspeed={colunas:{},caminhos:{}};
   {const sp=salasPadrao();const s=typeof d.salas==='object'&&d.salas&&!Array.isArray(d.salas)?d.salas:{};d.salas={};for(const k in sp)d.salas[k]={...sp[k],...(s[k]||{})};}
   const mapa={'Honorários contratuais':'H.O. iniciais','Honorários de êxito':'H.O. finais — êxito','Honorários mensais — partido':'Honorários mensais (partido)','Aluguel e condomínio':'Aluguel','Folha / pró-labore':'Folha de pagamento','Software e sistemas':'Sistemas','Marketing / tráfego pago':'Tráfego — Facebook/Instagram','Material e escritório':'Material de expediente'};
   d.lancamentos.forEach(l=>{if(mapa[l.categoria])l.categoria=mapa[l.categoria];if(!l.criado)l.criado=l.venc;});
@@ -1171,6 +1192,12 @@ function seed(){
     {id:uid(),clienteId:'c3',data:addDays(-4),autor:'u2',texto:'Explicada a sentença por telefone; cliente autorizou o recurso.'},
     {id:uid(),clienteId:'c7',data:addDays(-25),autor:'u2',texto:'Contrato assinado + partido de R$ 3.500/mês.'}];
   seedV6(d);seedConteudo(d);
+  // demonstração já no funil novo (o servidor usa a lista antiga até a migração ser aplicada)
+  const mapa={'Novo contato':'Novo lead','Em atendimento':'Em triagem','Em recuperação':'Negociação','Fechado':'Cliente fechado'};
+  d.funil={etapas:FUNIL_PADRAO.map(([nome,tipo])=>({nome,tipo}))};d.leads.forEach(l=>{if(mapa[l.etapa])l.etapa=mapa[l.etapa];if(l.etapa==='Perdido'&&!l.motivoPerda)l.motivoPerda='Achou caro';});
+  d.anuncios=[{id:'an1',codigo:'SM-01',plataforma:'Meta',campanha:'Salário-maternidade — gestantes',conjunto:'SP 20-35',anuncio:'Vídeo direitos da gestante',area:'Salário-maternidade',inicio:addDays(-30),fim:'',investimento:900,mensagem:'Olá! Vim pelo anúncio [SM-01]'},
+    {id:'an2',codigo:'TRA-01',plataforma:'Meta',campanha:'Trabalhista — demissão',conjunto:'Grande SP',anuncio:'Carrossel verbas',area:'Trabalhista',inicio:addDays(-20),fim:'',investimento:600,mensagem:'Olá! Vim pelo anúncio [TRA-01]'}];
+  d.leads.forEach((l,i)=>{if(/Facebook/.test(l.origem||'')){const a=d.anuncios[i%2];l.codigoAnuncio=a.codigo;l.campanha=a.campanha;l.conjunto=a.conjunto;l.anuncio=a.anuncio;l.plataforma='Meta';l.primeiraMensagem=a.mensagem;}});
   return d;
 }
 
@@ -1669,6 +1696,11 @@ function editCliente(id){
     {k:'origem',l:'Origem (como chegou)',t:'select',o:ORIGENS},{k:'produto',l:'Produto / nicho',t:'select',o:O.produtos},
     {k:'primeiroContato',l:'Primeiro contato',t:'date'},{k:'ultimoContato',l:'Último contato',t:'date'},
     {k:'status',l:'Situação',t:'select',o:['Ativo','Inativo'],req:1},...campoParceiro(),
+    {t:'sec',l:'Qualificação (procuração, declaração e contrato)'},
+    {k:'nacionalidade',l:'Nacionalidade',list:['brasileira','brasileiro']},{k:'estadoCivil',l:'Estado civil',list:['solteira','solteiro','casada','casado','divorciada','divorciado','viúva','viúvo','união estável']},
+    {k:'rg',l:'RG'},{k:'orgaoEmissor',l:'Órgão emissor'},{k:'filiacao',l:'Filiação (mãe e pai)',full:1},
+    {k:'cep',l:'CEP'},{k:'logradouro',l:'Endereço (rua/avenida)'},{k:'numero',l:'Número'},{k:'complemento',l:'Complemento'},{k:'bairro',l:'Bairro'},
+    {k:'objeto',l:'Objeto do caso',t:'textarea',full:1,rows:2},{k:'justicaGratuita',l:'Pedir justiça gratuita',t:'check'},
     ...camposPerfil,{k:'driveLink',l:'Pasta no Google Drive (cole o link da pasta)',t:'url',full:1,ph:'https://drive.google.com/drive/folders/…'},{k:'obs',l:'Observações',t:'textarea',full:1}],
     c,v=>{v.driveLink=(v.driveLink||'').trim();const fid=(v.driveLink.match(/folders\/([\w-]+)/)||v.driveLink.match(/[?&]id=([\w-]+)/)||[])[1];v.driveId=fid||(v.driveLink?'':(c.driveLink?'':c.driveId||''));
       const nid=upsert('clientes',id,v,{criado:today()});if(!id)location.hash='cliente/'+nid;},
@@ -1724,17 +1756,26 @@ function editTarefa(id,pre){
     {...t,responsaveis:respDe(t)},v=>{v.responsavelId=v.responsaveis[0]||'';if(v.status==='done'&&t.status!=='done'){v.concluidoEm=today();v.concluidoPor=quemConclui(v);setTimeout(()=>celebrarEvento('tarefa','Tarefa concluída!',v.titulo),200);}if(v.status!=='done')v.concluidoEm='';upsert('tarefas',id,v);},id&&(()=>{db.tarefas=db.tarefas.filter(x=>x.id!==id);}));
 }
 function editLead(id){
-  const l=id?db.leads.find(x=>x.id===id):{etapa:'Novo contato',origem:'',primeiroContato:today(),ultimoContato:today()};
+  const l=id?db.leads.find(x=>x.id===id):{etapa:etapaInicial(),origem:'',primeiroContato:today(),ultimoContato:today(),responsavelId:db.usuarioAtual};
   form(id?'Editar atendimento':'Novo atendimento',[
     {k:'nome',l:'Nome',req:1},{k:'tel',l:'WhatsApp / telefone'},{k:'email',l:'E-mail',t:'email'},
     {k:'origem',l:'Origem',t:'select',o:ORIGENS},{k:'produto',l:'Produto / nicho',t:'select',o:O.produtos},
-    {k:'etapa',l:'Status / etapa',t:'select',o:ETAPAS,req:1},{k:'canal',l:'WhatsApp de entrada',t:'select',o:CANAIS},{k:'etiquetas',l:'Etiquetas (WaSpeed)'},
+    {k:'etapa',l:'Status / etapa',t:'select',o:etapasLead(),req:1},{k:'motivoPerda',l:'Motivo da perda',dica:'Obrigatório quando a etapa é de perda.'},{k:'responsavelId',l:'Responsável',t:'select',o:O.usuarios},{k:'canal',l:'WhatsApp de entrada',t:'select',o:CANAIS},{k:'etiquetas',l:'Etiquetas (WaSpeed)'},
     {k:'primeiroContato',l:'Primeiro contato',t:'date'},{k:'ultimoContato',l:'Último contato',t:'date'},
     {k:'valor',l:'Honorários estimados (R$)',t:'number'},{k:'campanha',l:'Campanha (Meta)',list:()=>[...new Set(db.trafego.map(t=>t.campanha))].sort(),dica:'Para medir o resultado de cada campanha na tela Tráfego pago.'},
-    {k:'dataFechamento',l:'Data de fechamento',t:'date',dica:'Preenchida sozinha ao mover para "Fechado".'},{k:'valorFechado',l:'Honorários fechados (R$)',t:'number',dica:'Valor do contrato fechado (se vazio, usa o estimado).'},
+    {k:'dataFechamento',l:'Data de fechamento',t:'date',dica:'Preenchida sozinha ao mover para a etapa de cliente fechado.'},{k:'valorFechado',l:'Honorários fechados (R$)',t:'number',dica:'Valor do contrato fechado (se vazio, usa o estimado).'},
     {k:'proposta',l:'Proposta enviada',t:'textarea',full:1,rows:2,},
-    {k:'obs',l:'Resumo do caso',t:'textarea',full:1,rows:2},...campoParceiro(),...camposPerfil],
-    l,v=>{if(v.etapa==='Fechado'&&!v.dataFechamento)v.dataFechamento=today();if(v.etapa!=='Fechado')v.dataFechamento='';upsert('leads',id,v,{criado:v.primeiroContato||today()});},id&&(()=>{db.leads=db.leads.filter(x=>x.id!==id);}));
+    {k:'obs',l:'Resumo do caso',t:'textarea',full:1,rows:2},
+    {t:'sec',l:'Origem do anúncio e triagem'},
+    {k:'codigoAnuncio',l:'Código do anúncio',list:()=>db.anuncios.map(a=>a.codigo),ph:'ex.: BPC-01',dica:'Preenche campanha, conjunto e anúncio pelo cadastro de anúncios.'},{k:'plataforma',l:'Plataforma',list:['Meta','Instagram','Facebook','Google','WhatsApp']},
+    {k:'conjunto',l:'Conjunto de anúncios'},{k:'anuncio',l:'Anúncio'},
+    {k:'primeiraMensagem',l:'Primeira mensagem',t:'textarea',full:1,rows:2},{k:'resumoTriagem',l:'Resumo da triagem',t:'textarea',full:1,rows:3},
+    ...(id?[{t:'sec',html:htmlLeadHistorico(l)}]:[]),...campoParceiro(),...camposPerfil],
+    l,v=>{const tipo=tipoEtapa(v.etapa);if(tipo==='perdido'&&!String(v.motivoPerda||'').trim()){toast('Informe o motivo da perda',1);return false;}
+      if(!v.codigoAnuncio&&v.primeiraMensagem)v.codigoAnuncio=codigoDaMensagem(v.primeiraMensagem);aplicarAnuncio(v);
+      if(tipo==='ganho'&&!v.dataFechamento)v.dataFechamento=today();if(tipo!=='ganho')v.dataFechamento='';
+      if(id&&l.etapa!==v.etapa)registrarEtapaLead(l,l.etapa,v.etapa,v.motivoPerda);
+      upsert('leads',id,v,{criado:v.primeiroContato||today(),historicoEtapas:[],interacoes:[]});},id&&(()=>{db.leads=db.leads.filter(x=>x.id!==id);}));
 }
 function editLanc(id,pre){
   const l=id?db.lancamentos.find(x=>x.id===id):{tipo:'receita',venc:today(),pago:false,forma:'PIX',...pre};
@@ -1908,7 +1949,7 @@ const pStatusLanc=s=>pill(s,s==='Pago'?'p-green':s==='Atrasado'?'p-red':'p-amber
 const pStatusProc=s=>pill(s,s==='Em andamento'?'p-blue':s==='Ganho'||s==='Acordo'||s==='Deferido'?'p-green':s==='Perdido'||s==='Indeferido'?'p-red':'p-gray');
 const pPrior=p=>pill(p,p==='Alta'?'p-red':p==='Média'?'p-amber':'p-gray');
 const pTipoEvt=t=>tagTipo(t);
-const pEtapa=e=>pill(e,e==='Fechado'||e==='Cliente'?'p-green':e==='Perdido'?'p-red':e==='Em recuperação'?'p-amber':e==='Proposta enviada'?'p-blue':'p-gray');
+const pEtapa=e=>{const t=e==='Cliente'?'ganho':tipoEtapa(e);return pill(e,t==='ganho'?'p-green':t==='perdido'?'p-red':t==='parceiro'?'p-gray':/recupera|negocia/i.test(e)?'p-amber':/proposta|contrato/i.test(e)?'p-blue':'p-gray');};
 function prazoTxt(d){const n=diff(d);if(n<0)return `<span style="color:var(--red);font-weight:600">vencido há ${-n} dia${n===-1?'':'s'}</span>`;if(n===0)return '<span style="color:var(--red);font-weight:600">hoje</span>';if(n===1)return '<span style="color:var(--amber);font-weight:600">amanhã</span>';return `<span class="${n<=5?'strong':'muted'}" style="${n<=5?'color:var(--amber)':''}">em ${n} dias</span>`;}
 function kpi(l,v,s,cls){return `<div class="card kpi"><div class="l">${l}</div><div class="v">${v}</div><div class="s ${cls||''}">${s||'&nbsp;'}</div></div>`;}
 function hbars(items,fmt){const max=Math.max(1,...items.map(i=>i[1]));if(!items.length)return '<div class="empty">Sem dados</div>';
@@ -2035,7 +2076,7 @@ function moveCard(kind,id,col){
   if(kind==='cont')moverConteudo(id,col);
   if(kind==='proc'){const p=proc(id);if(p)aplicarFase(p,col);}
   if(kind==='sm'){const c=db.sm.find(x=>x.id===id);if(c){c.status=col;if(col==='Deferido'&&!c.dataDeferimento){c.dataDeferimento=today();celebrarEvento('deferido','Benefício deferido!',nomeCli(c.clienteId));setTimeout(()=>{editSm(id);},1800);}}}
-  if(kind==='lead'){const l=db.leads.find(x=>x.id===id);if(l){l.etapa=col;l.ultimoContato=today();if(col==='Fechado'){if(!l.dataFechamento)l.dataFechamento=today();}else l.dataFechamento='';if(col==='Fechado'&&!l.convertido){celebrarEvento('contrato','Negócio fechado!',l.nome);setTimeout(()=>toast('Use "Converter em cliente" no card.'),1200);}}}
+  if(kind==='lead'){const l=db.leads.find(x=>x.id===id);if(l){if(tipoEtapa(col)==='perdido'){pedirMotivoPerda(l,col);return;}registrarEtapaLead(l,l.etapa,col,'');l.etapa=col;l.ultimoContato=today();if(tipoEtapa(col)==='ganho'){if(!l.dataFechamento)l.dataFechamento=today();}else l.dataFechamento='';if(tipoEtapa(col)==='ganho'&&!l.convertido){celebrarEvento('contrato','Negócio fechado!',l.nome);setTimeout(()=>toast('Use "Converter em cliente" no card.'),1200);}}}
   save();render();
 }
 V.tarefas=()=>{
@@ -2101,6 +2142,7 @@ V.cliente=()=>{
   if(tab==='financeiro')body=`<div class="toolbar"><span class="small">Recebido: <b style="color:var(--green)">${brl(pago)}</b> · Em aberto: <b style="color:var(--amber)">${brl(aberto)}</b></span><span class="grow"></span>
     <button class="btn btn-ghost btn-sm" data-act="novaRecCli" data-id="${c.id}">+ Receita avulsa</button><button class="btn btn-gold btn-sm" data-act="ctrCli" data-id="${c.id}">Novo contrato</button></div>${lancTable(ls,false)}`;
   if(tab==='documentos')body=`<div class="toolbar">${c.driveLink?`<a class="btn btn-ghost btn-sm" href="${esc(c.driveLink)}" target="_blank" rel="noopener" style="text-decoration:none">📁 Pasta no Google Drive</a>`:`<button class="btn btn-ghost btn-sm" data-act="vincularDrive" data-id="${c.id}">📁 Vincular pasta do Drive</button>`}<span class="grow"></span><button class="btn btn-ghost btn-sm" data-act="docsPadraoSm" data-id="${c.id}">+ Documentos padrão do salário-maternidade</button><button class="btn btn-ghost btn-sm" data-act="modeloCli" data-id="${c.id}">Gerar contrato / proposta / procuração</button><button class="btn btn-gold btn-sm" data-act="novoDocCli" data-id="${c.id}">+ Documento</button></div>`+docList(docs);
+  if(tab==='documentos')body=htmlDocsGerados(c)+body;
   if(tab==='sm')body=`<div class="toolbar"><span class="grow"></span><button class="btn btn-gold btn-sm" data-act="novoSmCli" data-id="${c.id}">+ Caso de salário-maternidade</button></div>`+(sms.length?sms.map(x=>{const pg=x.guias.filter(g=>g.pagaEm).length;return `<div class="ev"><div class="body" data-go="sm/${x.id}"><div class="t">${esc(x.categoria)} · ${esc(x.estrategia||'')}</div><div class="small muted">DPP/parto ${fd(x.dataParto||x.dpp)} · guias pagas ${pg}/${x.guias.length}</div></div>${pill(x.status,smCor(x.status))}</div>`;}).join(''):'<div class="empty">Nenhum caso cadastrado</div>');
   if(tab==='agenda')body=`<div class="toolbar"><span class="grow"></span><button class="btn btn-gold btn-sm" data-act="novoEvCli" data-id="${c.id}">+ Compromisso</button></div>`+(evs.length?evs.map(e=>evItem(e)).join(''):'<div class="empty">Nenhum compromisso pendente</div>');
   if(tab==='portal'){body=htmlRecados(c);if(recadosNaoLidos(c.id)){db.recados.forEach(r=>{if(r.clienteId===c.id&&r.origem==='cliente')r.lidoEscritorio=true;});setTimeout(save,50);}}
@@ -2130,7 +2172,7 @@ function linhasRegistro(){
   if(f.tipo!=='clientes')db.leads.filter(l=>!l.convertido).forEach(l=>rows.push({_t:'lead',_id:l.id,nome:l.nome,email:l.email,tel:l.tel,origem:l.origem,produto:l.produto||l.area,primeiro:l.primeiroContato||l.criado,ultimo:l.ultimoContato,proposta:l.proposta,status:l.etapa,
     idade:idadeDe(l),sexo:l.sexo,uf:l.uf,cidade:l.cidade,profissao:l.profissao,renda:l.renda}));
   if(f.tipo!=='atendimentos')db.clientes.forEach(c=>{
-    const base={_t:'cliente',_id:c.id,nome:c.nome,email:c.email,tel:c.tel,origem:c.origem,produto:c.produto,primeiro:c.primeiroContato,ultimo:c.ultimoContato,status:c.status==='Ativo'?'Fechado':'Cliente inativo',
+    const base={_t:'cliente',_id:c.id,nome:c.nome,email:c.email,tel:c.tel,origem:c.origem,produto:c.produto,primeiro:c.primeiroContato,ultimo:c.ultimoContato,status:c.status==='Ativo'?(etapaDoTipo('ganho')||'Fechado'):'Cliente inativo',
       idade:idadeDe(c),sexo:c.sexo,uf:c.uf,cidade:c.cidade,profissao:c.profissao,renda:c.renda};
     const ks=db.contratos.filter(k=>k.clienteId===c.id);
     if(!ks.length){rows.push({...base,recebido:recebidoCliente(c.id),sucumbencia:somaCat(c.id,'Sucumbência')});return;}
@@ -2164,16 +2206,16 @@ V.registro=()=>{
 
 V.atendimentos=()=>{
   const f=ui.f.crm||(ui.f.crm={produto:'',canal:''});
-  const ls=db.leads.filter(l=>(!f.produto||(l.produto||l.area)===f.produto)&&(!f.canal||(l.canal||'')===f.canal));const ativos=ls.filter(l=>!['Fechado','Perdido','Encaminhado a parceiro'].includes(l.etapa));
-  const fech=ls.filter(l=>l.etapa==='Fechado').length,perd=ls.filter(l=>l.etapa==='Perdido').length;
+  const ls=db.leads.filter(l=>(!f.produto||(l.produto||l.area)===f.produto)&&(!f.canal||(l.canal||'')===f.canal));const ativos=ls.filter(l=>tipoEtapa(l.etapa)==='andamento');
+  const fech=ls.filter(leadGanho).length,perd=ls.filter(l=>tipoEtapa(l.etapa)==='perdido').length;
   const orig={};ls.forEach(l=>orig[l.origem||'—']=(orig[l.origem||'—']||0)+1);
-  return `<div class="grid g-kpi">${kpi('Atendimentos em aberto',ativos.length,ls.filter(l=>l.etapa==='Em recuperação').length+' em recuperação')}${kpi('Valor em negociação',brl(sumBy(ativos,l=>l.valor)))}${kpi('Taxa de conversão',(fech+perd?Math.round(fech/(fech+perd)*100):0)+'%',fech+' fechados · '+perd+' perdidos')}${kpi('Principal origem',Object.entries(orig).sort((a,b)=>b[1]-a[1])[0]?.[0]||'—')}</div>
-  <div class="toolbar"><select data-f="crm.produto"><option value="">Todos os produtos</option>${db.produtos.map(p=>`<option${f.produto===p?' selected':''}>${esc(p)}</option>`).join('')}</select><select data-f="crm.canal"><option value="">Todos os canais</option>${CANAIS.map(c=>`<option${f.canal===c?' selected':''}>${esc(c)}</option>`).join('')}</select><span class="hint" style="margin:0">Funil de novos casos: do primeiro contato ao contrato assinado. Arraste para mudar de etapa.</span><span class="grow"></span><button class="btn btn-ghost" data-act="importarWa">⇪ Importar do WhatsApp</button><a class="btn btn-ghost" href="#registro" style="text-decoration:none">Registro histórico</a><button class="btn btn-gold" data-act="novoLead">+ Atendimento</button></div>
-  ${kanban(ETAPAS.map(e=>[e,e]),ls.map(l=>({...l,_col:l.etapa})),'lead',l=>`<div class="t" data-act="editLead" data-id="${l.id}" style="cursor:pointer">${esc(l.nome)}</div>
+  return `<div class="grid g-kpi">${kpi('Atendimentos em aberto',ativos.length,ls.filter(l=>/recupera|negocia/i.test(l.etapa)).length+' em negociação')}${kpi('Valor em negociação',brl(sumBy(ativos,l=>l.valor)))}${kpi('Taxa de conversão',(fech+perd?Math.round(fech/(fech+perd)*100):0)+'%',fech+' fechados · '+perd+' perdidos')}${kpi('Principal origem',Object.entries(orig).sort((a,b)=>b[1]-a[1])[0]?.[0]||'—')}</div>
+  <div class="toolbar"><select data-f="crm.produto"><option value="">Todos os produtos</option>${db.produtos.map(p=>`<option${f.produto===p?' selected':''}>${esc(p)}</option>`).join('')}</select><select data-f="crm.canal"><option value="">Todos os canais</option>${CANAIS.map(c=>`<option${f.canal===c?' selected':''}>${esc(c)}</option>`).join('')}</select><span class="hint" style="margin:0">Funil de novos casos: do primeiro contato ao contrato assinado. Arraste para mudar de etapa.</span><span class="grow"></span><button class="btn btn-ghost" data-act="importarWa">⇪ Importar do WhatsApp</button><a class="btn btn-ghost" href="#anuncios" style="text-decoration:none">📣 Anúncios</a>${podeFin()?'<button class="btn btn-ghost" data-act="editFunil">⚙ Etapas</button>':''}<a class="btn btn-ghost" href="#registro" style="text-decoration:none">Registro histórico</a><button class="btn btn-gold" data-act="novoLead">+ Atendimento</button></div>
+  ${kanban(etapasLead().map(e=>[e,e]),ls.map(l=>({...l,_col:etapasLead().includes(l.etapa)?l.etapa:etapaInicial()})),'lead',l=>`<div class="t" data-act="editLead" data-id="${l.id}" style="cursor:pointer">${esc(l.nome)}</div>
     <div class="meta">${(l.produto||l.area)?pill(l.produto||l.area,'p-blue'):''}<span>${esc(l.origem||'')}</span>${l.canal?pill(ehCanalSm(l.canal)?'WhatsApp SM':'WhatsApp geral',ehCanalSm(l.canal)?'p-red':'p-green'):''}${l.valor?'<span>· '+brl(l.valor)+'</span>':''}</div>
     <div class="small muted" style="margin-top:3px">1º contato ${fd(l.primeiroContato||l.criado)}${l.ultimoContato?' · último '+fd(l.ultimoContato):''}</div>
-    ${l.campanha?`<div class="small muted" style="margin-top:3px">📣 ${esc(l.campanha)}</div>`:''}${l.etapa==='Fechado'&&l.dataFechamento?`<div class="small" style="margin-top:3px;color:var(--green)">✓ fechado em ${fd(l.dataFechamento)}${+l.valorFechado?' · '+brl(+l.valorFechado):''}</div>`:''}${l.etiquetas?`<div class="small" style="margin-top:4px">🏷 ${esc(l.etiquetas)}</div>`:''}${l.obs?`<div class="small muted" style="margin-top:4px">${esc(l.obs)}</div>`:''}
-    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${l.tel?`<a class="small" target="_blank" rel="noopener" href="${waLink(l.tel)}">WhatsApp</a>`:''}${l.etapa==='Fechado'&&!l.convertido?`<button class="btn btn-brand btn-sm" data-act="converter" data-id="${l.id}">Converter em cliente</button>`:''}${l.convertido?'<span class="small" style="color:var(--green)">✓ convertido</span>':''}</div>`)}`;
+    ${l.codigoAnuncio||l.campanha?`<div class="small muted" style="margin-top:3px">📣 ${l.codigoAnuncio?`<b>${esc(l.codigoAnuncio)}</b> `:''}${esc(l.campanha||'')}</div>`:''}${tipoEtapa(l.etapa)==='perdido'&&l.motivoPerda?`<div class="small" style="margin-top:3px;color:var(--red)">✗ ${esc(l.motivoPerda)}</div>`:''}${leadGanho(l)&&l.dataFechamento?`<div class="small" style="margin-top:3px;color:var(--green)">✓ fechado em ${fd(l.dataFechamento)}${+l.valorFechado?' · '+brl(+l.valorFechado):''}</div>`:''}${l.etiquetas?`<div class="small" style="margin-top:4px">🏷 ${esc(l.etiquetas)}</div>`:''}${l.obs?`<div class="small muted" style="margin-top:4px">${esc(l.obs)}</div>`:''}
+    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">${l.tel?`<a class="small" target="_blank" rel="noopener" href="${waLink(l.tel)}">WhatsApp</a>`:''}${leadGanho(l)&&!l.convertido?`<button class="btn btn-brand btn-sm" data-act="converter" data-id="${l.id}">Converter em cliente</button>`:''}${l.convertido?'<span class="small" style="color:var(--green)">✓ convertido</span>':''}</div>`)}`;
 };
 
 /* ---------- FINANCEIRO ---------- */
@@ -2375,7 +2417,7 @@ V.relatorios=()=>{
 const FRASES=['Cada prazo cumprido é um cliente mais tranquilo.','Pequenas tarefas concluídas hoje viram grandes resultados no fim do mês.','Atendimento rápido fecha contrato: responda os novos contatos primeiro!','Organização é a melhor estratégia processual.','Meta batida é conquista de todo o time. Bora!','Cliente bem informado indica o escritório.','Foco no que vence hoje, olhar no que vence amanhã.'];
 const smCor=s=>/Deferido|Concluído/.test(s)?'p-green':/Indeferido/.test(s)?'p-red':/exigência/i.test(s)?'p-amber':/Protocolado|Pronto/.test(s)?'p-blue':/Recurso/.test(s)?'p-teal':'p-gray';
 const guiaCor=s=>s==='Paga'?'p-green':s==='Vencida'?'p-red':s==='Emitida'?'p-blue':'p-amber';
-const leadsSemRetorno=()=>db.leads.filter(l=>!l.convertido&&!['Fechado','Perdido','Encaminhado a parceiro'].includes(l.etapa)&&diff(l.ultimoContato||l.primeiroContato||l.criado)<=-3);
+const leadsSemRetorno=()=>db.leads.filter(l=>leadAberto(l)&&diff(l.ultimoContato||l.primeiroContato||l.criado)<=-3);
 function guiasPendentes(dias){const out=[];db.sm.forEach(c=>(c.guias||[]).forEach(g=>{const st=guiaStatus(g);if(st!=='Paga'&&diff(g.venc)<=dias)out.push({c,g,st});}));return out.sort((a,b)=>a.g.venc.localeCompare(b.g.venc));}
 function aniversariantes(dias){
   const h=new Date();const lista=[];
@@ -2472,7 +2514,7 @@ V.painel=()=>{
     <div class="grid g-3">
       <div class="card"><h3>🎂 Aniversariantes da semana</h3>${anivHtml}</div>
       <div class="card"><h3>👶 Salário-maternidade <a class="btn btn-ghost btn-sm" href="#sm">Abrir</a></h3>${smHtml.trim()||'<div class="empty">Nenhum parto previsto ou guia pendente</div>'}</div>
-      <div class="card"><h3>◈ Novos atendimentos <a class="btn btn-ghost btn-sm" href="#atendimentos">CRM</a></h3>${db.leads.filter(l=>l.etapa==='Novo contato').slice(0,6).map(l=>`<div class="ev"><div class="body" data-act="editLead" data-id="${l.id}"><div class="t">${esc(l.nome)}</div><div class="small muted">${esc(l.produto||'')} · ${esc(l.origem||'')} · ${fd(l.primeiroContato||l.criado)}</div></div>${l.tel?`<a class="btn btn-ghost btn-sm" style="text-decoration:none;color:#1F9D55" target="_blank" rel="noopener" href="${waLink(l.tel)}">WhatsApp</a>`:''}</div>`).join('')||'<div class="empty">Nenhum contato novo aguardando</div>'}</div>
+      <div class="card"><h3>◈ Novos atendimentos <a class="btn btn-ghost btn-sm" href="#atendimentos">CRM</a></h3>${db.leads.filter(l=>l.etapa===etapaInicial()).slice(0,6).map(l=>`<div class="ev"><div class="body" data-act="editLead" data-id="${l.id}"><div class="t">${esc(l.nome)}</div><div class="small muted">${esc(l.produto||'')} · ${esc(l.origem||'')} · ${fd(l.primeiroContato||l.criado)}</div></div>${l.tel?`<a class="btn btn-ghost btn-sm" style="text-decoration:none;color:#1F9D55" target="_blank" rel="noopener" href="${waLink(l.tel)}">WhatsApp</a>`:''}</div>`).join('')||'<div class="empty">Nenhum contato novo aguardando</div>'}</div>
     </div>`;
 };
 
@@ -2880,7 +2922,7 @@ V.config=()=>{
     ${(contasCache||[]).map((c,i)=>`<tr data-act="editConta" data-id="${i}"><td class="strong">${esc(c.nome)}</td><td>${esc(c.email)}</td><td class="small">${esc(papelNome(c.papel))}</td><td>${c.ativo?pill('Ativo','p-green'):pill('Desativado','p-gray')}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">Carregando…</td></tr>'}</tbody></table></div>
     <div class="small muted" style="margin-top:8px">Cada pessoa entra com o próprio e-mail e senha. <b>Estagiário</b> não vê o financeiro; <b>Parceiro</b> vê só os casos da parceria.${modo==='local'?' Na demonstração, a senha de todos é <b>demo1234</b>.':''}</div></div>`:''}
   ${minhaSenha}
-  ${card2FA()}${cardAppCelular()}${cardEfeitos()}${cardBackup()}
+  ${card2FA()}${cardAppCelular()}${cardEfeitos()}${cardBackup()}${cardIntegracaoApi()}
   ${['admin','advogado'].includes(papel())?cardSalasConfig()+cardFluxosConfig()+cardLembretesConfig():''}${cardIntegracoes()}
   <div class="card"><h3>🧑‍⚖️ Equipe (responsáveis e parceiros) <button class="btn btn-gold btn-sm" data-act="novoUsr">+ Membro</button></h3><div class="tbl"><table><thead><tr><th>Nome</th><th>Função</th><th>OAB</th></tr></thead><tbody>
     ${db.usuarios.map(u=>`<tr data-act="editUsr" data-id="${u.id}"><td class="strong">${esc(u.nome)}<div class="small muted">${esc(u.email)}</div></td><td>${esc(u.papel)}</td><td>${esc(u.oab)||'—'}</td></tr>`).join('')}</tbody></table></div></div>
@@ -3058,7 +3100,10 @@ function guessCatDesp(desc){
   for(const[re,c]of R)if(re.test(d))return c;return 'Outras despesas';
 }
 function guessCatRec(desc){const d=norm(desc);if(/sucumb/.test(d))return 'Sucumbência';if(/acordo/.test(d))return 'H.O. finais — acordo';if(/final|exito/.test(d))return 'H.O. finais — êxito';if(/inicia|entrada|parcela/.test(d))return 'H.O. iniciais';if(/\btmp\b/.test(d))return 'TMP';if(/parceria|delegad/.test(d))return 'Parceria (execução delegada)';if(/consulta/.test(d))return 'Consulta';return 'Outras receitas';}
-function mapEtapa(s){const d=norm(s);if(/recupera/.test(d))return 'Em recuperação';if(/fechad|contrat/.test(d))return 'Fechado';if(/perd|desist/.test(d))return 'Perdido';if(/parceir/.test(d))return 'Encaminhado a parceiro';if(/proposta/.test(d))return 'Proposta enviada';if(/atendim|negocia/.test(d))return 'Em atendimento';return 'Novo contato';}
+function mapEtapa(s){const d=norm(s);const ex=etapasLead().find(e=>norm(e)===d);if(ex)return ex;const por=re=>etapasLead().find(e=>re.test(norm(e)));
+  if(/fechad|contrat.*assin|cliente/.test(d))return etapaDoTipo('ganho')||etapaInicial();if(/perd|desist/.test(d))return etapaDoTipo('perdido')||etapaInicial();if(/parceir/.test(d))return etapaDoTipo('parceiro')||etapaInicial();
+  if(/recupera|negocia/.test(d))return por(/negocia|recupera/)||etapaInicial();if(/contrato/.test(d))return por(/contrato/)||etapaInicial();if(/proposta/.test(d))return por(/proposta/)||etapaInicial();
+  if(/document/.test(d))return por(/document/)||etapaInicial();if(/triagem|atendim/.test(d))return por(/triagem|atendim/)||etapaInicial();return etapaInicial();}
 function somaReais(txt){const m=String(txt||'').match(/R\$\s*[\d.,]+/g);return m?m.reduce((s,x)=>s+parseNum(x),0):parseNum(txt);}
 function telTxt(v){if(v==null||v==='')return '';if(typeof v==='number')v=String(Math.round(v));const d=digits(v);if(d.length===11)return `(${d.slice(0,2)}) ${d.slice(2,7)}-${d.slice(7)}`;if(d.length===10)return `(${d.slice(0,2)}) ${d.slice(2,6)}-${d.slice(6)}`;return String(v).trim();}
 function achaCliente(nome){const n=norm(nome);return n?db.clientes.find(c=>norm(c.nome)===n):null;}
@@ -3212,9 +3257,9 @@ function aplicarImportWa(p){
   const hoje=today(),sm=ehCanalSm(p.canal),prodSm=db.produtos.find(x=>/matern/i.test(x))||'Salário-maternidade';
   p.novos.forEach(x=>{const d=x.data&&x.data<=hoje?x.data:hoje;
     db.leads.push({id:uid(),nome:x.nome||telTxt(x.telBruto)||'Contato do WhatsApp',tel:telTxt(digits(String(x.telBruto).split('@')[0]).replace(/^55(?=\d{10,11}$)/,'')),email:x.email,
-      canal:p.canal,origem:ui.waOrigem||'',produto:sm?prodSm:'',etapa:x.etiquetas?mapEtapa(x.etiquetas):'Novo contato',etiquetas:x.etiquetas,
+      canal:p.canal,origem:ui.waOrigem||'',produto:sm?prodSm:'',etapa:x.etiquetas?mapEtapa(x.etiquetas):etapaInicial(),etiquetas:x.etiquetas,
       primeiroContato:d,ultimoContato:d,valor:0,proposta:'',obs:x.obs,criado:d,criadoPor:db.usuarioAtual||'',importadoWa:hoje});});
-  p.atual.forEach(([l,x])=>{if(x.etiquetas){l.etiquetas=x.etiquetas;const e=mapEtapa(x.etiquetas);if(l.etapa==='Novo contato'&&e!=='Novo contato')l.etapa=e;}if(!l.canal)l.canal=p.canal;if(x.data&&x.data<=hoje&&x.data>(l.ultimoContato||''))l.ultimoContato=x.data;
+  p.atual.forEach(([l,x])=>{if(x.etiquetas){l.etiquetas=x.etiquetas;const e=mapEtapa(x.etiquetas);if(l.etapa===etapaInicial()&&e!==etapaInicial())l.etapa=e;}if(!l.canal)l.canal=p.canal;if(x.data&&x.data<=hoje&&x.data>(l.ultimoContato||''))l.ultimoContato=x.data;
     if(!l.nome||/^contato do whatsapp$/i.test(l.nome))l.nome=x.nome||l.nome;if(x.email&&!l.email)l.email=x.email;});
 }
 function importarWhatsApp(){
@@ -3887,7 +3932,7 @@ function fracao(t,de,ate){const ini=t.inicio>de?t.inicio:de,fim=t.fim<ate?t.fim:
 function statusCampanhas(){const m={};db.trafego.forEach(t=>{const x=m[t.campanha];if(t.ativa!=null&&(!x||t.fim>=x.fim))m[t.campanha]={fim:t.fim,ativa:t.ativa};});return m;}
 const leadsMeta=()=>db.leads.filter(l=>ehDeAnuncio(l.origem));
 const dataChegada=l=>l.primeiroContato||l.criado||'';
-const dataFechou=l=>l.etapa==='Fechado'?(l.dataFechamento||l.ultimoContato||''):'';
+const dataFechou=l=>leadGanho(l)?(l.dataFechamento||l.ultimoContato||''):'';
 const valorFechou=l=>+l.valorFechado||+l.valor||0;
 function resumoTrafego(de,ate,f){
   f=f||{};const st=statusCampanhas();
@@ -4843,7 +4888,7 @@ function resumoDia(dia){
     db.eventos.filter(e=>e.feito&&(e.feitoPor||e.responsavelId)===u.id&&no(e.feitoEm)).forEach(e=>add('⏰','Cumpriu: '+(e.tipo?e.tipo+' — ':'')+e.titulo));
     db.processos.forEach(p=>(p.andamentos||[]).filter(a=>a.autor===u.id&&no(a.data)).forEach(a=>add('⚖️','Andamento em '+p.numero+': '+String(a.texto).slice(0,80),'processo/'+p.id)));
     db.leads.filter(l=>l.criadoPor===u.id&&no(l.criado)).forEach(l=>add('◈','Novo atendimento: '+l.nome));
-    db.leads.filter(l=>l.etapa==='Fechado'&&no(l.dataFechamento)&&(l.responsavelId===u.id||l.criadoPor===u.id)).forEach(l=>add('🤝','Fechou: '+l.nome+(+l.valorFechado?' ('+brl(+l.valorFechado)+')':'')));
+    db.leads.filter(l=>leadGanho(l)&&no(l.dataFechamento)&&(l.responsavelId===u.id||l.criadoPor===u.id)).forEach(l=>add('🤝','Fechou: '+l.nome+(+l.valorFechado?' ('+brl(+l.valorFechado)+')':'')));
     db.contratos.filter(k=>k.responsavelId===u.id&&no(k.data)).forEach(k=>add('✎','Contrato de '+nomeCli(k.clienteId)+(podeFin()?' — '+brl(k.valorTotal):'')));
     db.peticoes.forEach(p=>(p.historico||[]).filter(h=>h.por===u.id&&emDia(h.em)).forEach(h=>add('🔎',(h.status==='A conferir'?'Enviou para conferência':h.status==='Conferida'?'Conferiu':h.status==='Protocolada'?'Protocolou':'Moveu para "'+h.status+'"')+': '+p.titulo,'peticoes')));
     db.notas.filter(x=>x.autor===u.id&&no(x.data)).forEach(x=>add('📝','Registro em '+nomeCli(x.clienteId)+': '+String(x.texto).slice(0,70)));
@@ -5194,6 +5239,224 @@ const FX_ACOES={
     else celebrarEvento(k,k==='contrato'?'Contrato fechado!':'Tarefa concluída!',k==='contrato'?'Exemplo de comemoração':'Exemplo de comemoração');},
 };
 /* =========================================================
+   FUNIL EDITÁVEL, ORIGEM DO ANÚNCIO, RELATÓRIO POR ANÚNCIO
+   e o painel "API e conector do Claude" (chaves, WaSpeed, OAuth, migração)
+   ========================================================= */
+const TIPOS_DOC_GERADO={procuracao:'Procuração',declaracao_hipossuficiencia:'Declaração de hipossuficiência',contrato_honorarios:'Contrato de honorários',outro:'Outro'};
+const chaveCodigo=c=>{const m=String(c||'').toUpperCase().trim().match(/^([A-Z]{2,5})-(\d+)$/);return m?m[1]+'-'+(+m[2]):String(c||'').toUpperCase().trim();};
+const anuncioPorCodigo=c=>c?db.anuncios.find(a=>chaveCodigo(a.codigo)===chaveCodigo(c)):null;
+/* mesmo critério do servidor: [BPC-01] com colchetes vale sempre; sem colchetes, só se o código estiver cadastrado */
+function codigoDaMensagem(txt){
+  txt=String(txt||'');let m=txt.match(/\[\s*([A-Za-z]{2,5})\s*[-–_]\s*(\d{1,3})\s*\]/);if(m)return m[1].toUpperCase()+'-'+m[2];
+  const re=/(^|[^A-Za-z0-9])([A-Za-z]{2,5})\s?[-–]\s?(\d{1,3})(?![0-9])/g;while((m=re.exec(txt))){const c=m[2].toUpperCase()+'-'+m[3];if(anuncioPorCodigo(c))return c;}
+  return '';
+}
+/* preenche campanha, conjunto, anúncio e origem a partir do código */
+function aplicarAnuncio(l){
+  const a=anuncioPorCodigo(l.codigoAnuncio);
+  if(a){l.codigoAnuncio=a.codigo;['campanha','conjunto','anuncio'].forEach(k=>{if(a[k])l[k]=a[k];});if(!l.produto&&a.area)l.produto=a.area;if(!l.plataforma)l.plataforma=a.plataforma||'Meta';}
+  if(l.codigoAnuncio){if(!l.origem||l.origem===ORIGEM_ORGANICA)l.origem=/google/i.test(l.plataforma||'')?'Google Ads':'Facebook / Instagram Ads';}
+  else if(!l.origem)l.origem=ORIGEM_ORGANICA;
+}
+function registrarEtapaLead(l,de,para,motivo){
+  if(de===para)return;const u=db.usuarios.find(x=>x.id===db.usuarioAtual);
+  (l.historicoEtapas=l.historicoEtapas||[]).push({de:de||'',para,data:today(),em:Date.now(),por:u?.nome||sessao?.nome||'',origem:'tela',motivo:motivo||''});
+}
+function pedirMotivoPerda(l,col){
+  modal('Mover para "'+col+'"',`<p class="small">Por que este atendimento não fechou? O motivo aparece nos relatórios.</p>
+    <div class="flx" style="flex-wrap:wrap;gap:6px;margin-bottom:8px">${['Achou caro','Não tem direito','Sem retorno','Fechou com outro escritório','Desistiu','Fora da nossa área'].map(m=>`<button class="btn btn-ghost btn-sm" type="button" onclick="document.getElementById('mp-txt').value=this.textContent">${m}</button>`).join('')}</div>
+    <textarea id="mp-txt" rows="2" style="width:100%" placeholder="Motivo">${esc(l.motivoPerda||'')}</textarea>`,
+    [{l:'Cancelar',c:'btn-ghost',fn:()=>{closeModal();render();}},{l:'Confirmar',c:'btn-danger-solid',fn:()=>{const m=$('#mp-txt').value.trim();if(!m)return toast('Informe o motivo',1);
+      registrarEtapaLead(l,l.etapa,col,m);l.etapa=col;l.motivoPerda=m;l.dataFechamento='';l.ultimoContato=today();closeModal();save();render();toast('Movido para "'+col+'"');}}]);
+}
+function htmlLeadHistorico(l){
+  const h=(l.historicoEtapas||[]).slice(-12).reverse(),its=(l.interacoes||[]).slice().reverse();
+  return `<div class="lead-hist" id="lead-hist-${esc(l.id)}"><div class="dgroup" style="margin:8px 0 4px">💬 Interações</div>
+    ${its.map(i=>`<div class="ev"><span class="pic">💬</span><div class="body small"><b>${fd(i.data)}</b> · ${esc(i.canal||'')}${i.por?' · '+esc(i.por):''}<div>${esc(i.resumo)}</div>${i.proximoPasso?`<div class="muted">➜ ${esc(i.proximoPasso)}${i.dataFollowUp?' até '+fd(i.dataFollowUp):''}</div>`:''}</div></div>`).join('')||'<div class="small muted">Nenhuma interação registrada</div>'}
+    <div class="fgrid" style="margin-top:6px"><label class="full">Nova interação<input id="li-resumo" placeholder="Resumo da conversa"></label><label>Próximo passo<input id="li-prox"></label><label>Retomar em (cria tarefa)<input id="li-follow" type="date"></label></div>
+    <button class="btn btn-ghost btn-sm" type="button" data-act="leadAddInt" data-id="${esc(l.id)}">+ Registrar interação</button>
+    <div class="dgroup" style="margin:12px 0 4px">↔ Histórico de etapas</div>
+    ${h.map(x=>`<div class="small" style="padding:3px 0">${fd(x.data)} · ${esc(x.de||'—')} → <b>${esc(x.para)}</b>${x.motivo?' ('+esc(x.motivo)+')':''} <span class="muted">· ${esc(x.por||'')}${x.origem&&x.origem!=='tela'?' via '+esc(x.origem):''}</span></div>`).join('')||'<div class="small muted">Sem mudanças registradas</div>'}</div>`;
+}
+
+/* ---------- etapas do funil (editáveis) ---------- */
+function editFunil(){
+  const linhas=funil().map(e=>({...e,orig:e.nome}));
+  const desenhar=()=>{$('#fn-lista').innerHTML=linhas.map((e,i)=>`<div class="fn-linha"><span class="small muted">${i+1}</span><input data-fn="${i}" value="${esc(e.nome)}">
+    <select data-fnt="${i}">${TIPOS_ETAPA.map(([k,l])=>`<option value="${k}"${e.tipo===k?' selected':''}>${l}</option>`).join('')}</select>
+    <button type="button" class="btn btn-ghost btn-sm" data-fnm="${i}|-1">▲</button><button type="button" class="btn btn-ghost btn-sm" data-fnm="${i}|1">▼</button><button type="button" class="btn btn-ghost btn-sm" data-fnx="${i}">✕</button>
+    <span class="small muted">${db.leads.filter(l=>l.etapa===e.orig).length||''}</span></div>`).join('');};
+  const ler=()=>{document.querySelectorAll('[data-fn]').forEach(el=>linhas[+el.dataset.fn].nome=el.value.trim());document.querySelectorAll('[data-fnt]').forEach(el=>linhas[+el.dataset.fnt].tipo=el.value);};
+  modal('⚙ Etapas do funil de atendimento',`<p class="small muted">A primeira etapa recebe os leads novos (inclusive os que chegam pela API e pelo WaSpeed). O tipo diz o que a etapa significa: <b>ganho</b> conta como cliente fechado, <b>perdido</b> pede o motivo. Renomear muda a etapa dos leads junto. O número à direita é quantos leads estão na etapa.</p>
+    <div id="fn-lista"></div><button type="button" class="btn btn-ghost btn-sm" id="fn-add">+ Etapa</button>`,
+    [{l:'Cancelar',c:'btn-ghost',fn:closeModal},{l:'Salvar etapas',c:'btn-brand',fn:()=>{ler();
+      const nomes=linhas.map(e=>e.nome);if(nomes.some(n=>!n))return toast('Dê nome a todas as etapas',1);
+      if(new Set(nomes.map(norm)).size!==nomes.length)return toast('Há etapas com o mesmo nome',1);
+      if(!linhas.some(e=>e.tipo==='ganho')||!linhas.some(e=>e.tipo==='perdido'))return toast('Precisa existir pelo menos uma etapa de ganho e uma de perda',1);
+      if(linhas[0].tipo!=='andamento')return toast('A primeira etapa deve ser do tipo "Em andamento"',1);
+      const removidas=funil().filter(e=>!linhas.some(x=>x.orig===e.nome)).map(e=>e.nome).filter(n=>db.leads.some(l=>l.etapa===n));
+      if(removidas.length)return toast('Antes de remover "'+removidas.join('", "')+'", mova os leads que estão nela',1);
+      linhas.forEach(e=>{if(e.orig&&e.orig!==e.nome)db.leads.forEach(l=>{if(l.etapa===e.orig)l.etapa=e.nome;});});
+      db.funil={etapas:linhas.map(({nome,tipo})=>({nome,tipo}))};closeModal();save();render();toast('Etapas salvas ✓');}}]);
+  desenhar();
+  $('#fn-add').onclick=()=>{ler();linhas.splice(Math.max(1,linhas.findIndex(e=>e.tipo!=='andamento')),0,{nome:'Nova etapa',tipo:'andamento',orig:''});desenhar();};
+  $('#fn-lista').onclick=ev=>{const m=ev.target.closest('[data-fnm]'),x=ev.target.closest('[data-fnx]');if(!m&&!x)return;ler();
+    if(m){const [i,d]=m.dataset.fnm.split('|').map(Number);const j=i+d;if(j<0||j>=linhas.length)return;[linhas[i],linhas[j]]=[linhas[j],linhas[i]];}
+    if(x){if(linhas.length<=3)return toast('O funil precisa de pelo menos 3 etapas',1);linhas.splice(+x.dataset.fnx,1);}desenhar();};
+}
+
+/* ---------- anúncios e relatório ---------- */
+function editAnuncio(id){
+  const a=id?db.anuncios.find(x=>x.id===id):{plataforma:'Meta',inicio:today()};
+  form(id?'Anúncio '+a.codigo:'Novo anúncio',[
+    {k:'codigo',l:'Código',req:1,ph:'ex.: BPC-01',dica:'2 a 5 letras, hífen e 2 ou 3 números. Vai na mensagem pré-preenchida do anúncio.'},{k:'plataforma',l:'Plataforma',list:['Meta','Instagram','Facebook','Google','TikTok']},
+    {k:'campanha',l:'Campanha',req:1,list:()=>[...new Set(db.anuncios.map(x=>x.campanha).concat(db.trafego.map(t=>t.campanha)).filter(Boolean))].sort()},{k:'conjunto',l:'Conjunto de anúncios'},
+    {k:'anuncio',l:'Anúncio (nome do criativo)'},{k:'area',l:'Área do direito',t:'select',o:O.produtos},
+    {k:'inicio',l:'Início da veiculação',t:'date'},{k:'fim',l:'Fim da veiculação',t:'date'},
+    {k:'investimento',l:'Investimento total (R$)',t:'number',vazio:'',dica:'Opcional: permite calcular o custo por lead e por cliente fechado.'},
+    {k:'mensagem',l:'Mensagem pré-preenchida do WhatsApp',full:1,dica:'Cole esta frase no anúncio da Meta (botão "Enviar mensagem").'},{k:'obs',l:'Observações',t:'textarea',full:1,rows:2}],
+    a,v=>{v.codigo=String(v.codigo||'').toUpperCase().replace(/\s/g,'');if(!/^[A-Z]{2,5}-\d{2,3}$/.test(v.codigo)){toast('Código inválido. Exemplo: BPC-01',1);return false;}
+      const dup=db.anuncios.find(x=>x.id!==id&&chaveCodigo(x.codigo)===chaveCodigo(v.codigo));if(dup){toast('Já existe o anúncio '+dup.codigo,1);return false;}
+      if(!v.mensagem)v.mensagem='Olá! Vim pelo anúncio ['+v.codigo+']';
+      upsert('anuncios',id,v,{criado:today()});
+      db.leads.forEach(l=>{if(!l.codigoAnuncio&&l.primeiraMensagem){const c=codigoDaMensagem(l.primeiraMensagem);if(c&&chaveCodigo(c)===chaveCodigo(v.codigo)){l.codigoAnuncio=c;aplicarAnuncio(l);}}});},
+    id&&(()=>{db.anuncios=db.anuncios.filter(x=>x.id!==id);}));
+}
+function relatorioAnuncios(desde,ate){
+  const linhas={},camp={};const ini=(k,b)=>linhas[k]||(linhas[k]={...b,leads:0,fechados:0,perdidos:0,andamento:0});
+  db.anuncios.forEach(a=>ini(chaveCodigo(a.codigo),{codigo:a.codigo,campanha:a.campanha||'',conjunto:a.conjunto||'',anuncio:a.anuncio||'',investimento:+a.investimento||0,id:a.id}));
+  db.leads.forEach(l=>{const d=l.primeiroContato||l.criado||'';if((desde&&d<desde)||(ate&&d>ate))return;
+    const k=l.codigoAnuncio?chaveCodigo(l.codigoAnuncio):ORIGEM_ORGANICA;const r=ini(k,{codigo:l.codigoAnuncio||ORIGEM_ORGANICA,campanha:l.campanha||'',conjunto:l.conjunto||'',anuncio:l.anuncio||'',investimento:0});
+    r.leads++;const t=tipoEtapa(l.etapa);if(t==='ganho'||l.convertido)r.fechados++;else if(t==='perdido'||t==='parceiro')r.perdidos++;else r.andamento++;});
+  const ls=Object.values(linhas).map(r=>({...r,taxa:r.leads?r.fechados/r.leads*100:0}));
+  ls.forEach(r=>{const c=r.codigo===ORIGEM_ORGANICA?ORIGEM_ORGANICA:r.campanha||'Sem campanha cadastrada';const x=camp[c]||(camp[c]={campanha:c,anuncios:0,leads:0,fechados:0,perdidos:0,investimento:0});
+    x.anuncios++;['leads','fechados','perdidos','investimento'].forEach(k=>x[k]+=r[k]);});
+  return {anuncios:ls.sort((a,b)=>b.leads-a.leads||String(a.codigo).localeCompare(b.codigo)),campanhas:Object.values(camp).map(c=>({...c,taxa:c.leads?c.fechados/c.leads*100:0})).sort((a,b)=>b.leads-a.leads)};
+}
+V.anuncios=()=>{
+  const f=ui.f.anu||(ui.f.anu={ver:'relatorio',desde:addDays(-90),ate:''});
+  const r=relatorioAnuncios(f.desde,f.ate);const tl=sumBy(r.anuncios,x=>x.leads),tf=sumBy(r.anuncios,x=>x.fechados);
+  const fin=podeFin();const cpc=x=>fin&&x.investimento&&x.fechados?brl(x.investimento/x.fechados):'—';
+  const tab=`<div class="tabs" style="margin:0;border:none">${[['relatorio','📊 Relatório por anúncio'],['lista','📣 Anúncios cadastrados']].map(([k,l])=>`<button class="tab ${f.ver===k?'active':''}" data-act="anuVer" data-id="${k}">${l}</button>`).join('')}</div>`;
+  const filtro=`<label class="small">De <input type="date" data-f="anu.desde" value="${esc(f.desde)}"></label><label class="small">até <input type="date" data-f="anu.ate" value="${esc(f.ate)}"></label>`;
+  const barra=(v,max)=>`<div class="barra-mini"><i style="width:${max?Math.round(v/max*100):0}%"></i></div>`;const maxL=Math.max(1,...r.anuncios.map(x=>x.leads));
+  const corpo=f.ver==='lista'?`<div class="card tbl"><table><thead><tr><th>Código</th><th>Campanha</th><th>Conjunto</th><th>Anúncio</th><th>Área</th><th>Veiculação</th>${fin?'<th class="num">Investimento</th>':''}<th>Mensagem pré-preenchida</th></tr></thead><tbody>
+      ${db.anuncios.slice().sort((a,b)=>a.codigo.localeCompare(b.codigo)).map(a=>`<tr data-act="editAnuncio" data-id="${a.id}" style="cursor:pointer"><td class="strong">${esc(a.codigo)}</td><td>${esc(a.campanha||'')}</td><td>${esc(a.conjunto||'')}</td><td>${esc(a.anuncio||'')}</td><td>${esc(a.area||'')}</td>
+        <td class="small">${fd(a.inicio)}${a.fim?' a '+fd(a.fim):a.inicio?' →':''}</td>${fin?`<td class="num">${a.investimento?brl(+a.investimento):'—'}</td>`:''}<td class="small"><code>${esc(a.mensagem||'')}</code></td></tr>`).join('')||`<tr><td colspan="8" class="empty">Nenhum anúncio. Cadastre cada anúncio da Meta com um código (ex.: BPC-01) e use a mensagem pré-preenchida.</td></tr>`}</tbody></table></div>`
+    :`<div class="grid g-kpi">${kpi('Leads no período',tl)}${kpi('Clientes fechados',tf)}${kpi('Taxa de conversão',(tl?num(tf/tl*100,1):0)+'%')}${kpi('Sem anúncio identificado',r.anuncios.find(x=>x.codigo===ORIGEM_ORGANICA)?.leads||0,ORIGEM_ORGANICA)}</div>
+    <div class="card tbl"><h3>Por anúncio</h3><table><thead><tr><th>Código</th><th>Campanha / anúncio</th><th class="num">Leads</th><th></th><th class="num">Fechados</th><th class="num">Perdidos</th><th class="num">Conversão</th>${fin?'<th class="num">Custo por cliente</th>':''}</tr></thead><tbody>
+      ${r.anuncios.map(x=>`<tr><td class="strong">${esc(x.codigo)}</td><td>${esc(x.campanha)}<div class="small muted">${esc([x.conjunto,x.anuncio].filter(Boolean).join(' · '))}</div></td><td class="num">${x.leads}</td><td style="width:120px">${barra(x.leads,maxL)}</td><td class="num">${x.fechados}</td><td class="num">${x.perdidos}</td><td class="num strong">${num(x.taxa,1)}%</td>${fin?`<td class="num">${cpc(x)}</td>`:''}</tr>`).join('')||'<tr><td colspan="8" class="empty">Sem leads no período</td></tr>'}</tbody></table></div>
+    <div class="card tbl"><h3>Por campanha</h3><table><thead><tr><th>Campanha</th><th class="num">Anúncios</th><th class="num">Leads</th><th class="num">Fechados</th><th class="num">Conversão</th>${fin?'<th class="num">Investimento</th><th class="num">Custo por cliente</th>':''}</tr></thead><tbody>
+      ${r.campanhas.map(c=>`<tr><td class="strong">${esc(c.campanha)}</td><td class="num">${c.anuncios}</td><td class="num">${c.leads}</td><td class="num">${c.fechados}</td><td class="num strong">${num(c.taxa,1)}%</td>${fin?`<td class="num">${c.investimento?brl(c.investimento):'—'}</td><td class="num">${cpc(c)}</td>`:''}</tr>`).join('')}</tbody></table></div>`;
+  return `<div class="toolbar">${tab}<span class="grow"></span>${f.ver==='relatorio'?filtro:''}<button class="btn btn-gold" data-act="novoAnuncio">+ Anúncio</button></div>
+    <div class="hint">Cada anúncio da Meta leva uma mensagem pré-preenchida com o código, por exemplo <code>Olá! Vim pelo anúncio [BPC-01]</code>. O sistema lê o código na primeira mensagem do lead (pela API, pelo WaSpeed ou digitado aqui) e preenche campanha, conjunto e anúncio. Sem código, a origem fica "${ORIGEM_ORGANICA}".</div>${corpo}`;
+};
+
+/* ---------- cliente: documentos gerados (links do Google Docs) ---------- */
+function htmlDocsGerados(c){
+  const ds=(c.docsGerados||[]).slice().sort((a,b)=>String(b.data).localeCompare(String(a.data)));if(!ds.length)return '';
+  return `<div class="card" style="margin-bottom:12px"><h3>📄 Documentos gerados</h3>${ds.map(d=>`<div class="ev"><span class="pic">📄</span><div class="body"><a href="${esc(d.url)}" target="_blank" rel="noopener" class="strong">${esc(d.titulo||TIPOS_DOC_GERADO[d.tipo]||d.tipo)}</a><div class="small muted">${esc(TIPOS_DOC_GERADO[d.tipo]||d.tipo)} · ${fd(d.data)}${d.por?' · '+esc(d.por):''}</div></div></div>`).join('')}</div>`;
+}
+
+/* ---------- Configurações → API e conector do Claude (só administração) ---------- */
+let INTAPI=null;
+async function carregarIntegracaoApi(){try{INTAPI=await api('integracaoApi',null,'&op=estado');}catch(e){INTAPI={erro:e.msg||'Não foi possível carregar'};}if(ui.page==='config')render();}
+const copiarTexto=t=>(navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(()=>toast('Copiado ✓')).catch(()=>toast('Selecione e copie',1));
+function cardIntegracaoApi(){
+  if(!ehAdmin())return '';
+  const tit='<h3>🔌 API, WaSpeed e conector do Claude</h3>';
+  if(modo!=='servidor')return `<div class="card">${tit}<p class="small muted">A API, o webhook do WaSpeed e o conector do Claude funcionam na versão hospedada.</p></div>`;
+  if(INTAPI===null){carregarIntegracaoApi();return `<div class="card">${tit}<p class="small muted">Carregando…</p></div>`;}
+  if(INTAPI.erro)return `<div class="card">${tit}<p class="small" style="color:var(--red)">${esc(INTAPI.erro)}</p></div>`;
+  const m=INTAPI.migracao;const dt=ms=>ms?new Date(+ms).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+  const cp=(t,rot)=>`<div class="flx" style="gap:6px;margin:4px 0"><code class="cod-url">${esc(t)}</code><button class="btn btn-ghost btn-sm" data-act="copiarTxt" data-id="${esc(t)}">${rot||'Copiar'}</button></div>`;
+  if(!m.aplicada)return `<div class="card">${tit}
+    <p class="small">Para ativar a API, o webhook e o conector, aplique a migração do banco. Ela:</p>
+    <ul class="small"><li>faz um <b>backup completo</b> antes (fica na pasta de backups do servidor);</li><li>cria as tabelas novas (chaves, logs, OAuth, índice de telefones);</li><li>passa os leads para o funil novo (Novo lead, Em triagem, Aguardando documentos, Proposta enviada, Negociação, Contrato enviado, Cliente fechado, Perdido, Encaminhado a parceiro);</li><li>pode ser <b>revertida</b> por aqui.</li></ul>
+    <div class="mfoot"><button class="btn btn-ghost" data-act="migPrevia">Ver prévia (não grava nada)</button><button class="btn btn-brand" data-act="migAplicar">Aplicar migração</button></div></div>`;
+  const ch=INTAPI.chaves||[],au=INTAPI.autorizacoes||[];
+  return `<div class="card intapi">${tit}
+    <div class="small" style="color:var(--green)">✓ Migração aplicada em ${dt(m.aplicada_em)}${m.detalhes?.backup?' · backup: '+esc(m.detalhes.backup.join(', ')):''}</div>
+    ${INTAPI.subpasta?'<div class="hint" style="color:var(--red)">O sistema está numa subpasta: o conector do Claude precisa do sistema na raiz do domínio (como gestao.seudominio.com.br).</div>':''}
+    <div class="dgroup">🤖 Conector do Claude (MCP)</div>
+    ${cp(INTAPI.mcp)}
+    <p class="small muted">No claude.ai: <b>Personalizar → Conectores → Adicionar conector personalizado</b>, cole o endereço acima, deixe "Entrar agora" (OAuth) e conecte. O Claude abre a tela de login do sistema: entre com uma conta de <b>administradora</b> e autorize.</p>
+    ${au.length?`<div class="small strong" style="margin-top:6px">Autorizações ativas</div>${au.map(a=>`<div class="ev"><span class="pic">🤖</span><div class="body small"><b>${esc(a.cliente||'Claude')}</b> · autorizado por ${esc(a.nome||'—')} em ${dt(a.desde)}<div class="muted">último uso/renovação ${dt(a.ultimo)}</div></div><button class="btn btn-ghost btn-sm" data-act="oauthRevogar" data-id="${esc(a.familia)}">Revogar</button></div>`).join('')}`:'<p class="small muted">Nenhuma autorização ativa.</p>'}
+    <div class="dgroup">🔑 Chaves de API <small class="muted">(para outras automações: Authorization: Bearer &lt;chave&gt;)</small></div>
+    ${cp(INTAPI.api,'Copiar endereço da API')}
+    ${ch.map(k=>`<div class="ev"><span class="pic">🔑</span><div class="body small"><b>${esc(k.nome)}</b> <code>${esc(k.prefixo)}…</code> ${k.revogada_em?pill('Revogada','p-red'):pill('Ativa','p-green')}<div class="muted">${esc(k.escopos)} · criada ${dt(k.criado_em)} · último uso ${dt(k.ultimo_uso)}</div></div>${k.revogada_em?'':`<button class="btn btn-ghost btn-sm" data-act="chaveRevogar" data-id="${k.id}">Revogar</button>`}</div>`).join('')||'<p class="small muted">Nenhuma chave criada.</p>'}
+    <button class="btn btn-ghost btn-sm" data-act="chaveNova">+ Nova chave de API</button>
+    <div class="dgroup">💬 Webhook do WaSpeed</div>
+    ${cp(INTAPI.webhook)}
+    <p class="small muted">Token: ${INTAPI.webhookToken?'<b>gerado</b> (por segurança não aparece de novo; gere outro se perdeu)':'<b>ainda não gerado</b>'}.</p>
+    <div class="flx" style="flex-wrap:wrap;gap:6px"><button class="btn btn-ghost btn-sm" data-act="wspToken">${INTAPI.webhookToken?'Gerar novo token':'Gerar token'}</button><button class="btn btn-ghost btn-sm" data-act="wspMapa">Colunas do WaSpeed → etapas</button><button class="btn btn-ghost btn-sm" data-act="wspLog">Eventos recebidos</button><button class="btn btn-ghost btn-sm" data-act="wspTestar">Testar um JSON</button></div>
+    <div class="dgroup">📜 Registro de acesso (LGPD)</div>
+    <div class="flx" style="flex-wrap:wrap;gap:6px"><button class="btn btn-ghost btn-sm" data-act="apiLogVer">Ver as últimas chamadas</button><a class="btn btn-ghost btn-sm" href="api/v1/openapi.yaml" target="_blank" rel="noopener" style="text-decoration:none">Documentação (OpenAPI)</a><button class="btn btn-ghost btn-sm" data-act="migPrevia">Prévia da migração</button><button class="btn btn-ghost btn-sm" data-act="migReverter" style="color:var(--red)">Reverter migração</button></div></div>`;
+}
+function mostrarPrevia(p){
+  modal('Prévia da migração (nada foi gravado)',`<p class="small">${p.total_leads} lead(s) no sistema.</p>
+    <div class="tbl"><table><thead><tr><th>Etapa atual → nova</th><th class="num">Leads</th></tr></thead><tbody>${Object.entries(p.mapeamento).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${v}</td></tr>`).join('')||'<tr><td colspan="2" class="empty">Nenhum lead</td></tr>'}</tbody></table></div>
+    ${Object.keys(p.etapas_desconhecidas||{}).length?`<p class="small" style="color:var(--amber)">Etapas fora da lista (vão para "Novo lead"): ${esc(Object.keys(p.etapas_desconhecidas).join(', '))}</p>`:''}
+    <p class="small"><b>${p.telefones_duplicados.length}</b> telefone(s) em mais de um lead${p.telefones_duplicados.length?' (não são juntados; confira):':'.'}</p>
+    ${p.telefones_duplicados.slice(0,30).map(d=>`<div class="small">📞 ${esc(d.telefone)}: ${d.leads.map(l=>esc(l.nome)+' ('+esc(l.etapa)+')').join(' · ')}</div>`).join('')}
+    <p class="small">${p.leads_sem_telefone} lead(s) sem telefone válido.</p><p class="small muted">${esc(p.observacao)}</p>`,[{l:'Fechar',c:'btn-ghost',fn:closeModal}],true);
+}
+function editWaspeedMapa(){
+  const w=db.waspeed||{colunas:{},caminhos:{}};
+  const linhas=Object.entries(w.colunas||{}).map(([c,e])=>c+' = '+e).join('\n');
+  const campos=[['telefone','Telefone'],['nome','Nome'],['mensagem','Mensagem'],['coluna','Coluna do Kanban'],['etiquetas','Etiquetas'],['evento','Tipo de evento'],['de_mim','Mensagem enviada por nós (fromMe)']];
+  modal('WaSpeed → sistema',`<p class="small"><b>Colunas do Kanban do WaSpeed</b>: uma por linha, no formato <code>Coluna no WaSpeed = Etapa no sistema</code>. Colunas com o mesmo nome de uma etapa não precisam estar aqui.</p>
+    <textarea id="wsp-col" rows="7" style="width:100%" placeholder="Atendendo = Em triagem&#10;Esperando documentos = Aguardando documentos&#10;Fechou = Cliente fechado&#10;Sem interesse = Perdido">${esc(linhas)}</textarea>
+    <p class="small muted">Etapas: ${esc(etapasLead().join(' · '))}</p>
+    <details class="small"><summary><b>Avançado:</b> onde está cada dado no JSON do WaSpeed (só se o teste mostrar campos vazios)</summary>
+      <p class="muted">Caminho com pontos, por exemplo <code>data.contact.phone</code> ou <code>messages[0].text</code>. Em branco, o sistema procura sozinho.</p>
+      <div class="fgrid">${campos.map(([k,l])=>`<label>${l}<input id="wsp-c-${k}" value="${esc(w.caminhos?.[k]||'')}" placeholder="automático"></label>`).join('')}</div></details>`,
+    [{l:'Cancelar',c:'btn-ghost',fn:closeModal},{l:'Salvar',c:'btn-brand',fn:()=>{
+      const cols={};let erro='';$('#wsp-col').value.split('\n').map(x=>x.trim()).filter(Boolean).forEach(x=>{const i=x.indexOf('=');if(i<1){erro=x;return;}const c=x.slice(0,i).trim(),e=x.slice(i+1).trim();
+        const et=etapasLead().find(n=>norm(n)===norm(e));if(!et){erro=x;return;}cols[c]=et;});
+      if(erro)return toast('Linha inválida ou etapa inexistente: "'+erro+'"',1);
+      const cam={};campos.forEach(([k])=>{const v=$('#wsp-c-'+k).value.trim();if(v)cam[k]=v;});
+      db.waspeed={colunas:cols,caminhos:cam};closeModal();save();toast('Mapeamento salvo ✓');}}],true);
+}
+const FUNIL_API_ACOES={
+  editFunil:()=>editFunil(),
+  leadAddInt:id=>{const l=db.leads.find(x=>x.id===id);const r=$('#li-resumo')?.value.trim();if(!l||!r)return toast('Escreva o resumo da interação',1);
+    const u=db.usuarios.find(x=>x.id===db.usuarioAtual);const it={id:uid(),data:today(),canal:'WhatsApp',resumo:r,proximoPasso:$('#li-prox').value.trim(),dataFollowUp:$('#li-follow').value,em:Date.now(),por:u?.nome||''};
+    if(it.dataFollowUp){const t={id:uid(),titulo:'Follow-up: '+l.nome+(it.proximoPasso?' — '+it.proximoPasso.slice(0,80):''),status:'todo',prioridade:'Média',prazo:it.dataFollowUp,hora:'',responsavelId:l.responsavelId||db.usuarioAtual,responsaveis:[l.responsavelId||db.usuarioAtual],clienteId:l.clienteId||'',processoId:'',leadId:l.id,obs:r,criadoPor:db.usuarioAtual};db.tarefas.push(t);it.tarefaId=t.id;}
+    (l.interacoes=l.interacoes||[]).push(it);l.ultimoContato=today();save();
+    const el=document.getElementById('lead-hist-'+l.id);if(el){const t=document.createElement('div');t.innerHTML=htmlLeadHistorico(l);el.replaceWith(t.firstElementChild);}
+    toast(it.dataFollowUp?'Interação registrada ✓ e tarefa de follow-up criada':'Interação registrada ✓');},
+  anuVer:k=>{ui.f.anu.ver=k;render();},novoAnuncio:()=>editAnuncio(),editAnuncio:id=>editAnuncio(id),
+  copiarTxt:t=>copiarTexto(t),
+  migPrevia:async()=>{try{const r=await api('integracaoApi',null,'&op=previa');mostrarPrevia(r.previa);}catch(e){toast(e.msg||'Falha ao gerar a prévia',1);}},
+  migAplicar:async()=>{if(!await confirmar('Aplicar a migração? Antes, o sistema faz um backup completo do banco. Os leads passam para o funil novo. Dá para reverter depois.','Aplicar',false))return;
+    try{toast('Aplicando… (backup + migração)');const r=await api('integracaoApi',{op:'aplicar'});toast('Migração aplicada ✓ '+r.leads_convertidos+' lead(s) no funil novo');INTAPI=null;await puxar(false);render();}catch(e){toast(e.msg||'A migração falhou (nada foi alterado)',1);}},
+  migReverter:async()=>{if(!await confirmar('Reverter a migração? Os leads voltam para as etapas antigas e a API, o webhook e o conector param de funcionar. Um backup é feito antes.','Reverter'))return;
+    try{const r=await api('integracaoApi',{op:'reverter'});toast('Migração revertida ✓ ('+r.leads_revertidos+' leads)');INTAPI=null;await puxar(false);render();}catch(e){toast(e.msg||'Não foi possível reverter',1);}},
+  chaveNova:()=>{const nomes={'clientes:ler':'Ler clientes','clientes:gravar':'Cadastrar/editar clientes','leads:ler':'Ler leads','leads:gravar':'Registrar/mover leads','anuncios:ler':'Ler anúncios','anuncios:gravar':'Cadastrar anúncios','relatorios:ler':'Relatórios'};
+    modal('Nova chave de API',`<label class="small">Nome (para quem é a chave)<input id="ck-nome" placeholder="ex.: Automação de leads" style="width:100%"></label><div class="multi" style="margin-top:10px">${INTAPI.escopos.map(e=>`<label class="chk"><input type="checkbox" value="${e}" checked> ${esc(nomes[e]||e)}</label>`).join('')}</div>`,
+      [{l:'Cancelar',c:'btn-ghost',fn:closeModal},{l:'Criar',c:'btn-brand',fn:async()=>{const nome=$('#ck-nome').value.trim();const esc_=[...document.querySelectorAll('#mbg .multi input:checked')].map(i=>i.value);
+        if(!nome)return toast('Dê um nome à chave',1);try{const r=await api('integracaoApi',{op:'criarChave',nome,escopos:esc_});INTAPI=null;
+          modal('🔑 Chave criada',`<p class="small"><b>Copie agora</b>: por segurança ela não aparece de novo (o sistema guarda só um resumo criptográfico).</p><code class="cod-url" style="display:block;padding:10px">${esc(r.chave)}</code>`,[{l:'Copiar',c:'btn-brand',fn:()=>copiarTexto(r.chave)},{l:'Fechar',c:'btn-ghost',fn:()=>{closeModal();render();}}]);}catch(e){toast(e.msg||'Falha',1);}}}]);},
+  chaveRevogar:async id=>{if(!await confirmar('Revogar esta chave? As automações que a usam param na hora.','Revogar'))return;await api('integracaoApi',{op:'revogarChave',id:+id}).catch(()=>{});INTAPI=null;render();toast('Chave revogada');},
+  oauthRevogar:async f=>{if(!await confirmar('Desconectar o Claude desta autorização? Será preciso conectar de novo no claude.ai.','Revogar'))return;await api('integracaoApi',{op:'revogarAutorizacao',familia:f}).catch(()=>{});INTAPI=null;render();toast('Autorização revogada');},
+  wspToken:async()=>{if(INTAPI.webhookToken&&!await confirmar('Gerar um novo token? O antigo para de funcionar e será preciso colar o novo no WaSpeed.','Gerar novo'))return;
+    try{const r=await api('integracaoApi',{op:'tokenWebhook'});INTAPI=null;
+      modal('Token do webhook do WaSpeed',`<p class="small"><b>Copie agora</b>: o token não aparece de novo.</p><p class="small strong">URL do webhook</p><code class="cod-url" style="display:block;padding:8px">${esc(r.url)}</code>
+        <p class="small strong">Token (cabeçalho <code>X-Webhook-Token</code>)</p><code class="cod-url" style="display:block;padding:8px">${esc(r.token)}</code>
+        <p class="small strong">Ou, se o WaSpeed só tiver o campo URL, use a URL com o token:</p><code class="cod-url" style="display:block;padding:8px;word-break:break-all">${esc(r.urlComToken)}</code>`,
+        [{l:'Copiar token',c:'btn-ghost',fn:()=>copiarTexto(r.token)},{l:'Copiar URL com token',c:'btn-brand',fn:()=>copiarTexto(r.urlComToken)},{l:'Fechar',c:'btn-ghost',fn:()=>{closeModal();render();}}],true);}catch(e){toast(e.msg||'Falha',1);}},
+  wspMapa:()=>editWaspeedMapa(),
+  wspLog:async()=>{try{const r=await api('integracaoApi',null,'&op=webhookLog');
+    modal('Eventos recebidos do WaSpeed (últimos 40)',r.itens.map(x=>`<details class="wsp-ev"><summary><b>${new Date(+x.em).toLocaleString('pt-BR')}</b> ${pill(x.status,x.status==='ok'?'p-green':x.status==='ignorado'?'p-amber':'p-red')} ${esc(x.evento||'')} <span class="small muted">${esc(x.detalhe||'')}</span></summary>
+      ${x.payload?`<pre class="small">${esc(JSON.stringify(JSON.parse(x.payload),null,2))}</pre><button class="btn btn-ghost btn-sm" data-act="copiarTxt" data-id="${esc(x.payload)}">Copiar JSON</button>`:'<div class="small muted">Sem conteúdo (pedido recusado).</div>'}</details>`).join('')||'<div class="empty">Nenhum evento recebido ainda. Confira a URL e o token no painel do WaSpeed e mande uma mensagem de teste.</div>',[{l:'Fechar',c:'btn-ghost',fn:closeModal}],true);}catch(e){toast(e.msg||'Falha',1);}},
+  wspTestar:()=>modal('Testar um JSON do WaSpeed (não grava nada)','<textarea id="wsp-json" rows="10" style="width:100%;font-family:monospace;font-size:12px" placeholder="Cole aqui o JSON de um evento (por exemplo, copiado de Eventos recebidos)"></textarea><div id="wsp-res"></div>',
+    [{l:'Fechar',c:'btn-ghost',fn:closeModal},{l:'Testar',c:'btn-brand',fn:async()=>{try{const r=await api('integracaoApi',{op:'testarWebhook',payload:$('#wsp-json').value});const x=r.extraido;
+      $('#wsp-res').innerHTML=`<div class="tbl" style="margin-top:8px"><table><tbody>${[['Evento',x.evento],['Telefone',x.telefone+(x.telefone_e164?' → '+x.telefone_e164:' (não reconhecido)')],['Nome',x.nome],['Mensagem',x.mensagem],['Código do anúncio',x.codigo_anuncio||'—'],['Coluna',x.coluna],['Etapa no sistema',x.etapa||'—'],['Etiquetas',(x.etiquetas||[]).join(', ')],['Enviada por nós',x.de_mim?'sim':'não']].map(([k,v])=>`<tr><td class="strong">${k}</td><td>${esc(v||'')}</td></tr>`).join('')}</tbody></table></div>`;}catch(e){toast(e.msg||'JSON inválido',1);}}}],true),
+  apiLogVer:async()=>{try{const r=await api('integracaoApi',null,'&op=apiLog');
+    modal('Registro de acesso à API (últimas 200 chamadas)',`<div class="tbl"><table><thead><tr><th>Quando</th><th>Quem</th><th>Chamada</th><th>Status</th><th>Registro</th></tr></thead><tbody>${r.itens.map(x=>`<tr><td class="small">${new Date(+x.em).toLocaleString('pt-BR')}</td><td class="small">${esc(x.quem)}<div class="muted">${esc(x.auth)} · ${esc(x.ip||'')}</div></td><td class="small"><code>${esc(x.metodo)} ${esc(x.rota)}</code></td><td>${pill(x.status,x.status<300?'p-green':x.status<500?'p-amber':'p-red')}</td><td class="small">${esc(x.recurso||'')}</td></tr>`).join('')||'<tr><td colspan="5" class="empty">Nenhuma chamada ainda</td></tr>'}</tbody></table></div><p class="small muted">O registro guarda quem acessou, quando e o quê, sem dados pessoais da consulta. Fica 12 meses; o conteúdo bruto do webhook, 30 dias.</p>`,[{l:'Fechar',c:'btn-ghost',fn:closeModal}],true);}catch(e){toast(e.msg||'Falha',1);}},
+};
+/* =========================================================
    RENDER / ROTEAMENTO
    ========================================================= */
 const PAGINAS_PARCEIRO=['painel','escritorio','tarefas','parcerias','config','cliente','processo'];
@@ -5261,7 +5524,7 @@ const A={
   converter:id=>{const l=db.leads.find(x=>x.id===id);const nid=uid();
     db.clientes.push({id:nid,tipo:'PF',nome:l.nome,doc:'',tel:l.tel,email:l.email||'',cidade:l.cidade||'',uf:l.uf||'',origem:l.origem,produto:l.produto||'',status:'Ativo',criado:today(),
       primeiroContato:l.primeiroContato||l.criado,ultimoContato:today(),idade:l.idade||null,nascimento:l.nascimento||'',sexo:l.sexo||'',profissao:l.profissao||'',renda:l.renda||0,obs:l.obs||'',leadId:l.id});
-    l.convertido=true;l.etapa='Fechado';db.notas.push({id:uid(),clienteId:nid,data:today(),autor:db.usuarioAtual,texto:'Cliente convertido a partir do atendimento.'+(l.proposta?' Proposta: '+l.proposta:'')});
+    l.convertido=true;l.clienteId=nid;if(!leadGanho(l)){registrarEtapaLead(l,l.etapa,etapaDoTipo('ganho')||l.etapa,'');l.etapa=etapaDoTipo('ganho')||l.etapa;}if(!l.dataFechamento)l.dataFechamento=today();db.notas.push({id:uid(),clienteId:nid,data:today(),autor:db.usuarioAtual,texto:'Cliente convertido a partir do atendimento.'+(l.proposta?' Proposta: '+l.proposta:'')});
     save();location.hash='cliente/'+nid;
     if(podeFin())setTimeout(()=>editContrato(null,{clienteId:nid,produto:l.produto||'',proposta:l.proposta||'',valorTotal:+l.valor||0}),80);
     toast('Cliente criado — registre o contrato de honorários');},
@@ -5369,7 +5632,7 @@ const A={
   importar:()=>$('#file-import').click(),
   importarXls:()=>$('#file-xlsx').click(),importarWa:()=>importarWhatsApp(),
 };
-Object.assign(A,FX_ACOES,ANX_ACOES,ACORDO_ACOES,PET_AUD_ACOES,VOZ_ACOES,CONT_ACOES,RTC_ACOES,ESC_ACOES,TRAF_ACOES,FLUXO_ACOES,LEMB_ACOES,INTEG_ACOES,SEG_ACOES,{portalAba:id=>{ui.tabCli='portal';location.hash='cliente/'+id;render();},smLembretes:()=>{ui.tabSm='lembretes';location.hash='sm';render();}});
+Object.assign(A,FUNIL_API_ACOES,FX_ACOES,ANX_ACOES,ACORDO_ACOES,PET_AUD_ACOES,VOZ_ACOES,CONT_ACOES,RTC_ACOES,ESC_ACOES,TRAF_ACOES,FLUXO_ACOES,LEMB_ACOES,INTEG_ACOES,SEG_ACOES,{portalAba:id=>{ui.tabCli='portal';location.hash='cliente/'+id;render();},smLembretes:()=>{ui.tabSm='lembretes';location.hash='sm';render();}});
 function lerTipos(){document.querySelectorAll('[data-tipo-nome]').forEach(el=>{const i=+el.dataset.tipoNome;if(db.tiposEvento[i])db.tiposEvento[i].nome=el.value.trim();});
   document.querySelectorAll('[data-tipo-cor]').forEach(el=>{const i=+el.dataset.tipoCor;if(db.tiposEvento[i])db.tiposEvento[i].cor=el.value;});}
 function lancarFixas(ym,ids){

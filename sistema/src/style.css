@@ -519,3 +519,10 @@ table.ind td.editado{font-style:italic;color:var(--brand2)}
 .cont-msgs{max-height:460px;min-height:160px;overflow:auto;display:flex;flex-direction:column;gap:6px}
 .nb-mini{background:#C0392B;color:#fff;border-radius:999px;font-size:10px;padding:1px 6px;vertical-align:middle}
 .card.acordo{border-left:4px solid #2E7D4E}
+/* funil, anúncios e painel da API */
+.fn-linha{display:flex;gap:6px;align-items:center;margin-bottom:6px}.fn-linha input{flex:1;min-width:0}.fn-linha select{max-width:190px}
+.barra-mini{height:8px;background:var(--bg2,#efe9dc);border-radius:99px;overflow:hidden}.barra-mini i{display:block;height:100%;background:#C8A84B}
+.cod-url{font-size:12px;background:var(--bg2,#f3efe6);border-radius:6px;padding:5px 8px;word-break:break-all;flex:1;min-width:0}
+.intapi .dgroup{margin:16px 0 6px}
+.wsp-ev{border-bottom:1px solid var(--line,#eee);padding:6px 0}.wsp-ev pre{max-height:320px;overflow:auto;background:var(--bg2,#f6f3ec);padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-word}
+.lead-hist .ev{padding:4px 0}

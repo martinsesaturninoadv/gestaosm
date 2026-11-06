@@ -22,8 +22,20 @@ const CAT_REC=['H.O. iniciais','H.O. finais — acordo','H.O. finais — êxito'
 const LUCROS='Distribuição de lucros';
 const CAT_DESP=['Aluguel','Energia elétrica','Telefonia / internet','Sistemas','Tráfego — Google','Tráfego — Facebook/Instagram','Agência / marketing','Indicações pagas','Contador','Folha de pagamento','Pró-labore','Impostos','Taxa de cartão','Taxa de boleto','Tarifas bancárias','Empresa de TI','Copa','Correios','Material de expediente','Manutenção / extraordinárias','Equipamentos','Capacitação','Custas processuais','Repasse a parceiro',LUCROS,'Outras despesas'];
 const FORMAS=['PIX','Boleto','Cartão','Cheque','Transferência','Dinheiro','Recorrência'];
-const ETAPAS=['Novo contato','Em atendimento','Proposta enviada','Em recuperação','Fechado','Perdido','Encaminhado a parceiro'];
-const ORIGENS=['Google Ads','Facebook / Instagram Ads','Instagram orgânico','TikTok orgânico','YouTube orgânico','Indicação de cliente','Indicação de parceiro','Site','Outro'];
+const ETAPAS=['Novo contato','Em atendimento','Proposta enviada','Em recuperação','Fechado','Perdido','Encaminhado a parceiro']; // lista antiga (antes da migração da API)
+/* funil de atendimento: etapas editáveis (Configurações → Funil), cada uma com um tipo: andamento, ganho, perdido ou parceiro */
+const FUNIL_LEGADO=[['Novo contato','andamento'],['Em atendimento','andamento'],['Proposta enviada','andamento'],['Em recuperação','andamento'],['Fechado','ganho'],['Perdido','perdido'],['Encaminhado a parceiro','parceiro']];
+const FUNIL_PADRAO=[['Novo lead','andamento'],['Em triagem','andamento'],['Aguardando documentos','andamento'],['Proposta enviada','andamento'],['Negociação','andamento'],['Contrato enviado','andamento'],['Cliente fechado','ganho'],['Perdido','perdido'],['Encaminhado a parceiro','parceiro']];
+const TIPOS_ETAPA=[['andamento','Em andamento'],['ganho','Cliente fechado (ganho)'],['perdido','Perdido (pede motivo)'],['parceiro','Encaminhado a parceiro']];
+const funil=()=>{const e=typeof db!=='undefined'&&db&&db.funil&&Array.isArray(db.funil.etapas)?db.funil.etapas.filter(x=>x&&x.nome):[];return e.length?e:FUNIL_LEGADO.map(([nome,tipo])=>({nome,tipo}));};
+const etapasLead=()=>funil().map(e=>e.nome);
+const tipoEtapa=n=>(funil().find(e=>e.nome===n)||{tipo:'andamento'}).tipo;
+const etapaInicial=()=>funil()[0].nome;
+const etapaDoTipo=t=>(funil().find(e=>e.tipo===t)||{}).nome||'';
+const leadGanho=l=>tipoEtapa(l.etapa)==='ganho';
+const leadAberto=l=>!l.convertido&&tipoEtapa(l.etapa)==='andamento';
+const ORIGEM_ORGANICA='Orgânico / não identificado';
+const ORIGENS=['Google Ads','Facebook / Instagram Ads','Instagram orgânico','TikTok orgânico','YouTube orgânico','Orgânico / não identificado','Indicação de cliente','Indicação de parceiro','Site','Outro'];
 const AMBITOS=['Judicial','Administrativo','Administrativo + Judicial','Extrajudicial / consultivo'];
 const SEXOS=['Feminino','Masculino','Outro'];
 const UFS='AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split(' ');
@@ -42,7 +54,7 @@ const GPS_CODIGOS=[['1007','Contribuinte individual — 20%',20],['1163','Contri
 const SM_DOCS=['RG e CPF da segurada','Certidão de nascimento da criança (ou atestado/termo de guarda)','CNIS atualizado','Comprovante de residência','Carteira de trabalho / contratos','Comprovantes de recolhimento (guias pagas)','Declaração de atividade rural / autodeclaração (se rural)','Comprovante de inscrição MEI e DAS pagos (se MEI)'];
 const SCRIPT_CATS=['Primeiro atendimento','Qualificação','Objeções','Fechamento','Pós-venda','Pedido de indicação','Aniversário','Cobrança','Recuperação de contato','Datas e avisos'];
 const MODELO_CATS=['Contrato de honorários','Proposta de honorários','Procuração','Declaração','Recibo','Notificação','Outro'];
-const TITLES={painel:'Painel',escritorio:'Escritório virtual',trafego:'Tráfego pago (Meta Ads)',conteudo:'Produção de conteúdo',requisitorios:'RPV, precatórios e alvarás',peticoes:'Conferência de petições',audiencias:'Audiências',agenda:'Agenda e compromissos',tarefas:'Tarefas',resumo:'Resumo do dia',clientes:'Clientes',cliente:'Cliente',registro:'Registro histórico de clientes',processos:'Contencioso e administrativo',processo:'Processo',sm:'Salário-maternidade',smcaso:'Caso de salário-maternidade',documentos:'Documentos e modelos',scripts:'Scripts de atendimento',atendimentos:'Atendimentos (CRM)',financeiro:'Contas a receber e pagar',previsao:'Previsão de recebimentos',fixas:'Despesas fixas',fluxo:'Fluxo de caixa',contratos:'Contratos e metas',parcerias:'Parcerias',indicadores:'Indicadores mensais',relatorios:'Relatórios',config:'Configurações'};
+const TITLES={painel:'Painel',escritorio:'Escritório virtual',trafego:'Tráfego pago (Meta Ads)',anuncios:'Anúncios e origem dos leads',conteudo:'Produção de conteúdo',requisitorios:'RPV, precatórios e alvarás',peticoes:'Conferência de petições',audiencias:'Audiências',agenda:'Agenda e compromissos',tarefas:'Tarefas',resumo:'Resumo do dia',clientes:'Clientes',cliente:'Cliente',registro:'Registro histórico de clientes',processos:'Contencioso e administrativo',processo:'Processo',sm:'Salário-maternidade',smcaso:'Caso de salário-maternidade',documentos:'Documentos e modelos',scripts:'Scripts de atendimento',atendimentos:'Atendimentos (CRM)',financeiro:'Contas a receber e pagar',previsao:'Previsão de recebimentos',fixas:'Despesas fixas',fluxo:'Fluxo de caixa',contratos:'Contratos e metas',parcerias:'Parcerias',indicadores:'Indicadores mensais',relatorios:'Relatórios',config:'Configurações'};
 const PAG_FIN=['financeiro','previsao','fixas','fluxo','contratos','indicadores','relatorios'];
 const XLSX_URL='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
 

@@ -77,7 +77,7 @@ function resumoDia(dia){
     db.eventos.filter(e=>e.feito&&(e.feitoPor||e.responsavelId)===u.id&&no(e.feitoEm)).forEach(e=>add('⏰','Cumpriu: '+(e.tipo?e.tipo+' — ':'')+e.titulo));
     db.processos.forEach(p=>(p.andamentos||[]).filter(a=>a.autor===u.id&&no(a.data)).forEach(a=>add('⚖️','Andamento em '+p.numero+': '+String(a.texto).slice(0,80),'processo/'+p.id)));
     db.leads.filter(l=>l.criadoPor===u.id&&no(l.criado)).forEach(l=>add('◈','Novo atendimento: '+l.nome));
-    db.leads.filter(l=>l.etapa==='Fechado'&&no(l.dataFechamento)&&(l.responsavelId===u.id||l.criadoPor===u.id)).forEach(l=>add('🤝','Fechou: '+l.nome+(+l.valorFechado?' ('+brl(+l.valorFechado)+')':'')));
+    db.leads.filter(l=>leadGanho(l)&&no(l.dataFechamento)&&(l.responsavelId===u.id||l.criadoPor===u.id)).forEach(l=>add('🤝','Fechou: '+l.nome+(+l.valorFechado?' ('+brl(+l.valorFechado)+')':'')));
     db.contratos.filter(k=>k.responsavelId===u.id&&no(k.data)).forEach(k=>add('✎','Contrato de '+nomeCli(k.clienteId)+(podeFin()?' — '+brl(k.valorTotal):'')));
     db.peticoes.forEach(p=>(p.historico||[]).filter(h=>h.por===u.id&&emDia(h.em)).forEach(h=>add('🔎',(h.status==='A conferir'?'Enviou para conferência':h.status==='Conferida'?'Conferiu':h.status==='Protocolada'?'Protocolou':'Moveu para "'+h.status+'"')+': '+p.titulo,'peticoes')));
     db.notas.filter(x=>x.autor===u.id&&no(x.data)).forEach(x=>add('📝','Registro em '+nomeCli(x.clienteId)+': '+String(x.texto).slice(0,70)));

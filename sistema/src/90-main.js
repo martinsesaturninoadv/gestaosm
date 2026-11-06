@@ -66,7 +66,7 @@ const A={
   converter:id=>{const l=db.leads.find(x=>x.id===id);const nid=uid();
     db.clientes.push({id:nid,tipo:'PF',nome:l.nome,doc:'',tel:l.tel,email:l.email||'',cidade:l.cidade||'',uf:l.uf||'',origem:l.origem,produto:l.produto||'',status:'Ativo',criado:today(),
       primeiroContato:l.primeiroContato||l.criado,ultimoContato:today(),idade:l.idade||null,nascimento:l.nascimento||'',sexo:l.sexo||'',profissao:l.profissao||'',renda:l.renda||0,obs:l.obs||'',leadId:l.id});
-    l.convertido=true;l.etapa='Fechado';db.notas.push({id:uid(),clienteId:nid,data:today(),autor:db.usuarioAtual,texto:'Cliente convertido a partir do atendimento.'+(l.proposta?' Proposta: '+l.proposta:'')});
+    l.convertido=true;l.clienteId=nid;if(!leadGanho(l)){registrarEtapaLead(l,l.etapa,etapaDoTipo('ganho')||l.etapa,'');l.etapa=etapaDoTipo('ganho')||l.etapa;}if(!l.dataFechamento)l.dataFechamento=today();db.notas.push({id:uid(),clienteId:nid,data:today(),autor:db.usuarioAtual,texto:'Cliente convertido a partir do atendimento.'+(l.proposta?' Proposta: '+l.proposta:'')});
     save();location.hash='cliente/'+nid;
     if(podeFin())setTimeout(()=>editContrato(null,{clienteId:nid,produto:l.produto||'',proposta:l.proposta||'',valorTotal:+l.valor||0}),80);
     toast('Cliente criado — registre o contrato de honorários');},
@@ -174,7 +174,7 @@ const A={
   importar:()=>$('#file-import').click(),
   importarXls:()=>$('#file-xlsx').click(),importarWa:()=>importarWhatsApp(),
 };
-Object.assign(A,FX_ACOES,ANX_ACOES,ACORDO_ACOES,PET_AUD_ACOES,VOZ_ACOES,CONT_ACOES,RTC_ACOES,ESC_ACOES,TRAF_ACOES,FLUXO_ACOES,LEMB_ACOES,INTEG_ACOES,SEG_ACOES,{portalAba:id=>{ui.tabCli='portal';location.hash='cliente/'+id;render();},smLembretes:()=>{ui.tabSm='lembretes';location.hash='sm';render();}});
+Object.assign(A,FUNIL_API_ACOES,FX_ACOES,ANX_ACOES,ACORDO_ACOES,PET_AUD_ACOES,VOZ_ACOES,CONT_ACOES,RTC_ACOES,ESC_ACOES,TRAF_ACOES,FLUXO_ACOES,LEMB_ACOES,INTEG_ACOES,SEG_ACOES,{portalAba:id=>{ui.tabCli='portal';location.hash='cliente/'+id;render();},smLembretes:()=>{ui.tabSm='lembretes';location.hash='sm';render();}});
 function lerTipos(){document.querySelectorAll('[data-tipo-nome]').forEach(el=>{const i=+el.dataset.tipoNome;if(db.tiposEvento[i])db.tiposEvento[i].nome=el.value.trim();});
   document.querySelectorAll('[data-tipo-cor]').forEach(el=>{const i=+el.dataset.tipoCor;if(db.tiposEvento[i])db.tiposEvento[i].cor=el.value;});}
 function lancarFixas(ym,ids){

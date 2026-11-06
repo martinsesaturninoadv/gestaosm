@@ -69,6 +69,11 @@ function editCliente(id){
     {k:'origem',l:'Origem (como chegou)',t:'select',o:ORIGENS},{k:'produto',l:'Produto / nicho',t:'select',o:O.produtos},
     {k:'primeiroContato',l:'Primeiro contato',t:'date'},{k:'ultimoContato',l:'Último contato',t:'date'},
     {k:'status',l:'Situação',t:'select',o:['Ativo','Inativo'],req:1},...campoParceiro(),
+    {t:'sec',l:'Qualificação (procuração, declaração e contrato)'},
+    {k:'nacionalidade',l:'Nacionalidade',list:['brasileira','brasileiro']},{k:'estadoCivil',l:'Estado civil',list:['solteira','solteiro','casada','casado','divorciada','divorciado','viúva','viúvo','união estável']},
+    {k:'rg',l:'RG'},{k:'orgaoEmissor',l:'Órgão emissor'},{k:'filiacao',l:'Filiação (mãe e pai)',full:1},
+    {k:'cep',l:'CEP'},{k:'logradouro',l:'Endereço (rua/avenida)'},{k:'numero',l:'Número'},{k:'complemento',l:'Complemento'},{k:'bairro',l:'Bairro'},
+    {k:'objeto',l:'Objeto do caso',t:'textarea',full:1,rows:2},{k:'justicaGratuita',l:'Pedir justiça gratuita',t:'check'},
     ...camposPerfil,{k:'driveLink',l:'Pasta no Google Drive (cole o link da pasta)',t:'url',full:1,ph:'https://drive.google.com/drive/folders/…'},{k:'obs',l:'Observações',t:'textarea',full:1}],
     c,v=>{v.driveLink=(v.driveLink||'').trim();const fid=(v.driveLink.match(/folders\/([\w-]+)/)||v.driveLink.match(/[?&]id=([\w-]+)/)||[])[1];v.driveId=fid||(v.driveLink?'':(c.driveLink?'':c.driveId||''));
       const nid=upsert('clientes',id,v,{criado:today()});if(!id)location.hash='cliente/'+nid;},
@@ -124,17 +129,26 @@ function editTarefa(id,pre){
     {...t,responsaveis:respDe(t)},v=>{v.responsavelId=v.responsaveis[0]||'';if(v.status==='done'&&t.status!=='done'){v.concluidoEm=today();v.concluidoPor=quemConclui(v);setTimeout(()=>celebrarEvento('tarefa','Tarefa concluída!',v.titulo),200);}if(v.status!=='done')v.concluidoEm='';upsert('tarefas',id,v);},id&&(()=>{db.tarefas=db.tarefas.filter(x=>x.id!==id);}));
 }
 function editLead(id){
-  const l=id?db.leads.find(x=>x.id===id):{etapa:'Novo contato',origem:'',primeiroContato:today(),ultimoContato:today()};
+  const l=id?db.leads.find(x=>x.id===id):{etapa:etapaInicial(),origem:'',primeiroContato:today(),ultimoContato:today(),responsavelId:db.usuarioAtual};
   form(id?'Editar atendimento':'Novo atendimento',[
     {k:'nome',l:'Nome',req:1},{k:'tel',l:'WhatsApp / telefone'},{k:'email',l:'E-mail',t:'email'},
     {k:'origem',l:'Origem',t:'select',o:ORIGENS},{k:'produto',l:'Produto / nicho',t:'select',o:O.produtos},
-    {k:'etapa',l:'Status / etapa',t:'select',o:ETAPAS,req:1},{k:'canal',l:'WhatsApp de entrada',t:'select',o:CANAIS},{k:'etiquetas',l:'Etiquetas (WaSpeed)'},
+    {k:'etapa',l:'Status / etapa',t:'select',o:etapasLead(),req:1},{k:'motivoPerda',l:'Motivo da perda',dica:'Obrigatório quando a etapa é de perda.'},{k:'responsavelId',l:'Responsável',t:'select',o:O.usuarios},{k:'canal',l:'WhatsApp de entrada',t:'select',o:CANAIS},{k:'etiquetas',l:'Etiquetas (WaSpeed)'},
     {k:'primeiroContato',l:'Primeiro contato',t:'date'},{k:'ultimoContato',l:'Último contato',t:'date'},
     {k:'valor',l:'Honorários estimados (R$)',t:'number'},{k:'campanha',l:'Campanha (Meta)',list:()=>[...new Set(db.trafego.map(t=>t.campanha))].sort(),dica:'Para medir o resultado de cada campanha na tela Tráfego pago.'},
-    {k:'dataFechamento',l:'Data de fechamento',t:'date',dica:'Preenchida sozinha ao mover para "Fechado".'},{k:'valorFechado',l:'Honorários fechados (R$)',t:'number',dica:'Valor do contrato fechado (se vazio, usa o estimado).'},
+    {k:'dataFechamento',l:'Data de fechamento',t:'date',dica:'Preenchida sozinha ao mover para a etapa de cliente fechado.'},{k:'valorFechado',l:'Honorários fechados (R$)',t:'number',dica:'Valor do contrato fechado (se vazio, usa o estimado).'},
     {k:'proposta',l:'Proposta enviada',t:'textarea',full:1,rows:2,},
-    {k:'obs',l:'Resumo do caso',t:'textarea',full:1,rows:2},...campoParceiro(),...camposPerfil],
-    l,v=>{if(v.etapa==='Fechado'&&!v.dataFechamento)v.dataFechamento=today();if(v.etapa!=='Fechado')v.dataFechamento='';upsert('leads',id,v,{criado:v.primeiroContato||today()});},id&&(()=>{db.leads=db.leads.filter(x=>x.id!==id);}));
+    {k:'obs',l:'Resumo do caso',t:'textarea',full:1,rows:2},
+    {t:'sec',l:'Origem do anúncio e triagem'},
+    {k:'codigoAnuncio',l:'Código do anúncio',list:()=>db.anuncios.map(a=>a.codigo),ph:'ex.: BPC-01',dica:'Preenche campanha, conjunto e anúncio pelo cadastro de anúncios.'},{k:'plataforma',l:'Plataforma',list:['Meta','Instagram','Facebook','Google','WhatsApp']},
+    {k:'conjunto',l:'Conjunto de anúncios'},{k:'anuncio',l:'Anúncio'},
+    {k:'primeiraMensagem',l:'Primeira mensagem',t:'textarea',full:1,rows:2},{k:'resumoTriagem',l:'Resumo da triagem',t:'textarea',full:1,rows:3},
+    ...(id?[{t:'sec',html:htmlLeadHistorico(l)}]:[]),...campoParceiro(),...camposPerfil],
+    l,v=>{const tipo=tipoEtapa(v.etapa);if(tipo==='perdido'&&!String(v.motivoPerda||'').trim()){toast('Informe o motivo da perda',1);return false;}
+      if(!v.codigoAnuncio&&v.primeiraMensagem)v.codigoAnuncio=codigoDaMensagem(v.primeiraMensagem);aplicarAnuncio(v);
+      if(tipo==='ganho'&&!v.dataFechamento)v.dataFechamento=today();if(tipo!=='ganho')v.dataFechamento='';
+      if(id&&l.etapa!==v.etapa)registrarEtapaLead(l,l.etapa,v.etapa,v.motivoPerda);
+      upsert('leads',id,v,{criado:v.primeiroContato||today(),historicoEtapas:[],interacoes:[]});},id&&(()=>{db.leads=db.leads.filter(x=>x.id!==id);}));
 }
 function editLanc(id,pre){
   const l=id?db.lancamentos.find(x=>x.id===id):{tipo:'receita',venc:today(),pago:false,forma:'PIX',...pre};
