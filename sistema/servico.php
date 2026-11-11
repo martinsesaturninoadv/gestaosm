@@ -482,8 +482,16 @@ function sv_cadastrar_cliente(PDO $pdo, array $in, array $quem): array
     if (empty($c['origem'])) $c['origem'] = 'Outro';
     sv_gravar($pdo, 'clientes', $c['id'], $c, $quem);
     $contrato = sv_cliente_honorarios($pdo, $c, $in, $quem);
-    if ($lead) sv_marcar_convertido($pdo, $lead, (string) $c['id'], $quem);
-    return ['cliente' => sv_cliente_api($pdo, $c), 'contrato_id' => $contrato];
+    $sm = null;
+    if ($lead) {
+        sv_marcar_convertido($pdo, $lead, (string) $c['id'], $quem);
+        // lead de salário-maternidade: o caso já nasce no quadro, em "Documentos", com o checklist básico
+        if (preg_match('/maternidade/iu', (string) ($c['produto'] ?? ''))) {
+            $obs = trim((string) ($lead['resumoTriagem'] ?? ''));
+            $sm = sv_sm_criar($pdo, ['cliente_id' => $c['id'], 'lead_id' => $lead['id'], 'obs' => $obs, 'dpp' => $in['dpp'] ?? ''], $quem)['caso']['id'];
+        }
+    }
+    return ['cliente' => sv_cliente_api($pdo, $c), 'contrato_id' => $contrato] + ($sm ? ['caso_sm_id' => $sm] : []);
 }
 function sv_marcar_convertido(PDO $pdo, array $lead, string $clienteId, array $quem): void
 {
@@ -849,4 +857,384 @@ function sv_limpeza(PDO $pdo): void
     $pdo->prepare('DELETE FROM api_limite WHERE janela < ?')->execute([intdiv(time(), 60) - 1440]);
     $pdo->prepare('DELETE FROM oauth_codigos WHERE expira < ?')->execute([$agora]);
     $pdo->prepare('DELETE FROM oauth_tokens WHERE expira < ?')->execute([$agora - 30 * 86400000]);
+}
+
+/* =========================================================
+   SALÁRIO-MATERNIDADE pela API/conector (mesmas regras da tela)
+   - o servidor grava os dados do caso; o financeiro (honorários e reembolso de guia) é montado pelo sistema
+     na próxima abertura (reconciliação com ids fixos, que nunca duplica). Quando o lançamento já existe,
+     o recebimento da parcela do INSS já libera a cobrança aqui mesmo.
+   ========================================================= */
+const SV_SM_CATEG = ['A definir (triagem)', 'Empregada (CLT)', 'Desempregada (período de graça)', 'Desempregada', 'Contribuinte individual', 'MEI', 'Facultativa', 'Segurada especial (rural)', 'Empregada doméstica', 'Trabalhadora avulsa'];
+const SV_SM_ESTRAT = ['Via vínculo empregatício', 'Via guias (recolhimento)', 'Via período de graça', 'Via segurada especial (rural)', 'Via MEI (DAS)'];
+const SV_SM_DESFECHOS = ['Concluído', 'Indeferido', 'Recurso / judicial'];
+const SV_GPS = ['1406' => 20, '1473' => 11, '1929' => 5, '1007' => 20, '1163' => 11, 'DAS-MEI' => 5, 'Outro' => 0];
+const SV_SALARIO_MINIMO = [2024 => 1412, 2025 => 1518, 2026 => 1621];
+const SV_SM_DOCS_BASE = ['RG e CPF da segurada', 'Certidão de nascimento da criança (ou atestado/termo de guarda)', 'CNIS atualizado', 'Comprovante de residência'];
+
+function sv_pascoa(int $ano): string
+{
+    $a = $ano % 19; $b = intdiv($ano, 100); $c = $ano % 100; $d = intdiv($b, 4); $e = $b % 4; $f = intdiv($b + 8, 25); $g = intdiv($b - $f + 1, 3);
+    $h = (19 * $a + $b - $d - $g + 15) % 30; $i = intdiv($c, 4); $k = $c % 4; $l = (32 + 2 * $e + 2 * $i - $h - $k) % 7; $m = intdiv($a + 11 * $h + 22 * $l, 451);
+    $mes = intdiv($h + $l - 7 * $m + 114, 31); $dia = (($h + $l - 7 * $m + 114) % 31) + 1;
+    return sprintf('%04d-%02d-%02d', $ano, $mes, $dia);
+}
+function sv_mais_dias(string $d, int $n): string { return date('Y-m-d', strtotime("$d 12:00 $n day")); }
+/* dia útil: sem sábado, domingo, feriados nacionais (fixos e móveis) e os feriados locais cadastrados no escritório */
+function sv_dia_util(PDO $pdo, string $d): bool
+{
+    static $locais = null;
+    $dw = (int) date('w', strtotime("$d 12:00"));
+    if ($dw === 0 || $dw === 6) return false;
+    $ano = (int) substr($d, 0, 4);
+    $p = sv_pascoa($ano);
+    $f = array_map(fn($md) => "$ano-$md", ['01-01', '04-21', '05-01', '09-07', '10-12', '11-02', '11-15', '11-20', '12-25']);
+    array_push($f, sv_mais_dias($p, -48), sv_mais_dias($p, -47), sv_mais_dias($p, -2), sv_mais_dias($p, 60));
+    if ($locais === null) { $locais = []; $esc = nuc_config($pdo, 'escritorio') ?: [];
+        foreach (preg_split('/\n|;/', (string) ($esc['feriados'] ?? '')) as $l) if (preg_match('/^\s*(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?/', $l, $m)) $locais[] = [(int) $m[1], (int) $m[2], isset($m[3]) ? (int) $m[3] : 0]; }
+    foreach ($locais as [$dd, $mm, $aa]) if ((!$aa || $aa === $ano)) $f[] = sprintf('%04d-%02d-%02d', $ano, $mm, $dd);
+    return !in_array($d, $f, true);
+}
+function sv_uteis_depois(PDO $pdo, string $d, int $n): string { while ($n > 0) { $d = sv_mais_dias($d, 1); if (sv_dia_util($pdo, $d)) $n--; } return $d; }
+function sv_venc_guia(PDO $pdo, string $comp, string $cod): string
+{
+    $d = date('Y-m', strtotime("$comp-01 12:00 +1 month")) . ($cod === 'DAS-MEI' ? '-20' : '-15');
+    while (!sv_dia_util($pdo, $d)) $d = sv_mais_dias($d, 1);
+    return $d;
+}
+function sv_salario_minimo(PDO $pdo, string $comp): float
+{
+    $a = (int) substr($comp, 0, 4);
+    if (isset(SV_SALARIO_MINIMO[$a])) return (float) SV_SALARIO_MINIMO[$a];
+    $esc = nuc_config($pdo, 'escritorio') ?: [];
+    return (float) ($esc['salarioMinimo'] ?? 1621) ?: 1621.0;
+}
+function sv_valor_guia(PDO $pdo, string $comp, string $cod): float { return round(sv_salario_minimo($pdo, $comp) * (SV_GPS[$cod] ?? 0)) / 100; }
+function sv_competencia($v, string $campo): string
+{
+    $s = sv_texto($v, 10);
+    if (preg_match('/^(\d{4})-(\d{2})$/', $s, $m) || preg_match('/^(\d{2})\/(\d{4})$/', $s, $n)) {
+        [$a, $mes] = isset($m[1]) ? [$m[1], $m[2]] : [$n[2], $n[1]];
+        if ((int) $mes >= 1 && (int) $mes <= 12) return "$a-$mes";
+    }
+    throw new SvErro("Competência inválida em \"$campo\". Use AAAA-MM (ex.: 2026-03).", 422, ['campo' => $campo]);
+}
+function sv_opcao($v, array $lista, string $campo): string
+{
+    $s = sv_texto($v, 120);
+    if ($s === '') return '';
+    foreach ($lista as $o) if (sv_norm($o) === sv_norm($s)) return $o;
+    foreach ($lista as $o) if (strpos(sv_norm($o), sv_norm($s)) !== false) return $o;
+    throw new SvErro("Valor inválido em \"$campo\". Use: " . implode(', ', $lista) . '.', 422, ['campo' => $campo]);
+}
+function sv_sm_caso(PDO $pdo, string $id): array
+{
+    $c = nuc_ler($pdo, 'sm', $id);
+    if (!$c) throw new SvErro('Caso de salário-maternidade não encontrado.', 404);
+    return sv_sm_normalizar($c);
+}
+/* casos antigos (11 etapas) são lidos já na etapa nova; a gravação definitiva é feita pelo sistema na abertura */
+function sv_sm_normalizar(array $c): array
+{
+    if (!in_array($c['status'] ?? '', NUC_SM_ETAPAS, true)) {
+        $ant = (string) ($c['status'] ?? '');
+        $c['statusAntigo'] = $ant;
+        $c['status'] = nuc_sm_etapa($c);
+        if (in_array($ant, SV_SM_DESFECHOS, true) && empty($c['desfecho'])) $c['desfecho'] = $ant;
+        if ($ant === 'Em exigência' && empty($c['exigencia'])) $c['exigencia'] = ['aberta' => true, 'descricao' => 'Exigência em aberto (anotada antes da mudança do quadro)', 'prazo' => '', 'abertaEm' => sv_hoje()];
+        $c['historico'] = array_merge((array) ($c['historico'] ?? []), [['de' => $ant, 'para' => $c['status'], 'em' => nuc_ms(), 'por' => 'mudança do quadro (6 colunas)']]);
+    }
+    if (!isset($c['guias']) || !is_array($c['guias'])) $c['guias'] = [];
+    return $c;
+}
+function sv_sm_status_guia(array $g): string
+{
+    if (!empty($g['pagaEm'])) return 'Paga';
+    $venc = (string) ($g['venc'] ?? '');
+    if ($venc !== '' && $venc < sv_hoje()) return 'Vencida';
+    return !empty($g['emitidaEm']) ? 'Emitida' : 'A emitir';
+}
+function sv_sm_alertas(array $c): array
+{
+    $a = [];
+    $parto = substr((string) (($c['dataParto'] ?? '') ?: ($c['dpp'] ?? '')), 0, 7);
+    foreach ($c['guias'] as $g) {
+        if (!empty($g['pagaEm']) && !empty($g['venc']) && $g['pagaEm'] > $g['venc']) $a[] = "Guia {$g['competencia']} paga em atraso ({$g['pagaEm']}, vencia {$g['venc']}): não conta para qualidade de segurada nem carência.";
+        if ($parto !== '' && ($g['competencia'] ?? '') > $parto) $a[] = "Guia {$g['competencia']} é de competência depois do parto: não serve para a qualidade de segurada.";
+    }
+    $pagas = count(array_filter($c['guias'], fn($g) => !empty($g['pagaEm'])));
+    if (preg_match('/per[ií]odo de gra[cç]a/iu', (string) ($c['estrategia'] ?? '')) && $pagas) $a[] = "Estratégia \"via período de graça\", mas há $pagas guia(s) paga(s).";
+    if (preg_match('/via guias/i', (string) ($c['estrategia'] ?? '')) && !$c['guias']) $a[] = 'Estratégia "via guias", mas nenhuma guia cadastrada.';
+    if (!empty($c['exigencia']['aberta'])) $a[] = 'Exigência do INSS em aberto' . (!empty($c['exigencia']['prazo']) ? ' (prazo ' . $c['exigencia']['prazo'] . ')' : '') . '.';
+    if (($c['status'] ?? '') === 'Deferido — a receber' && empty($c['nb'])) $a[] = 'Deferido sem NB/protocolo.';
+    return $a;
+}
+function sv_sm_api(PDO $pdo, array $c, bool $completo = true): array
+{
+    $cli = nuc_ler($pdo, 'clientes', (string) ($c['clienteId'] ?? '')) ?: [];
+    $o = ['id' => $c['id'], 'cliente_id' => $c['clienteId'] ?? '', 'cliente' => $cli['nome'] ?? '', 'etapa' => $c['status'] ?? '', 'desfecho' => $c['desfecho'] ?? '',
+        'categoria' => $c['categoria'] ?? '', 'estrategia' => $c['estrategia'] ?? '', 'dpp' => $c['dpp'] ?? '', 'data_parto' => $c['dataParto'] ?? '',
+        'nb' => $c['nb'] ?? '', 'der' => $c['der'] ?? '', 'exigencia_aberta' => !empty($c['exigencia']['aberta']),
+        'guias_pendentes' => count(array_filter($c['guias'], fn($g) => empty($g['pagaEm']))), 'alertas' => sv_sm_alertas($c)];
+    if (!$completo) return $o;
+    $o += ['crianca' => $c['crianca'] ?? '', 'carencia_meses' => $c['carenciaMeses'] ?? '', 'qualidade_ate' => $c['qualidadeAte'] ?? '', 'responsavel' => $c['responsavelId'] ?? '',
+        'exigencia' => $c['exigencia'] ?? null, 'data_deferimento' => $c['dataDeferimento'] ?? '', 'dib' => $c['dib'] ?? '', 'valor_concedido' => (float) ($c['valorConcedido'] ?? 0),
+        'previsao_pagamento' => $c['previsaoPagamento'] ?? '', 'beneficio_estimado' => (float) ($c['beneficioEstimado'] ?? 0), 'honorarios_percentual' => (float) ($c['honorariosPct'] ?? 0),
+        'parcelas_honorarios' => (int) ($c['parcelasHonorarios'] ?? 0), 'obs' => $c['obs'] ?? '',
+        'guias' => array_map(fn($g) => ['id' => $g['id'] ?? '', 'competencia' => $g['competencia'] ?? '', 'codigo' => $g['codigo'] ?? '', 'codigo_descricao' => $g['codigoDesc'] ?? '',
+            'valor' => (float) ($g['valor'] ?? 0), 'vencimento' => $g['venc'] ?? '', 'status' => sv_sm_status_guia($g), 'emitida_em' => $g['emitidaEm'] ?? '', 'paga_em' => $g['pagaEm'] ?? '',
+            'quem_paga' => $g['quemPaga'] ?? 'Cliente'], $c['guias']),
+        'parcelas_inss' => array_map(fn($p) => ['n' => (int) ($p['n'] ?? 0), 'previsao' => $p['previsao'] ?? '', 'recebida_em' => $p['recebidaEm'] ?? '',
+            'honorarios_vencem_em' => !empty($p['recebidaEm']) ? sv_uteis_depois($pdo, (string) $p['recebidaEm'], 5) : ''], (array) ($c['parcelasInss'] ?? [])),
+        'historico' => array_map(fn($h) => ['de' => $h['de'] ?? '', 'para' => $h['para'] ?? '', 'em' => isset($h['em']) ? date('Y-m-d H:i', (int) ($h['em'] / 1000)) : '', 'por' => $h['por'] ?? ''], (array) ($c['historico'] ?? []))];
+    return $o;
+}
+function sv_sm_buscar(PDO $pdo, array $f): array
+{
+    $id = sv_texto($f['caso_id'] ?? '', 60);
+    if ($id !== '') return ['total' => 1, 'itens' => [sv_sm_api($pdo, sv_sm_caso($pdo, $id))]];
+    $cli = sv_texto($f['cliente_id'] ?? '', 60);
+    $nome = sv_norm(sv_texto($f['nome'] ?? '', 120));
+    $cpf = sv_digitos(sv_texto($f['cpf'] ?? '', 20));
+    $tel = sv_texto($f['telefone'] ?? '', 40);
+    $e164 = $tel !== '' ? sv_telefone_e164($tel) : '';
+    $etapa = sv_texto($f['etapa'] ?? '', 60) !== '' ? sv_opcao($f['etapa'], NUC_SM_ETAPAS, 'etapa') : '';
+    $clientes = [];
+    foreach (nuc_listar($pdo, 'clientes') as $c) $clientes[(string) $c['id']] = $c;
+    $out = [];
+    foreach (nuc_listar($pdo, 'sm') as $c) {
+        $c = sv_sm_normalizar($c);
+        $k = $clientes[(string) ($c['clienteId'] ?? '')] ?? [];
+        if ($cli !== '' && ($c['clienteId'] ?? '') !== $cli) continue;
+        if ($etapa !== '' && $c['status'] !== $etapa) continue;
+        if ($nome !== '' && strpos(sv_norm((string) ($k['nome'] ?? '')), $nome) === false) continue;
+        if ($cpf !== '' && sv_digitos((string) ($k['doc'] ?? '')) !== $cpf) continue;
+        if ($tel !== '' && ($k['telE164'] ?? sv_telefone_e164((string) ($k['tel'] ?? ''))) !== $e164) continue;
+        $out[] = sv_sm_api($pdo, $c, false);
+    }
+    $um = count($out) === 1 ? [sv_sm_api($pdo, sv_sm_caso($pdo, (string) $out[0]['id']))] : array_slice($out, 0, 100);
+    return ['total' => count($out), 'itens' => $um];
+}
+function sv_sm_historico(array &$c, string $para, array $quem): void
+{
+    if (($c['status'] ?? '') === $para) return;
+    $c['historico'] = array_merge((array) ($c['historico'] ?? []), [['de' => $c['status'] ?? '', 'para' => $para, 'em' => nuc_ms(), 'por' => $quem['nome'] ?? 'API']]);
+    $c['status'] = $para;
+}
+function sv_sm_gravar(PDO $pdo, array $c, array $quem): array
+{
+    sv_gravar($pdo, 'sm', (string) $c['id'], $c, $quem);
+    return ['caso' => sv_sm_api($pdo, $c)];
+}
+/* campos simples do caso (parcial: só os informados) */
+function sv_sm_aplicar(PDO $pdo, array &$c, array $in): void
+{
+    if (array_key_exists('categoria', $in)) $c['categoria'] = sv_opcao($in['categoria'], SV_SM_CATEG, 'categoria') ?: 'A definir (triagem)';
+    if (array_key_exists('estrategia', $in)) $c['estrategia'] = sv_opcao($in['estrategia'], SV_SM_ESTRAT, 'estrategia');
+    foreach (['dpp' => 'dpp', 'data_parto' => 'dataParto', 'qualidade_ate' => 'qualidadeAte', 'previsao_pagamento' => 'previsaoPagamento'] as $k => $int)
+        if (array_key_exists($k, $in)) $c[$int] = sv_data($in[$k], $k);
+    if (!empty($c['dataParto']) && $c['dataParto'] > sv_hoje()) throw new SvErro('A data do parto não pode ser no futuro: use a DPP (data provável do parto).', 422, ['campo' => 'data_parto']);
+    foreach (['crianca' => ['crianca', 160], 'obs' => ['obs', 4000]] as $k => [$int, $max]) if (array_key_exists($k, $in)) $c[$int] = sv_texto($in[$k], $max);
+    foreach (['carencia_meses' => 'carenciaMeses', 'beneficio_estimado' => 'beneficioEstimado', 'honorarios_percentual' => 'honorariosPct', 'parcelas_honorarios' => 'parcelasHonorarios'] as $k => $int)
+        if (array_key_exists($k, $in)) $c[$int] = sv_valor($in[$k], $k) ?? '';
+    if (isset($c['honorariosPct']) && $c['honorariosPct'] !== '' && ($c['honorariosPct'] < 0 || $c['honorariosPct'] > 100)) throw new SvErro('Percentual de honorários deve estar entre 0 e 100.', 422, ['campo' => 'honorarios_percentual']);
+    if (array_key_exists('responsavel', $in)) $c['responsavelId'] = sv_resolver_responsavel($pdo, sv_texto($in['responsavel'], 160));
+}
+function sv_sm_docs(PDO $pdo, array $c, array $quem): void
+{
+    $tem = [];
+    foreach (nuc_listar($pdo, 'documentos') as $d) if (($d['clienteId'] ?? '') === $c['clienteId']) $tem[sv_norm((string) ($d['nome'] ?? ''))] = 1;
+    foreach (SV_SM_DOCS_BASE as $nome) if (!isset($tem[sv_norm($nome)])) { $id = 'd' . nuc_uid(); sv_gravar($pdo, 'documentos', $id, ['id' => $id, 'clienteId' => $c['clienteId'], 'nome' => $nome, 'recebido' => false, 'data' => ''], $quem); }
+}
+function sv_sm_criar(PDO $pdo, array $in, array $quem): array
+{
+    $cli = sv_cliente($pdo, sv_texto($in['cliente_id'] ?? '', 60));
+    foreach (nuc_listar($pdo, 'sm') as $x) if (($x['clienteId'] ?? '') === $cli['id'] && nuc_sm_etapa($x) !== 'Encerrado')
+        throw new SvErro('Esta cliente já tem um caso de salário-maternidade em andamento.', 409, ['caso_id' => $x['id']]);
+    $esc = nuc_config($pdo, 'escritorio') ?: [];
+    $c = ['id' => 's' . nuc_uid(), 'clienteId' => $cli['id'], 'status' => 'Documentos', 'categoria' => 'A definir (triagem)', 'estrategia' => '', 'responsavelId' => $quem['membro'] ?? '',
+        'guias' => [], 'guiasRevisadas' => 1, 'dpp' => '', 'dataParto' => '', 'beneficioEstimado' => round(sv_salario_minimo($pdo, sv_hoje()) * 4),
+        'honorariosPct' => (float) ($esc['smHonorariosPct'] ?? 25) ?: 25, 'parcelasHonorarios' => 2, 'obs' => '',
+        'historico' => [['de' => '', 'para' => 'Documentos', 'em' => nuc_ms(), 'por' => $quem['nome'] ?? 'API']]];
+    if (!empty($in['lead_id'])) $c['leadId'] = sv_texto($in['lead_id'], 60);
+    sv_sm_aplicar($pdo, $c, $in);
+    sv_sm_docs($pdo, $c, $quem);
+    return sv_sm_gravar($pdo, $c, $quem);
+}
+function sv_sm_atualizar(PDO $pdo, string $id, array $in, array $quem): array
+{
+    $c = sv_sm_caso($pdo, $id);
+    sv_sm_aplicar($pdo, $c, $in);
+    return sv_sm_gravar($pdo, $c, $quem);
+}
+function sv_sm_mover(PDO $pdo, string $id, array $in, array $quem): array
+{
+    $c = sv_sm_caso($pdo, $id);
+    $nova = sv_opcao($in['etapa'] ?? '', NUC_SM_ETAPAS, 'etapa');
+    if ($nova === '') throw new SvErro('Informe a etapa: ' . implode(', ', NUC_SM_ETAPAS) . '.', 422, ['campo' => 'etapa']);
+    if ($nova === 'Deferido — a receber') throw new SvErro('Para deferido use sm_registrar_deferimento (precisa de NB, DER, data e valor).', 422, ['campo' => 'etapa']);
+    if ($nova === 'Encerrado') {
+        $c['desfecho'] = sv_opcao($in['desfecho'] ?? '', SV_SM_DESFECHOS, 'desfecho');
+        if ($c['desfecho'] === '') throw new SvErro('Para encerrar, informe o desfecho: ' . implode(', ', SV_SM_DESFECHOS) . '.', 422, ['campo' => 'desfecho']);
+    }
+    if ($nova === 'No INSS') {
+        if (array_key_exists('nb', $in)) $c['nb'] = sv_texto($in['nb'], 60);
+        if (array_key_exists('der', $in)) $c['der'] = sv_data($in['der'], 'der');
+        if (!empty($c['nb']) && empty($c['der'])) throw new SvErro('Com protocolo/NB, informe também a DER.', 422, ['campo' => 'der']);
+    }
+    sv_sm_historico($c, $nova, $quem);
+    return sv_sm_gravar($pdo, $c, $quem);
+}
+function sv_sm_guia(PDO $pdo, string $id, array $in, array $quem): array
+{
+    $c = sv_sm_caso($pdo, $id);
+    $comp = sv_competencia($in['competencia'] ?? '', 'competencia');
+    $cod = sv_texto($in['codigo'] ?? '', 20);
+    if ($cod === '') $cod = preg_match('/mei/i', (string) $c['categoria']) ? 'DAS-MEI' : (preg_match('/contribuinte/i', (string) $c['categoria']) ? '1007' : '1406');
+    if (!array_key_exists($cod, SV_GPS)) throw new SvErro('Código inválido. Use: ' . implode(', ', array_keys(SV_GPS)) . '.', 422, ['campo' => 'codigo']);
+    $desc = sv_texto($in['codigo_descricao'] ?? '', 120);
+    if ($cod === 'Outro' && $desc === '') throw new SvErro('Descreva o código "Outro" em codigo_descricao.', 422, ['campo' => 'codigo_descricao']);
+    $valor = sv_valor($in['valor'] ?? null, 'valor');
+    if ($valor === null) { if ($cod === 'Outro') throw new SvErro('Informe o valor da guia de código "Outro".', 422, ['campo' => 'valor']); $valor = sv_valor_guia($pdo, $comp, $cod); }
+    $quemPaga = preg_match('/escrit/i', (string) ($in['quem_paga'] ?? '')) ? 'Escritório (reembolsável)' : 'Cliente';
+    $g = null;
+    foreach ($c['guias'] as $i => $x) if (($x['competencia'] ?? '') === $comp) $g = $i;
+    $dados = ['competencia' => $comp, 'codigo' => $cod, 'codigoDesc' => $desc, 'valor' => $valor, 'venc' => sv_venc_guia($pdo, $comp, $cod === 'Outro' ? '1406' : $cod), 'quemPaga' => $quemPaga];
+    if (array_key_exists('link', $in)) $dados['link'] = sv_texto($in['link'], 1000);
+    if ($g !== null) $c['guias'][$g] = array_merge($c['guias'][$g], $dados);
+    else $c['guias'][] = ['id' => 'g' . nuc_uid(), 'emitidaEm' => '', 'pagaEm' => '', 'link' => '', 'obs' => ''] + $dados;
+    usort($c['guias'], fn($a, $b) => strcmp((string) $a['competencia'], (string) $b['competencia']));
+    if ($c['status'] === 'Documentos') sv_sm_historico($c, 'Guia a pagar', $quem);
+    $r = sv_sm_gravar($pdo, $c, $quem);
+    return $r + ['guia' => array_values(array_filter($r['caso']['guias'], fn($x) => $x['competencia'] === $comp))[0], 'atualizada' => $g !== null];
+}
+function sv_sm_guia_paga(PDO $pdo, string $id, array $in, array $quem): array
+{
+    $c = sv_sm_caso($pdo, $id);
+    $gid = sv_texto($in['guia_id'] ?? '', 60);
+    $comp = sv_texto($in['competencia'] ?? '', 10) !== '' ? sv_competencia($in['competencia'], 'competencia') : '';
+    $i = null;
+    foreach ($c['guias'] as $k => $g) if (($gid !== '' && ($g['id'] ?? '') === $gid) || ($gid === '' && $comp !== '' && ($g['competencia'] ?? '') === $comp)) $i = $k;
+    if ($i === null) throw new SvErro('Guia não encontrada: informe guia_id ou a competência (AAAA-MM).', 404);
+    $pagaEm = sv_data($in['paga_em'] ?? '', 'paga_em') ?: sv_hoje();
+    if ($pagaEm > sv_hoje()) throw new SvErro('"paga_em" não pode ser no futuro.', 422, ['campo' => 'paga_em']);
+    $c['guias'][$i]['pagaEm'] = $pagaEm;
+    if (empty($c['guias'][$i]['emitidaEm'])) $c['guias'][$i]['emitidaEm'] = $pagaEm;
+    if (array_key_exists('quem_paga', $in)) $c['guias'][$i]['quemPaga'] = preg_match('/escrit/i', (string) $in['quem_paga']) ? 'Escritório (reembolsável)' : 'Cliente';
+    $r = sv_sm_gravar($pdo, $c, $quem);
+    $g = $c['guias'][$i];
+    $av = [];
+    if (!empty($g['venc']) && $pagaEm > $g['venc']) $av[] = 'Paga em atraso: pagamento em atraso de facultativa não conta para a qualidade de segurada nem para a carência.';
+    if (preg_match('/escrit/i', (string) $g['quemPaga'])) $av[] = 'Paga pelo escritório: vira reembolso a receber da cliente (lançado no financeiro, aguardando o benefício).';
+    return $r + ['avisos' => $av];
+}
+function sv_sm_requerimento(PDO $pdo, string $id, array $in, array $quem): array
+{
+    $c = sv_sm_caso($pdo, $id);
+    $c['nb'] = sv_texto($in['nb'] ?? '', 60);
+    $c['der'] = sv_data($in['der'] ?? '', 'der');
+    if ($c['nb'] === '' || $c['der'] === '') throw new SvErro('Informe o nº do protocolo/NB e a DER.', 422, ['campo' => $c['nb'] === '' ? 'nb' : 'der']);
+    if (in_array($c['status'], ['Documentos', 'Guia a pagar', 'Aguardando parto'], true)) sv_sm_historico($c, 'No INSS', $quem);
+    return sv_sm_gravar($pdo, $c, $quem);
+}
+function sv_sm_exigencia(PDO $pdo, string $id, array $in, array $quem): array
+{
+    $c = sv_sm_caso($pdo, $id);
+    if (sv_bool($in['cumprida'] ?? false)) {
+        if (empty($c['exigencia']['aberta'])) throw new SvErro('Não há exigência em aberto neste caso.', 409);
+        $c['exigencia'] = array_merge((array) $c['exigencia'], ['aberta' => false, 'cumpridaEm' => sv_data($in['data'] ?? '', 'data') ?: sv_hoje()]);
+        return sv_sm_gravar($pdo, $c, $quem);
+    }
+    $desc = sv_texto($in['descricao'] ?? '', 2000);
+    if ($desc === '') throw new SvErro('Descreva o que o INSS pediu.', 422, ['campo' => 'descricao']);
+    $prazo = sv_data($in['prazo'] ?? '', 'prazo') ?: sv_mais_dias(sv_hoje(), 30);
+    $c['exigencia'] = ['aberta' => true, 'descricao' => $desc, 'prazo' => $prazo, 'abertaEm' => sv_hoje()];
+    if ($c['status'] !== 'No INSS') sv_sm_historico($c, 'No INSS', $quem);
+    return sv_sm_gravar($pdo, $c, $quem);
+}
+function sv_sm_deferimento(PDO $pdo, string $id, array $in, array $quem): array
+{
+    $c = sv_sm_caso($pdo, $id);
+    $nb = sv_texto($in['nb'] ?? ($c['nb'] ?? ''), 60);
+    $der = sv_data($in['der'] ?? ($c['der'] ?? ''), 'der');
+    $valor = sv_valor($in['valor_concedido'] ?? null, 'valor_concedido');
+    if ($nb === '') throw new SvErro('Informe o NB/protocolo.', 422, ['campo' => 'nb']);
+    if ($der === '') throw new SvErro('Informe a DER.', 422, ['campo' => 'der']);
+    if (!$valor) throw new SvErro('Informe o valor total concedido (R$).', 422, ['campo' => 'valor_concedido']);
+    $c['nb'] = $nb; $c['der'] = $der; $c['valorConcedido'] = $valor;
+    $c['dataDeferimento'] = sv_data($in['data_deferimento'] ?? '', 'data_deferimento') ?: sv_hoje();
+    if (array_key_exists('dib', $in)) $c['dib'] = sv_data($in['dib'], 'dib');
+    if (array_key_exists('previsao_pagamento', $in)) $c['previsaoPagamento'] = sv_data($in['previsao_pagamento'], 'previsao_pagamento');
+    $n = max(1, (int) round((float) ($in['parcelas_inss'] ?? ($c['qtdParcelasInss'] ?? ($c['parcelasHonorarios'] ?? 1)))));
+    $c['qtdParcelasInss'] = $n;
+    $atual = (array) ($c['parcelasInss'] ?? []);
+    $prev = (string) ($c['previsaoPagamento'] ?? '');
+    $c['parcelasInss'] = [];
+    for ($i = 0; $i < $n; $i++) $c['parcelasInss'][] = $atual[$i] ?? ['n' => $i + 1, 'recebidaEm' => '', 'previsao' => $prev !== '' ? date('Y-m-d', strtotime("$prev 12:00 +$i month")) : ''];
+    if (!empty($c['exigencia']) && is_array($c['exigencia'])) $c['exigencia']['aberta'] = false;
+    sv_sm_historico($c, 'Deferido — a receber', $quem);
+    $r = sv_sm_gravar($pdo, $c, $quem);
+    $pct = (float) (($c['honorariosPct'] ?? '') !== '' ? $c['honorariosPct'] : 25);
+    $np = max(1, (int) round((float) ($c['parcelasHonorarios'] ?? 2)));
+    return $r + ['honorarios_previstos' => ['percentual' => $pct, 'parcelas' => $np, 'valor_parcela' => round($valor * $pct / 100 / $np, 2),
+        'obs' => 'Lançados no financeiro como "aguardando benefício"; cada parcela vence 5 dias úteis depois que a cliente recebe a parcela do INSS. Se houver contrato de salário-maternidade com parcelas, ele prevalece.']];
+}
+function sv_sm_parcela(PDO $pdo, string $id, array $in, array $quem): array
+{
+    $c = sv_sm_caso($pdo, $id);
+    $n = (int) ($in['parcela'] ?? 1);
+    $ps = (array) ($c['parcelasInss'] ?? []);
+    if (!$ps) throw new SvErro('O caso ainda não tem o deferimento registrado (use sm_registrar_deferimento).', 409);
+    if ($n < 1 || $n > count($ps)) throw new SvErro('Parcela inválida: o INSS paga em ' . count($ps) . ' parcela(s).', 422, ['campo' => 'parcela']);
+    $data = sv_data($in['recebida_em'] ?? '', 'recebida_em') ?: sv_hoje();
+    if ($data > sv_hoje()) throw new SvErro('A data de recebimento não pode ser no futuro.', 422, ['campo' => 'recebida_em']);
+    $ps[$n - 1]['recebidaEm'] = $data;
+    if (array_key_exists('valor', $in)) $ps[$n - 1]['valor'] = sv_valor($in['valor'], 'valor') ?? '';
+    $c['parcelasInss'] = $ps;
+    $r = sv_sm_gravar($pdo, $c, $quem);
+    $lib = sv_uteis_depois($pdo, $data, 5);
+    // lançamentos automáticos já existentes: libera a cobrança agora (os que faltarem o sistema cria na abertura)
+    $liberados = 0;
+    foreach (nuc_listar($pdo, 'lancamentos') as $l) {
+        if (($l['smId'] ?? '') !== $c['id'] || !empty($l['pago']) || empty($l['auto'])) continue;
+        $alvo = ($l['smTipo'] ?? '') === 'honorarios' ? (int) ($l['smParcela'] ?? 0) === $n : (($l['smTipo'] ?? '') === 'reembolso' && $n === 1);
+        if (!$alvo) continue;
+        $l['venc'] = $lib; $l['aguardandoBeneficio'] = false;
+        sv_gravar($pdo, 'lancamentos', (string) $l['id'], $l, $quem); $liberados++;
+    }
+    return $r + ['cobrar_a_partir_de' => $lib, 'lancamentos_liberados' => $liberados, 'obs' => "Honorários da parcela $n vencem em $lib (5 dias úteis depois do recebimento)."];
+}
+function sv_sm_a_receber(PDO $pdo, array $f): array
+{
+    $clientes = [];
+    foreach (nuc_listar($pdo, 'clientes') as $c) $clientes[(string) $c['id']] = $c;
+    $casos = [];
+    foreach (nuc_listar($pdo, 'sm') as $c) $casos[(string) $c['id']] = sv_sm_normalizar($c);
+    $porCaso = [];
+    foreach (nuc_listar($pdo, 'lancamentos') as $l) {
+        if (empty($l['smId']) || !empty($l['pago'])) continue;
+        $porCaso[(string) $l['smId']][] = $l;
+    }
+    $itens = []; $tot = ['cobrar_agora' => 0.0, 'aguardando_beneficio' => 0.0, 'previsto_sem_lancamento' => 0.0];
+    foreach ($casos as $id => $c) {
+        $ls = $porCaso[$id] ?? [];
+        $cli = $clientes[(string) ($c['clienteId'] ?? '')] ?? [];
+        $base = ['caso_id' => $id, 'cliente' => $cli['nome'] ?? '', 'telefone' => $cli['tel'] ?? '', 'etapa' => $c['status']];
+        foreach ($ls as $l) {
+            $ag = !empty($l['aguardandoBeneficio']);
+            $tot[$ag ? 'aguardando_beneficio' : 'cobrar_agora'] += (float) ($l['valor'] ?? 0);
+            $itens[] = $base + ['tipo' => ($l['smTipo'] ?? '') === 'reembolso' ? 'Reembolso de guia' : 'Honorários', 'descricao' => $l['descricao'] ?? '', 'valor' => (float) ($l['valor'] ?? 0),
+                'situacao' => $ag ? 'Aguardando benefício' : ((string) ($l['venc'] ?? '') < sv_hoje() ? 'Vencido' : 'A cobrar'), 'vencimento' => $ag ? '' : ($l['venc'] ?? '')];
+        }
+        if (!$ls && $c['status'] === 'Deferido — a receber' && !empty($c['valorConcedido'])) {
+            $pct = (float) (($c['honorariosPct'] ?? '') !== '' ? $c['honorariosPct'] : 25);
+            $v = round((float) $c['valorConcedido'] * $pct / 100, 2);
+            $tot['previsto_sem_lancamento'] += $v;
+            $itens[] = $base + ['tipo' => 'Honorários', 'descricao' => "Previsto: $pct% do benefício (ainda não lançado; entra no financeiro quando alguém abrir o sistema)", 'valor' => $v, 'situacao' => 'Previsto', 'vencimento' => ''];
+        }
+    }
+    $sit = sv_texto($f['situacao'] ?? '', 40);
+    if ($sit !== '') $itens = array_values(array_filter($itens, fn($i) => sv_norm($i['situacao']) === sv_norm($sit) || ($sit === 'cobrar_agora' && in_array($i['situacao'], ['A cobrar', 'Vencido'], true))));
+    usort($itens, fn($a, $b) => strcmp($a['vencimento'] ?: '9999', $b['vencimento'] ?: '9999'));
+    return ['totais' => array_map(fn($v) => round($v, 2), $tot), 'total' => count($itens), 'itens' => array_slice($itens, 0, 200)];
 }

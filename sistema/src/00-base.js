@@ -47,10 +47,10 @@ const FAIXAS=[[0,20,'Até 20 anos'],[21,30,'21 a 30 anos'],[31,40,'31 a 40 anos'
 const PRIOR=['Alta','Média','Baixa'];
 const TSTATUS=[['todo','A fazer'],['doing','Em andamento'],['done','Concluído']];
 /* Salário-maternidade */
-const SM_STATUS=['Triagem / viabilidade','Coleta de documentos','Guias em andamento','Aguardando o parto','Pronto para protocolo','Protocolado — em análise','Em exigência','Deferido','Indeferido','Recurso / judicial','Concluído'];
-const SM_CATEG=['Empregada (CLT)','Desempregada (período de graça)','Desempregada','Contribuinte individual','MEI','Facultativa','Segurada especial (rural)','Empregada doméstica','Trabalhadora avulsa'];
+const SM_STATUS=['Documentos','Guia a pagar','Aguardando parto','No INSS','Deferido — a receber','Encerrado'];
+const SM_CATEG=['A definir (triagem)','Empregada (CLT)','Desempregada (período de graça)','Desempregada','Contribuinte individual','MEI','Facultativa','Segurada especial (rural)','Empregada doméstica','Trabalhadora avulsa'];
 const SM_ESTRAT=['Via vínculo empregatício','Via guias (recolhimento)','Via período de graça','Via segurada especial (rural)','Via MEI (DAS)'];
-const GPS_CODIGOS=[['1007','Contribuinte individual — 20%',20],['1163','Contribuinte individual — plano simplificado 11%',11],['1406','Facultativo — 20%',20],['1473','Facultativo — plano simplificado 11%',11],['1929','Facultativo baixa renda — 5%',5],['DAS-MEI','MEI — DAS mensal',5]];
+const GPS_CODIGOS=[['1406','Facultativo — 20%',20],['1473','Facultativo plano simplificado — 11%',11],['1929','Facultativo baixa renda — 5%',5],['1007','Contribuinte individual — 20%',20],['1163','Contribuinte individual plano simplificado — 11%',11],['DAS-MEI','MEI — DAS mensal',5],['Outro','Outro (descrever)',0]];
 const SM_DOCS=['RG e CPF da segurada','Certidão de nascimento da criança (ou atestado/termo de guarda)','CNIS atualizado','Comprovante de residência','Carteira de trabalho / contratos','Comprovantes de recolhimento (guias pagas)','Declaração de atividade rural / autodeclaração (se rural)','Comprovante de inscrição MEI e DAS pagos (se MEI)'];
 const SCRIPT_CATS=['Primeiro atendimento','Qualificação','Objeções','Fechamento','Pós-venda','Pedido de indicação','Aniversário','Cobrança','Recuperação de contato','Datas e avisos'];
 const MODELO_CATS=['Contrato de honorários','Proposta de honorários','Procuração','Declaração','Recibo','Notificação','Outro'];

@@ -2,7 +2,7 @@
    COMPONENTES DE VISUALIZAÇÃO
    ========================================================= */
 const pill=(t,c)=>`<span class="pill ${c}">${esc(t)}</span>`;
-const pStatusLanc=s=>pill(s,s==='Pago'?'p-green':s==='Atrasado'?'p-red':'p-amber');
+const pStatusLanc=s=>pill(s,s==='Pago'?'p-green':s==='Atrasado'?'p-red':s==='Aguardando benefício'?'p-gray':'p-amber');
 const pStatusProc=s=>pill(s,s==='Em andamento'?'p-blue':s==='Ganho'||s==='Acordo'||s==='Deferido'?'p-green':s==='Perdido'||s==='Indeferido'?'p-red':'p-gray');
 const pPrior=p=>pill(p,p==='Alta'?'p-red':p==='Média'?'p-amber':'p-gray');
 const pTipoEvt=t=>tagTipo(t);
@@ -59,7 +59,7 @@ function barras(series,rotulos,fmt,empilhado,alt=170){
 /* ---------- produtividade, pontos e pins ---------- */
 const PONTOS={tarefa:10,prazo:15,contrato:50,atendimento:5,andamento:3,deferido:30};
 /* data em que o benefício foi deferido (casos antigos sem a data: usa a DER ou o cadastro) */
-const dataDefSm=c=>c.dataDeferimento||(['Deferido','Concluído'].includes(c.status)?(c.der||c.criado||''):'');
+const dataDefSm=c=>c.dataDeferimento||(c.status==='Deferido — a receber'||['Deferido','Concluído'].includes(c.status)||c.desfecho==='Concluído'?(c.der||c.criado||''):'');
 const deferidosSm=prefixo=>db.sm.filter(c=>dataDefSm(c).startsWith(prefixo));
 function produtividade(ym){
   const no=d=>d&&String(d).startsWith(ym);

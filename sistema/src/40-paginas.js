@@ -13,7 +13,8 @@ function moveCard(kind,id,col){
   if(kind==='pet')moverPeticao(id,col);
   if(kind==='cont')moverConteudo(id,col);
   if(kind==='proc'){const p=proc(id);if(p)aplicarFase(p,col);}
-  if(kind==='sm'){const c=db.sm.find(x=>x.id===id);if(c){c.status=col;if(col==='Deferido'&&!c.dataDeferimento){c.dataDeferimento=today();celebrarEvento('deferido','Benefício deferido!',nomeCli(c.clienteId));setTimeout(()=>{editSm(id);},1800);}}}
+  if(kind==='sm'){smPedirMover(id,col);return;}
+  if(kind==='sm-antigo'){const c=db.sm.find(x=>x.id===id);if(c){c.status=col;if(col==='Deferido'&&!c.dataDeferimento){c.dataDeferimento=today();celebrarEvento('deferido','Benefício deferido!',nomeCli(c.clienteId));setTimeout(()=>{editSm(id);},1800);}}}
   if(kind==='lead'){const l=db.leads.find(x=>x.id===id);if(l){if(tipoEtapa(col)==='perdido'){pedirMotivoPerda(l,col);return;}registrarEtapaLead(l,l.etapa,col,'');l.etapa=col;l.ultimoContato=today();if(tipoEtapa(col)==='ganho'){if(!l.dataFechamento)l.dataFechamento=today();}else l.dataFechamento='';if(tipoEtapa(col)==='ganho'&&!l.convertido){celebrarEvento('contrato','Negócio fechado!',l.nome);setTimeout(()=>toast('Use "Converter em cliente" no card.'),1200);}}}
   save();render();
 }

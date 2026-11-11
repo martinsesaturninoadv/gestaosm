@@ -21,7 +21,7 @@ function botoesEnvio(cl,txt,assunto,act,id){
 /* lista do dia: guias vencendo e partos próximos */
 function lembretesPendentes(){
   const out=[];
-  db.sm.forEach(c=>{if(['Concluído','Indeferido'].includes(c.status))return;
+  db.sm.forEach(c=>{if(smEncerrado(c))return;
     (c.guias||[]).forEach(g=>{if(g.pagaEm||g.quemPaga==='Escritório')return;const d=diff(g.venc);if(d>7||d<-30)return;out.push({tipo:'guia',c,g,d,feito:g.lembradoEm&&g.lembradoEm>=addDays(-3)});});
     if(!c.dataParto&&c.dpp&&diff(c.dpp)<=15&&diff(c.dpp)>=-30)out.push({tipo:'parto',c,d:diff(c.dpp),feito:c.lembradoPartoEm&&c.lembradoPartoEm>=addDays(-7)});});
   return out.sort((a,b)=>a.feito-b.feito||a.d-b.d);
@@ -99,7 +99,7 @@ const linkNps=c=>c?.portalToken?linkPortal(c)+'&nps=1':'';
 function garantirToken(c){if(!c.portalToken){c.portalToken=Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');save();}return c.portalToken;}
 function npsPendentes(){
   const out=[];const visto=new Set();
-  db.sm.filter(c=>['Deferido','Concluído'].includes(c.status)).forEach(c=>out.push(c.clienteId));
+  db.sm.filter(c=>c.status==='Deferido — a receber'||c.desfecho==='Concluído').forEach(c=>out.push(c.clienteId));
   db.processos.filter(p=>p.status!=='Em andamento'||p.fase==='Encerrado').forEach(p=>out.push(p.clienteId));
   return out.filter(id=>{if(!id||visto.has(id))return false;visto.add(id);const c=cli(id);return c&&!c.npsEnviadoEm&&!db.nps.some(n=>n.clienteId===id);}).map(cli);
 }

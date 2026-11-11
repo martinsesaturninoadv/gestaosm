@@ -516,6 +516,11 @@ function mcp_ferramentas(): array
         'plataforma' => $s('Plataforma de origem (ex.: Meta, Instagram, Facebook, Google).'), 'codigo_anuncio' => $s('Código do anúncio, se já souber (ex.: BPC-01).'),
         'campanha' => $s('Nome da campanha (opcional; vem do cadastro do anúncio).'), 'conjunto' => $s('Conjunto de anúncios (opcional).'), 'anuncio' => $s('Nome do anúncio (opcional).'),
         'area_interesse' => $s('Área do direito de interesse.'), 'resumo_triagem' => $s('Resumo da triagem do caso.'), 'responsavel' => $s('Advogada responsável (nome ou e-mail).')];
+    $smProps = ['categoria' => $s('Categoria da segurada.', ['enum' => SV_SM_CATEG]), 'estrategia' => $s('Estratégia.', ['enum' => SV_SM_ESTRAT]), 'dpp' => $data('Data provável do parto.'),
+        'data_parto' => $data('Data do parto/adoção (não pode ser no futuro).'), 'crianca' => $s('Nome da criança.'), 'carencia_meses' => ['type' => 'integer', 'description' => 'Carência exigida (nº de contribuições).'],
+        'qualidade_ate' => $data('Qualidade de segurada até.'), 'beneficio_estimado' => ['type' => 'number', 'description' => 'Valor total estimado do benefício (R$).'],
+        'honorarios_percentual' => ['type' => 'number', 'description' => 'Honorários em % do benefício (padrão 25).'], 'parcelas_honorarios' => ['type' => 'integer', 'description' => 'Honorários em quantas parcelas (padrão 2).'],
+        'responsavel' => $s('Responsável (nome ou e-mail).'), 'obs' => $s('Observações.')];
     $ro = ['readOnlyHint' => true, 'destructiveHint' => false, 'openWorldHint' => false];
     $rw = ['readOnlyHint' => false, 'destructiveHint' => false, 'openWorldHint' => false];
     return [
@@ -559,6 +564,46 @@ function mcp_ferramentas(): array
         'relatorio_por_anuncio' => ['Relatório por anúncio', 'Leads e clientes fechados por anúncio e por campanha, com taxa de conversão e custo por cliente quando houver investimento cadastrado.',
             ['desde' => $data('Início do período (primeiro contato).'), 'ate' => $data('Fim do período.')], [], 'relatorios:ler', $ro,
             fn($pdo, $a, $q) => sv_relatorio_anuncios($pdo, $a)],
+        /* ---------- salário-maternidade ---------- */
+        'sm_buscar_caso' => ['SM: buscar caso', 'Procura casos de salário-maternidade por caso_id, cliente_id, nome, CPF, telefone ou etapa. Com um único resultado, devolve a ficha completa (guias, parcelas do INSS, exigência, histórico e alertas). Etapas: ' . implode(', ', NUC_SM_ETAPAS) . '.',
+            ['caso_id' => $s('ID do caso.'), 'cliente_id' => $s('ID da cliente.'), 'nome' => $s('Nome da segurada ou parte dele.'), 'cpf' => $s('CPF.'), 'telefone' => $s('Telefone com DDD.'),
+                'etapa' => $s('Etapa do quadro.', ['enum' => NUC_SM_ETAPAS])], [], 'clientes:ler', $ro, fn($pdo, $a, $q) => sv_sm_buscar($pdo, $a)],
+        'sm_criar_caso' => ['SM: criar caso', 'Abre o caso de salário-maternidade de uma cliente já cadastrada (etapa Documentos, com o checklist básico). Falha se ela já tiver caso em andamento. Leads de salário-maternidade convertidos já ganham o caso sozinhos.',
+            $smProps + ['cliente_id' => $s('ID da cliente.')], ['cliente_id'], 'clientes:gravar', $rw, fn($pdo, $a, $q) => sv_sm_criar($pdo, $a, $q)],
+        'sm_atualizar_caso' => ['SM: atualizar caso', 'Atualiza só os campos informados do caso (categoria, estratégia, DPP, data do parto, criança, honorários etc.). A data do parto não pode ser no futuro (use a DPP).',
+            $smProps + ['caso_id' => $s('ID do caso.')], ['caso_id'], 'clientes:gravar', $rw, fn($pdo, $a, $q) => sv_sm_atualizar($pdo, (string) ($a['caso_id'] ?? ''), $a, $q)],
+        'sm_mover_etapa' => ['SM: mover etapa', 'Move o caso no quadro e registra no histórico. Encerrado exige o desfecho; No INSS aceita nb e der. Para deferido use sm_registrar_deferimento.',
+            ['caso_id' => $s('ID do caso.'), 'etapa' => $s('Nova etapa.', ['enum' => NUC_SM_ETAPAS]), 'desfecho' => $s('Desfecho (para Encerrado).', ['enum' => SV_SM_DESFECHOS]),
+                'nb' => $s('Nº do protocolo/NB (para No INSS).'), 'der' => $data('DER (para No INSS).')], ['caso_id', 'etapa'], 'clientes:gravar', $rw,
+            fn($pdo, $a, $q) => sv_sm_mover($pdo, (string) ($a['caso_id'] ?? ''), $a, $q)],
+        'sm_registrar_guia' => ['SM: registrar guia', 'Cadastra (ou atualiza, se a competência já existir) uma guia de recolhimento. Vencimento calculado: dia 15 do mês seguinte (DAS-MEI: dia 20), passando para o próximo dia útil. Sem valor, calcula pelo % do código sobre o salário mínimo da competência (2026: R$ 1.621).',
+            ['caso_id' => $s('ID do caso.'), 'competencia' => $s('Competência AAAA-MM.'), 'codigo' => $s('Código de pagamento (padrão pela categoria).', ['enum' => array_keys(SV_GPS)]),
+                'codigo_descricao' => $s('Descrição, obrigatória para o código Outro.'), 'valor' => ['type' => 'number', 'description' => 'Valor em reais (opcional).'],
+                'quem_paga' => $s('Quem paga a guia.', ['enum' => ['Cliente', 'Escritório (reembolsável)']]), 'link' => $s('Link da guia (opcional).')], ['caso_id', 'competencia'], 'clientes:gravar', $rw,
+            fn($pdo, $a, $q) => sv_sm_guia($pdo, (string) ($a['caso_id'] ?? ''), $a, $q)],
+        'sm_marcar_guia_paga' => ['SM: marcar guia paga', 'Marca a guia como paga (por guia_id ou competência). Avisa se foi paga em atraso. Guia paga pelo escritório vira reembolso a receber da cliente.',
+            ['caso_id' => $s('ID do caso.'), 'guia_id' => $s('ID da guia.'), 'competencia' => $s('Competência AAAA-MM (se não souber o guia_id).'), 'paga_em' => $data('Data do pagamento (padrão: hoje).'),
+                'quem_paga' => $s('Quem pagou.', ['enum' => ['Cliente', 'Escritório (reembolsável)']])], ['caso_id'], 'clientes:gravar', $rw,
+            fn($pdo, $a, $q) => sv_sm_guia_paga($pdo, (string) ($a['caso_id'] ?? ''), $a, $q)],
+        'sm_registrar_requerimento' => ['SM: registrar requerimento', 'Registra o protocolo no INSS (NB e DER) e move o caso para No INSS.',
+            ['caso_id' => $s('ID do caso.'), 'nb' => $s('Nº do protocolo/NB.'), 'der' => $data('DER — data do requerimento.')], ['caso_id', 'nb', 'der'], 'clientes:gravar', $rw,
+            fn($pdo, $a, $q) => sv_sm_requerimento($pdo, (string) ($a['caso_id'] ?? ''), $a, $q)],
+        'sm_registrar_exigencia' => ['SM: registrar exigência', 'Registra uma exigência do INSS (o caso fica em No INSS com a etiqueta de exigência) ou, com cumprida=true, marca a exigência aberta como cumprida.',
+            ['caso_id' => $s('ID do caso.'), 'descricao' => $s('O que o INSS pediu.'), 'prazo' => $data('Prazo para cumprir (padrão: 30 dias).'), 'cumprida' => ['type' => 'boolean', 'description' => 'true para marcar a exigência como cumprida.'],
+                'data' => $data('Data do cumprimento (padrão: hoje).')], ['caso_id'], 'clientes:gravar', $rw,
+            fn($pdo, $a, $q) => sv_sm_exigencia($pdo, (string) ($a['caso_id'] ?? ''), $a, $q)],
+        'sm_registrar_deferimento' => ['SM: registrar deferimento', 'Registra o benefício deferido e move para "Deferido — a receber". Os honorários (% do benefício, em parcelas) entram no financeiro como "aguardando benefício".',
+            ['caso_id' => $s('ID do caso.'), 'nb' => $s('NB.'), 'der' => $data('DER.'), 'data_deferimento' => $data('Data do deferimento (padrão: hoje).'),
+                'valor_concedido' => ['type' => 'number', 'description' => 'Valor total do benefício (R$).'], 'parcelas_inss' => ['type' => 'integer', 'description' => 'Em quantas parcelas o INSS vai pagar.'],
+                'previsao_pagamento' => $data('Previsão da 1ª parcela.'), 'dib' => $data('DIB — início do benefício.')], ['caso_id', 'valor_concedido'], 'clientes:gravar', $rw,
+            fn($pdo, $a, $q) => sv_sm_deferimento($pdo, (string) ($a['caso_id'] ?? ''), $a, $q)],
+        'sm_registrar_parcela_recebida' => ['SM: parcela do INSS recebida', 'Registra que a cliente recebeu uma parcela do INSS. Os honorários dessa parcela (e, na 1ª, o reembolso de guias) passam a vencer 5 dias úteis depois.',
+            ['caso_id' => $s('ID do caso.'), 'parcela' => ['type' => 'integer', 'description' => 'Número da parcela (1, 2…).'], 'recebida_em' => $data('Data em que a cliente recebeu (padrão: hoje).'),
+                'valor' => ['type' => 'number', 'description' => 'Valor recebido (opcional).']], ['caso_id', 'parcela'], 'clientes:gravar', $rw,
+            fn($pdo, $a, $q) => sv_sm_parcela($pdo, (string) ($a['caso_id'] ?? ''), $a, $q)],
+        'sm_a_receber' => ['SM: a receber', 'Lista o que o escritório tem a receber nos casos de salário-maternidade (honorários e reembolso de guias): o que já pode cobrar, o que aguarda o benefício e o previsto ainda não lançado. Valores financeiros: mostre só a quem pediu.',
+            ['situacao' => $s('Filtro opcional.', ['enum' => ['cobrar_agora', 'Aguardando benefício', 'Vencido', 'Previsto']])], [], 'relatorios:ler', $ro,
+            fn($pdo, $a, $q) => sv_sm_a_receber($pdo, $a)],
     ];
 }
 function mcp_lista(): array

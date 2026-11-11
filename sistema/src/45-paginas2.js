@@ -2,10 +2,7 @@
    PÁGINAS — versão 6
    ========================================================= */
 const FRASES=['Cada prazo cumprido é um cliente mais tranquilo.','Pequenas tarefas concluídas hoje viram grandes resultados no fim do mês.','Atendimento rápido fecha contrato: responda os novos contatos primeiro!','Organização é a melhor estratégia processual.','Meta batida é conquista de todo o time. Bora!','Cliente bem informado indica o escritório.','Foco no que vence hoje, olhar no que vence amanhã.'];
-const smCor=s=>/Deferido|Concluído/.test(s)?'p-green':/Indeferido/.test(s)?'p-red':/exigência/i.test(s)?'p-amber':/Protocolado|Pronto/.test(s)?'p-blue':/Recurso/.test(s)?'p-teal':'p-gray';
-const guiaCor=s=>s==='Paga'?'p-green':s==='Vencida'?'p-red':s==='Emitida'?'p-blue':'p-amber';
 const leadsSemRetorno=()=>db.leads.filter(l=>leadAberto(l)&&diff(l.ultimoContato||l.primeiroContato||l.criado)<=-3);
-function guiasPendentes(dias){const out=[];db.sm.forEach(c=>(c.guias||[]).forEach(g=>{const st=guiaStatus(g);if(st!=='Paga'&&diff(g.venc)<=dias)out.push({c,g,st});}));return out.sort((a,b)=>a.g.venc.localeCompare(b.g.venc));}
 function aniversariantes(dias){
   const h=new Date();const lista=[];
   db.clientes.concat(db.usuarios.map(u=>({...u,_equipe:1}))).forEach(p=>{if(!p.nascimento)return;const[,m,d]=p.nascimento.split('-').map(Number);
@@ -52,7 +49,7 @@ V.painel=()=>{
   const pend=[];
   atrasE.forEach(e=>pend.push(['r','⏰',`Prazo vencido: ${e.titulo}`,nomeCli(e.clienteId),`editEv`,e.id]));
   tAtras.forEach(t=>pend.push(['r','☑',`Tarefa atrasada: ${t.titulo}`,nomesResp(t),'editTar',t.id]));
-  db.sm.filter(c=>c.status==='Aguardando o parto').forEach(c=>{const nome=nomeCli(c.clienteId);
+  db.sm.filter(c=>c.status==='Aguardando parto').forEach(c=>{const nome=nomeCli(c.clienteId);
     if(c.dpp&&diff(c.dpp)<0)pend.push(['r','👶',`Data provável do parto já passou (${fd(c.dpp)}): confirmar nascimento e protocolar`,nome,'go','sm/'+c.id]);
     else if(c.dpp&&diff(c.dpp)<=10)pend.push(['a','👶',`Parto previsto para ${fd(c.dpp)}: preparar o protocolo do benefício`,nome,'go','sm/'+c.id]);});
   db.processos.filter(p=>p.status==='Em andamento'&&p.fase==='Em exigência').forEach(p=>pend.push(['a','⚑',`Exigência em aberto: ${p.numero}`,nomeCli(p.clienteId),'go','processo/'+p.id]));
@@ -203,59 +200,7 @@ V.processo=()=>{
   </div>`;
 };
 
-/* ---------------- SALÁRIO-MATERNIDADE ---------------- */
-V.sm=()=>{
-  if(ui.id)return smCaso(ui.id);
-  const t=ui.tabSm;const ativos=db.sm.filter(c=>!['Concluído','Indeferido'].includes(c.status));
-  const gp=guiasPendentes(30);const venc=gp.filter(x=>x.st==='Vencida');
-  const partos=db.sm.filter(c=>!c.dataParto&&c.dpp&&diff(c.dpp)>=-7&&diff(c.dpp)<=60);
-  const ano=today().slice(0,4);
-  let corpo='';
-  if(t==='casos')corpo=kanban(SM_STATUS.map(s=>[s,s]),db.sm.map(c=>({...c,_col:c.status})),'sm',c=>{const pg=(c.guias||[]).filter(g=>g.pagaEm).length,car=+c.carenciaMeses||0;
-    return `<div class="t" data-go="sm/${c.id}" style="cursor:pointer">${esc(nomeCli(c.clienteId))}</div><div class="small muted">${esc(c.categoria)}</div>
-    <div class="meta">${c.dataParto?'👶 '+fd(c.dataParto):c.dpp?'DPP '+fd(c.dpp):''}</div>${car?`<div class="prog" title="Contribuições pagas para a carência"><i style="width:${Math.min(100,pg/car*100)}%;background:${pg>=car?'var(--green)':'var(--amber)'}"></i></div><div class="small muted">carência ${pg}/${car}</div>`:''}`;});
-  if(t==='guias'){const f=ui.f.guias||(ui.f.guias={st:'pendentes'});
-    const todas=[];db.sm.forEach(c=>(c.guias||[]).forEach(g=>todas.push({c,g,st:guiaStatus(g)})));
-    const lista=todas.filter(x=>f.st==='todas'||(f.st==='pendentes'?x.st!=='Paga':x.st===f.st)).sort((a,b)=>a.g.venc.localeCompare(b.g.venc));
-    corpo=`<div class="toolbar"><select data-f="guias.st">${[['pendentes','Não pagas'],['A emitir','A emitir'],['Emitida','Emitidas (aguardando pagamento)'],['Vencida','Vencidas'],['Paga','Pagas'],['todas','Todas']].map(([v,l])=>`<option value="${v}"${f.st===v?' selected':''}>${l}</option>`).join('')}</select></div>
-    <div class="card tbl"><table><thead><tr><th>Segurada</th><th>Competência</th><th>Código</th><th class="num">Valor</th><th>Vencimento</th><th>Status</th><th></th></tr></thead><tbody>
-    ${lista.map(({c,g,st})=>`<tr><td data-go="sm/${c.id}" style="cursor:pointer" class="strong">${esc(nomeCli(c.clienteId))}</td><td>${mLabel(g.competencia)}</td><td>${esc(g.codigo)}</td><td class="num">${brl(g.valor)}</td><td>${fd(g.venc)}<div class="small">${st!=='Paga'?prazoTxt(g.venc):''}</div></td><td>${pill(st,guiaCor(st))}</td>
-      <td class="num">${guiaBotoes(c,g,st)}</td></tr>`).join('')||'<tr><td colspan="7" class="empty">Nenhuma guia</td></tr>'}</tbody></table></div>`;}
-  if(t==='lembretes')corpo=htmlLembretes();
-  if(t==='partos')corpo=`<div class="card">${db.sm.filter(c=>c.dpp||c.dataParto).sort((a,b)=>(a.dataParto||a.dpp).localeCompare(b.dataParto||b.dpp)).reverse().map(c=>`<div class="ev" data-go="sm/${c.id}"><div class="av" style="background:#FDE8EF;color:#C84B6E">👶</div><div class="body"><div class="t">${esc(nomeCli(c.clienteId))} ${c.crianca?'· '+esc(c.crianca):''}</div><div class="small muted">${c.dataParto?'Nasceu em '+fd(c.dataParto):'Previsto para '+fd(c.dpp)+' ('+prazoTxt(c.dpp)+')'}</div></div>${pill(c.status,smCor(c.status))}</div>`).join('')||'<div class="empty">Nenhum caso</div>'}</div>`;
-  return `<div class="grid g-kpi">${kpi('Casos em andamento',ativos.length)}${kpi('Guias a emitir/pagar (30 dias)',gp.length,venc.length?venc.length+' vencida(s)!':'nenhuma vencida',venc.length?'bad':'good')}${kpi('Partos previstos (60 dias)',partos.length)}${(()=>{const ag=db.sm.filter(c=>c.status==='Aguardando o parto');const pass=ag.filter(c=>c.dpp&&diff(c.dpp)<0).length;return kpi('👶 Aguardando o parto',ag.length,pass?pass+' com DPP já passada':'guias pagas, esperando o nascimento',pass?'bad':'');})()}
-    ${kpi('Em exigência',db.sm.filter(c=>c.status==='Em exigência').length,'',db.sm.some(c=>c.status==='Em exigência')?'bad':'')}${kpi('✅ Deferidos em '+ano,deferidosSm(ano).length,deferidosSm(today().slice(0,7)).length+' neste mês','good')}${podeFin()?kpi('Benefícios em andamento',brlK(sumBy(ativos,c=>c.beneficioEstimado)),'valor estimado'):''}</div>
-  <div class="toolbar"><div class="tabs" style="margin:0;border:none">${[['casos','Quadro de casos'],['guias','Guias de recolhimento'],['partos','Partos e nascimentos'],['lembretes','📲 Lembretes'+(lembretesPendentes().filter(x=>!x.feito).length?' ('+lembretesPendentes().filter(x=>!x.feito).length+')':'')]].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabSm" data-id="${k}">${l}</button>`).join('')}</div>
-    <span class="grow"></span><a class="btn btn-ghost" href="#scripts" style="text-decoration:none">Scripts de salário-maternidade</a><button class="btn btn-gold" data-act="novoSm">+ Caso</button></div>
-  ${t==='casos'?'<div class="hint">Controle completo: categoria da segurada, estratégia, carência, guias (GPS/DAS), DPP, protocolo e exigências. Arraste os cards para mudar a etapa.</div>':''}${corpo}`;
-};
-function guiaBotoes(c,g,st){
-  return `${st==='A emitir'||st==='Vencida'&&!g.emitidaEm?`<button class="btn btn-ghost btn-sm" data-act="guiaEmitida" data-id="${c.id}|${g.id}">Emitida</button>`:''}${st!=='Paga'?`<button class="btn btn-ghost btn-sm" data-act="guiaPaga" data-id="${c.id}|${g.id}">Paga</button>`:''}${g.link?`<a class="btn btn-ghost btn-sm" href="${esc(g.link)}" target="_blank" rel="noopener" style="text-decoration:none">Abrir</a>`:''}<button class="btn btn-sm lnk" data-act="editGuia" data-id="${c.id}|${g.id}">editar</button>`;
-}
-function smCaso(id){
-  const c=db.sm.find(x=>x.id===id);if(!c)return '<div class="empty">Caso não encontrado. <a href="#sm">Voltar</a></div>';
-  const cl=cli(c.clienteId)||{};const pagas=c.guias.filter(g=>g.pagaEm).length,car=+c.carenciaMeses||0;
-  const docs=db.documentos.filter(d=>d.clienteId===c.clienteId);const proc0=db.processos.find(p=>p.clienteId===c.clienteId&&/maternidade/i.test(p.objeto));
-  const qual=c.qualidadeAte?diff(c.qualidadeAte):null;
-  const scrG=db.scripts.find(s=>/guia/i.test(s.titulo));
-  return `<div class="toolbar"><a class="btn btn-ghost" href="#sm" style="text-decoration:none">← Salário-maternidade</a><span class="grow"></span>
-    ${cl.tel?`<a class="btn btn-ghost" style="color:#1F9D55;border-color:#1F9D55;text-decoration:none" target="_blank" rel="noopener" href="${waLink(cl.tel,scrG?personalizar(scrG.texto,cl):'')}">WhatsApp (guia)</a>`:''}
-    <button class="btn btn-ghost" data-act="smContrato" data-id="${c.id}">Gerar contrato</button><button class="btn btn-ghost" data-act="editSm" data-id="${c.id}">Editar caso</button></div>
-  <div class="card" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><div class="small muted">Salário-maternidade · ${esc(c.categoria)}</div><div style="font-size:18px;font-weight:800"><a href="#cliente/${c.clienteId}">${esc(cl.nome||'—')}</a></div><div class="small">${esc(c.estrategia||'')}</div></div><div>${pill(c.status,smCor(c.status))}</div></div>
-    <div class="fases">${SM_STATUS.map((s,i)=>`<div class="fase ${s===c.status?'atual':i<SM_STATUS.indexOf(c.status)?'feita':''}" data-act="setSmStatus" data-id="${c.id}|${esc(s)}"><i></i><span>${esc(s)}</span></div>`).join('')}</div></div>
-  <div class="grid g-kpi">${c.status==='Deferido'||c.dataDeferimento?kpi('✅ Deferido',fd(c.dataDeferimento),[c.valorConcedido?brl(c.valorConcedido):'',c.previsaoPagamento?'pagamento '+fd(c.previsaoPagamento):'',c.pagoClienteEm?'pago à cliente em '+fd(c.pagoClienteEm):''].filter(Boolean).join(' · ')||'complete os dados em Editar','good'):''}${kpi('Parto / DPP',c.dataParto?fd(c.dataParto):fd(c.dpp),c.dataParto?'nascimento'+(c.crianca?' — '+esc(c.crianca):''):c.dpp?prazoTxt(c.dpp):'')}
-    ${kpi('Carência',car?pagas+' / '+car:'—',car?(pagas>=car?'cumprida ✓':'faltam '+(car-pagas)+' contribuição(ões)'):'sem carência informada',car&&pagas>=car?'good':car?'bad':'')}
-    ${kpi('Qualidade de segurada',c.qualidadeAte?fd(c.qualidadeAte):'—',qual==null?'':qual<0?'expirada':'mantida por mais '+qual+' dias',qual!=null&&qual<30?'bad':'good')}
-    ${kpi('Requerimento',c.nb||'—',c.der?'DER '+fd(c.der):'ainda não protocolado')}${podeFin()?kpi('Benefício estimado',brl(c.beneficioEstimado)):''}</div>
-  <div class="grid g-2">
-    <div class="card"><h3>Guias de recolhimento <span class="flx"><button class="btn btn-ghost btn-sm" data-act="gerarGuias" data-id="${c.id}">Gerar em lote</button><button class="btn btn-gold btn-sm" data-act="novaGuia" data-id="${c.id}">+ Guia</button></span></h3>
-      ${c.guias.length?`<div class="tbl"><table><thead><tr><th>Competência</th><th>Código</th><th class="num">Valor</th><th>Vencimento</th><th>Status</th><th></th></tr></thead><tbody>${c.guias.map(g=>{const st=guiaStatus(g);return `<tr><td class="strong">${mLabel(g.competencia)}</td><td>${esc(g.codigo)}</td><td class="num">${brl(g.valor)}</td><td>${fd(g.venc)}</td><td>${pill(st,guiaCor(st))}</td><td class="num">${guiaBotoes(c,g,st)}</td></tr>`;}).join('')}</tbody></table></div>
-      <div class="small muted" style="margin-top:8px">Total: ${brl(sumBy(c.guias,g=>g.valor))} · pagas ${pagas} · em aberto ${c.guias.length-pagas}</div>`:'<div class="empty">Nenhuma guia. Use "Gerar em lote" para criar as competências da carência.</div>'}</div>
-    <div class="card"><h3>Documentos <span class="flx"><button class="btn btn-ghost btn-sm" data-act="docsPadraoSm" data-id="${c.clienteId}">+ Padrão SM</button><button class="btn btn-gold btn-sm" data-act="novoDocCli" data-id="${c.clienteId}">+ Documento</button></span></h3>${docList(docs)}
-      ${proc0?`<h3 style="margin-top:16px">Processo / requerimento</h3><div class="ev" data-go="processo/${proc0.id}"><div class="body"><div class="t">${esc(proc0.numero)}</div><div class="small muted">${esc(proc0.fase)}</div></div>${pStatusProc(proc0.status)}</div>`:`<button class="btn btn-ghost btn-sm" style="margin-top:12px" data-act="novoProcSm" data-id="${c.id}">+ Registrar requerimento no INSS</button>`}
-      ${c.obs?`<div class="hint" style="margin:14px 0 0">${esc(c.obs)}</div>`:''}</div>
-  </div>`;
-}
+/* salário-maternidade: telas em 46-salario-maternidade.js */
 
 /* ---------------- DOCUMENTOS E MODELOS ---------------- */
 const CAMPOS_MODELO=['cliente','qualificacao','tipodoc','doc','cidade','email','tel','escritorio','escritorio_qualificacao','advogados','cidade_esc','objeto','area','processo','parte_contraria','valor','valor_extenso','entrada','parcelas','valor_parcela','dia_venc','forma','exito','condicoes','validade','titular','crianca','dpp','data'];

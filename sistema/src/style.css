@@ -526,3 +526,13 @@ table.ind td.editado{font-style:italic;color:var(--brand2)}
 .intapi .dgroup{margin:16px 0 6px}
 .wsp-ev{border-bottom:1px solid var(--line,#eee);padding:6px 0}.wsp-ev pre{max-height:320px;overflow:auto;background:var(--bg2,#f6f3ec);padding:8px;border-radius:6px;white-space:pre-wrap;word-break:break-word}
 .lead-hist .ev{padding:4px 0}
+/* salário-maternidade */
+.kpi-clic{cursor:pointer;transition:box-shadow .15s,transform .15s}.kpi-clic:hover{box-shadow:0 4px 14px rgba(0,0,0,.08);transform:translateY(-1px)}
+.kpi-clic.ativo{outline:2px solid var(--gold,#C8A84B)}
+.grid.kpi-6{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+.sigla-sm{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.3px;background:#FDE8EF;color:#A23A5C;border-radius:5px;padding:1px 5px;vertical-align:middle}
+.prox-acao{font-size:12px;font-weight:600;margin-top:4px;color:var(--text2,#444)}
+.prox-acao.sev-r{color:var(--red)}.prox-acao.sev-a{color:var(--amber)}
+.av-mini{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--bg2,#efe9dc);font-size:9px;font-weight:800;margin-left:auto}
+.alertas-sm{border-left:4px solid var(--amber)}
+.card .tbl{overflow-x:auto}

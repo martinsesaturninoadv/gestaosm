@@ -46,15 +46,12 @@ const camposPrazo=()=>[{t:'sec',l:'🧮 Calcular prazo (opcional) — preenche a
 
 /* ---------- FLUXOS AUTOMÁTICOS ---------- */
 const FLUXOS_PADRAO=`# tipo | etapa | tarefa ({cliente} e {numero} são trocados) | dias | uteis ou corridos
-sm | Coleta de documentos | Solicitar os documentos à cliente — {cliente} | 1 | corridos
-sm | Coleta de documentos | Conferir CNIS e qualidade de segurada — {cliente} | 3 | uteis
-sm | Guias em andamento | Emitir e enviar a próxima guia — {cliente} | 2 | uteis
-sm | Aguardando o parto | Confirmar com a cliente se o bebê já nasceu — {cliente} | 7 | corridos
-sm | Pronto para protocolo | Protocolar o requerimento no Meu INSS — {cliente} | 2 | uteis
-sm | Protocolado — em análise | Acompanhar a análise do INSS — {cliente} | 30 | corridos
-sm | Em exigência | Cumprir a exigência do INSS — {cliente} | 5 | uteis
-sm | Deferido | Avisar a cliente do deferimento e cobrar os honorários — {cliente} | 1 | corridos
-sm | Indeferido | Analisar o indeferimento e decidir recurso ou ação — {cliente} | 5 | uteis
+sm | Documentos | Solicitar os documentos à cliente — {cliente} | 1 | corridos
+sm | Documentos | Conferir CNIS e qualidade de segurada — {cliente} | 3 | uteis
+sm | Guia a pagar | Emitir e enviar a próxima guia — {cliente} | 2 | uteis
+sm | Aguardando parto | Confirmar com a cliente se o bebê já nasceu — {cliente} | 7 | corridos
+sm | No INSS | Protocolar o requerimento no Meu INSS e acompanhar a análise — {cliente} | 2 | uteis
+sm | Deferido — a receber | Avisar a cliente do deferimento e combinar a cobrança dos honorários — {cliente} | 1 | corridos
 judicial | Citação | Acompanhar a citação — {numero} | 15 | corridos
 judicial | Contestação / réplica | Preparar a réplica — {numero} | 15 | uteis
 judicial | Sentença | Analisar a sentença e avaliar recurso — {numero} | 5 | uteis

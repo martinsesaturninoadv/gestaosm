@@ -90,7 +90,7 @@ function conquistaRemota(col,ant,novo){
   if(col==='tarefas'&&novo.status==='done'&&ant.status!=='done'&&novo.concluidoPor!==me)return {ic:'✅',quem:nomeU(novo.concluidoPor),titulo:nomeU(novo.concluidoPor)+' concluiu uma tarefa',sub:novo.titulo};
   if(col==='eventos'&&novo.feito&&!ant.feito&&novo.feitoPor!==me)return {ic:'⚡',quem:nomeU(novo.feitoPor),titulo:nomeU(novo.feitoPor)+' cumpriu um prazo',sub:novo.titulo};
   if(col==='contratos'&&!ant&&novo.responsavelId!==me)return {ic:'🤝',grande:1,quem:nomeU(novo.responsavelId),titulo:'🎉 '+(nomeU(novo.responsavelId)||'A equipe')+' fechou um contrato!',sub:nomeCli(novo.clienteId)};
-  if(col==='sm'&&novo.status==='Deferido'&&ant.status!=='Deferido')return {ic:'✅',grande:1,quem:nomeU(novo.responsavelId),titulo:'Benefício deferido! 🎉',sub:nomeCli(novo.clienteId)};
+  if(col==='sm'&&/^Deferido/.test(novo.status||'')&&!/^Deferido/.test(ant.status||''))return {ic:'✅',grande:1,quem:nomeU(novo.responsavelId),titulo:'Benefício deferido! 🎉',sub:nomeCli(novo.clienteId)};
   if(col==='processos'&&novo.status!==ant.status&&['Ganho','Acordo','Deferido'].includes(novo.status))return {ic:novo.status==='Ganho'?'🏆':novo.status==='Acordo'?'🤝':'✅',grande:1,quem:nomeU(novo.responsavelId),titulo:(novo.status==='Ganho'?'Processo ganho!':novo.status==='Acordo'?'Acordo fechado!':'Requerimento deferido!')+' 🎉',sub:nomeCli(novo.clienteId)};
   if(col==='peticoes'&&novo.status==='Protocolada'&&ant.status!=='Protocolada')return {ic:'📨',quem:nomeU(novo.autorId),titulo:'Petição protocolada',sub:novo.titulo};
   if(col==='conteudos'&&novo.etapa==='Publicado'&&ant.etapa!=='Publicado')return {ic:'🚀',grande:1,quem:'',titulo:'Conteúdo publicado!',sub:novo.titulo};

@@ -400,8 +400,10 @@ def main():
         st, j = mcp('tools/list')
         nomes = [t['name'] for t in j['result']['tools']]
         esperadas = ['buscar_cliente', 'cadastrar_cliente', 'atualizar_cliente', 'anexar_documento_cliente', 'buscar_leads', 'registrar_lead', 'mudar_etapa_lead',
-                     'registrar_interacao', 'converter_lead_em_cliente', 'listar_etapas_funil', 'listar_anuncios', 'cadastrar_anuncio', 'relatorio_por_anuncio']
-        ok(sorted(nomes) == sorted(esperadas), 'tools/list traz as 13 ferramentas')
+                     'registrar_interacao', 'converter_lead_em_cliente', 'listar_etapas_funil', 'listar_anuncios', 'cadastrar_anuncio', 'relatorio_por_anuncio',
+                     'sm_buscar_caso', 'sm_criar_caso', 'sm_atualizar_caso', 'sm_mover_etapa', 'sm_registrar_guia', 'sm_marcar_guia_paga', 'sm_registrar_requerimento',
+                     'sm_registrar_exigencia', 'sm_registrar_deferimento', 'sm_registrar_parcela_recebida', 'sm_a_receber']
+        ok(sorted(nomes) == sorted(esperadas), 'tools/list traz as 24 ferramentas')
         ok(all(t['description'] and t['inputSchema']['type'] == 'object' for t in j['result']['tools']), 'todas com descrição e schema de entrada')
         r = ferramenta('listar_etapas_funil', {})
         ok(not r['isError'] and r['structuredContent']['etapas'][0]['nome'] == 'Novo lead', 'listar_etapas_funil')
@@ -433,6 +435,53 @@ def main():
         ok(len(r['structuredContent']['itens']) == 3, 'listar_anuncios')
         r = ferramenta('relatorio_por_anuncio', {'desde': '2026-11-01'})
         ok(r['structuredContent']['totais']['leads'] >= 5, 'relatorio_por_anuncio')
+
+        print('\n== Salário-maternidade pelo conector ==')
+        r = ferramenta('registrar_lead', {'telefone': '11 97777-1234', 'nome': 'Gestante do Claude', 'area_interesse': 'Salário-maternidade', 'resumo_triagem': 'MEI, DPP em janeiro'})
+        slid = r['structuredContent']['lead']['id']
+        r = ferramenta('converter_lead_em_cliente', {'lead_id': slid, 'cpf': '12345678143'})
+        ok(not r['isError'] and r['structuredContent'].get('caso_sm_id'), 'lead de SM convertido já cria o caso de salário-maternidade')
+        cso = r['structuredContent']['caso_sm_id']
+        r = ferramenta('sm_buscar_caso', {'nome': 'gestante do claude'})
+        c = r['structuredContent']['itens'][0]
+        ok(r['structuredContent']['total'] == 1 and c['etapa'] == 'Documentos' and c['categoria'] == 'A definir (triagem)' and 'MEI' in c['obs'], 'sm_buscar_caso: ficha completa, etapa Documentos, triagem nas observações')
+        r = ferramenta('sm_criar_caso', {'cliente_id': c['cliente_id']})
+        ok(r['isError'] and 'andamento' in r['content'][0]['text'], 'sm_criar_caso: recusa caso duplicado em andamento')
+        r = ferramenta('sm_atualizar_caso', {'caso_id': cso, 'data_parto': '2099-01-01'})
+        ok(r['isError'] and 'DPP' in r['content'][0]['text'], 'data do parto no futuro é recusada')
+        r = ferramenta('sm_atualizar_caso', {'caso_id': cso, 'categoria': 'facultativa', 'estrategia': 'via guias', 'dpp': '2027-01-20'})
+        ok(r['structuredContent']['caso']['categoria'] == 'Facultativa' and r['structuredContent']['caso']['estrategia'] == 'Via guias (recolhimento)', 'sm_atualizar_caso (categoria e estratégia por aproximação)')
+        r = ferramenta('sm_registrar_guia', {'caso_id': cso, 'competencia': '2026-02', 'codigo': '1473'})
+        g = r['structuredContent']['guia']
+        ok(g['valor'] == 178.31 and g['vencimento'] == '2026-03-16' and r['structuredContent']['caso']['etapa'] == 'Guia a pagar', 'sm_registrar_guia: 11% de R$ 1.621, vence no dia útil seguinte ao 15 (16/03/2026), etapa vira Guia a pagar')
+        r = ferramenta('sm_registrar_guia', {'caso_id': cso, 'competencia': '2026-04'})
+        ok(r['structuredContent']['guia']['codigo'] == '1406' and r['structuredContent']['guia']['valor'] == 324.2 and r['structuredContent']['guia']['vencimento'] == '2026-05-15', 'código padrão pela categoria (facultativa: 1406, 20%)')
+        r = ferramenta('sm_registrar_guia', {'caso_id': cso, 'competencia': '2026-05', 'codigo': 'Outro'})
+        ok(r['isError'], 'código Outro exige descrição')
+        r = ferramenta('sm_marcar_guia_paga', {'caso_id': cso, 'competencia': '2026-02', 'paga_em': '2026-03-20', 'quem_paga': 'Escritório'})
+        ok(not r['isError'] and any('atraso' in a for a in r['structuredContent']['avisos']) and any('reembolso' in a for a in r['structuredContent']['avisos']), 'sm_marcar_guia_paga: avisa atraso e reembolso')
+        r = ferramenta('sm_mover_etapa', {'caso_id': cso, 'etapa': 'Encerrado'})
+        ok(r['isError'] and 'desfecho' in r['content'][0]['text'], 'encerrar exige desfecho')
+        r = ferramenta('sm_registrar_requerimento', {'caso_id': cso, 'nb': '123.456.789-0', 'der': '2026-11-05'})
+        ok(r['structuredContent']['caso']['etapa'] == 'No INSS', 'sm_registrar_requerimento move para No INSS')
+        r = ferramenta('sm_registrar_exigencia', {'caso_id': cso, 'descricao': 'Certidão de nascimento legível', 'prazo': '2026-12-05'})
+        ok(r['structuredContent']['caso']['exigencia_aberta'] and r['structuredContent']['caso']['etapa'] == 'No INSS', 'sm_registrar_exigencia (fica em No INSS, com a exigência)')
+        r = ferramenta('sm_registrar_exigencia', {'caso_id': cso, 'cumprida': True})
+        ok(not r['structuredContent']['caso']['exigencia_aberta'], 'exigência cumprida')
+        r = ferramenta('sm_registrar_deferimento', {'caso_id': cso, 'valor_concedido': 6484, 'parcelas_inss': 2, 'previsao_pagamento': '2026-12-01'})
+        sc = r['structuredContent']
+        ok(sc['caso']['etapa'] == 'Deferido — a receber' and sc['honorarios_previstos']['valor_parcela'] == 810.5 and len(sc['caso']['parcelas_inss']) == 2, 'sm_registrar_deferimento: 25% em 2 parcelas de R$ 810,50')
+        r = ferramenta('sm_registrar_parcela_recebida', {'caso_id': cso, 'parcela': 1, 'recebida_em': '2026-11-10'})
+        ok(r['structuredContent']['cobrar_a_partir_de'] == '2026-11-17', 'parcela recebida em 10/11 → honorários vencem em 17/11 (5 dias úteis)')
+        r = ferramenta('sm_registrar_parcela_recebida', {'caso_id': cso, 'parcela': 3})
+        ok(r['isError'], 'parcela inexistente é recusada')
+        r = ferramenta('sm_a_receber', {})
+        ok(not r['isError'] and r['structuredContent']['totais']['previsto_sem_lancamento'] == 1621.0, 'sm_a_receber: previsto do caso deferido ainda sem lançamento')
+        r = ferramenta('sm_buscar_caso', {'etapa': 'Deferido — a receber'})
+        ok(r['structuredContent']['total'] == 1, 'sm_buscar_caso por etapa')
+        st, j = A.sistema('dados', None, '&desde=0')
+        docs = [x['dados']['nome'] for x in j['registros'] if x['colecao'] == 'documentos' and x['dados'].get('clienteId') == c['cliente_id']]
+        ok(len(docs) == 4, 'checklist básico criado com o caso')
         st, j = mcp('tools/call', {'name': 'apagar_tudo', 'arguments': {}})
         ok('error' in j, 'ferramenta inexistente: erro JSON-RPC')
         st, _, _, _ = A.req('GET', '/api/v1/mcp', cab=M)

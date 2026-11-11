@@ -18,7 +18,7 @@ const COLS_LIVRES_PARC=['usuarios'];
 const doParceiro=(x,email)=>!!x&&(norm(x.parceiro)===norm(email)||(Array.isArray(x.parceiros)&&x.parceiros.some(e=>norm(e)===norm(email))));
 const CONFIG_PARC=['escritorio','produtos','tiposEvento','salas'];
 
-function vazio(){return {versao:6,escritorio:{nome:'Martins & Saturnino Advocacia e Consultoria',cnpj:'',oab:'',email:'',tel:'',endereco:'',cidade:'',saldoInicial:0,saldoInicialData:'',logo:'',googleClientId:'',salarioMinimo:1518},
+function vazio(){return {versao:6,escritorio:{nome:'Martins & Saturnino Advocacia e Consultoria',cnpj:'',oab:'',email:'',tel:'',endereco:'',cidade:'',saldoInicial:0,saldoInicialData:'',logo:'',googleClientId:'',salarioMinimo:1621},
   metas:{...METAS_PADRAO},produtos:PRODUTOS_PADRAO.slice(),tiposEvento:TIPOS_EVT_PADRAO.map(([nome,cor])=>({nome,cor})),indAjustes:{},indExtras:[],salas:salasPadrao(),fluxos:{},funil:{etapas:[]},waspeed:{colunas:{},caminhos:{}},
   usuarioAtual:'',usuarios:[],clientes:[],processos:[],eventos:[],tarefas:[],leads:[],lancamentos:[],documentos:[],notas:[],contratos:[],despesasFixas:[],sm:[],scripts:[],modelos:[],trafego:[],requisitorios:[],nps:[],recados:[],peticoes:[],conteudos:[],anuncios:[]};}
 function migrar(d){
@@ -37,6 +37,12 @@ function migrar(d){
   d.processos.forEach(p=>{if(fm[p.fase])p.fase=fm[p.fase];if(!fasesDe(p.tipo).includes(p.fase))p.fase=fasesDe(p.tipo)[0];});
   d.eventos.forEach(e=>{if(e.tipo==='Reunião')e.tipo='Reunião com cliente';if(e.tipo==='Outro')e.tipo='Atendimento / consulta';
     if(e.tipo&&!d.tiposEvento.some(t=>norm(t.nome)===norm(e.tipo)))d.tiposEvento.push({nome:e.tipo,cor:'#6B6B6B'});});
+  if(d.fluxos&&typeof d.fluxos.texto==='string'&&/sm \| (Coleta de documentos|Guias em andamento|Aguardando o parto|Pronto para protocolo|Protocolado|Em exigência|Deferido \||Indeferido)/.test(d.fluxos.texto)){
+    const m={'Triagem / viabilidade':'Documentos','Coleta de documentos':'Documentos','Guias em andamento':'Guia a pagar','Aguardando o parto':'Aguardando parto','Pronto para protocolo':'No INSS','Protocolado — em análise':'No INSS','Em exigência':'No INSS','Deferido':'Deferido — a receber'};
+    d.fluxos.texto=d.fluxos.texto.split('\n').filter(l=>!/^\s*sm \| (Indeferido|Concluído|Recurso)/.test(l)).map(l=>{const p=l.split('|');if(p.length>2&&p[0].trim()==='sm'&&m[p[1].trim()])p[1]=' '+m[p[1].trim()]+' ';return p.join('|');}).join('\n');}
+  if(+d.escritorio.salarioMinimo===1518&&today()>='2026-01-01')d.escritorio.salarioMinimo=1621; // mínimo de 2026
+  // salário-maternidade: quadro de 6 colunas e financeiro do caso (reconciliado sozinho)
+  if(migrarSm(d)|(typeof db!=='undefined'&&d===db&&sessao?smReconciliar(d):false)){if(typeof db!=='undefined'&&d===db&&sessao)setTimeout(agendarEnvio,0);}
   d.versao=6;return d;
 }
 /* acrescenta ao conjunto de dados o que é novo na versão 6 (sem apagar nada) */
@@ -143,7 +149,7 @@ function api(acao,corpo,params){
     if(!r.ok||!j||!j.ok){if(r.status===401&&!['login','sessao'].includes(acao))mostrarLogin('Sua sessão expirou. Entre novamente.');throw {status:r.status,msg:j&&j.erro,dados:j};}
     return j;});
 }
-function save(){processarFluxos();propagarParceiro();agendarEnvio();}
+function save(){processarFluxos();propagarParceiro();smReconciliar(db);agendarEnvio();}
 /* registros ligados a um cliente de parceria herdam o parceiro (é o que permite ao parceiro vê-los) */
 function propagarParceiro(){
   if(!db)return;
@@ -255,7 +261,7 @@ const ehResp=(x,u)=>respDe(x).includes(u);
 const nomesResp=x=>respDe(x).map(nomeUsr).join(', ')||'—';
 const cidadeUF=c=>[c?.cidade,c?.uf].filter(Boolean).join('/');
 function idadeDe(c){if(!c)return null;if(c.nascimento){const n=new Date(c.nascimento+'T00:00'),h=new Date();let a=h.getFullYear()-n.getFullYear();if(h<new Date(h.getFullYear(),n.getMonth(),n.getDate()))a--;return a;}return c.idade?+c.idade:null;}
-function lancStatus(l){return l.pago?'Pago':diff(l.venc)<0?'Atrasado':'Em aberto';}
+function lancStatus(l){return l.pago?'Pago':l.aguardandoBeneficio?'Aguardando benefício':diff(l.venc)<0?'Atrasado':'Em aberto';}
 const dataCaixa=l=>l.pagoEm||l.venc;
 function areaLanc(l){const p=proc(l.processoId)||db.processos.find(p=>p.clienteId===l.clienteId);return p?p.area:'Sem processo';}
 function prodLanc(l){return l.produto||(l.contratoId&&ctr(l.contratoId)?.produto)||cli(l.clienteId)?.produto||'';}

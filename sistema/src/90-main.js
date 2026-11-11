@@ -67,9 +67,10 @@ const A={
     db.clientes.push({id:nid,tipo:'PF',nome:l.nome,doc:'',tel:l.tel,email:l.email||'',cidade:l.cidade||'',uf:l.uf||'',origem:l.origem,produto:l.produto||'',status:'Ativo',criado:today(),
       primeiroContato:l.primeiroContato||l.criado,ultimoContato:today(),idade:l.idade||null,nascimento:l.nascimento||'',sexo:l.sexo||'',profissao:l.profissao||'',renda:l.renda||0,obs:l.obs||'',leadId:l.id});
     l.convertido=true;l.clienteId=nid;if(!leadGanho(l)){registrarEtapaLead(l,l.etapa,etapaDoTipo('ganho')||l.etapa,'');l.etapa=etapaDoTipo('ganho')||l.etapa;}if(!l.dataFechamento)l.dataFechamento=today();db.notas.push({id:uid(),clienteId:nid,data:today(),autor:db.usuarioAtual,texto:'Cliente convertido a partir do atendimento.'+(l.proposta?' Proposta: '+l.proposta:'')});
-    save();location.hash='cliente/'+nid;
+    const smNovo=/maternidade/i.test(l.produto||'')?criarCasoSmDoLead(l,nid):null;
+    save();location.hash=smNovo?'sm/'+smNovo:'cliente/'+nid;
     if(podeFin())setTimeout(()=>editContrato(null,{clienteId:nid,produto:l.produto||'',proposta:l.proposta||'',valorTotal:+l.valor||0}),80);
-    toast('Cliente criado — registre o contrato de honorários');},
+    toast(/maternidade/i.test(l.produto||'')?'Cliente e caso de salário-maternidade criados — registre o contrato de honorários':'Cliente criado — registre o contrato de honorários');},
   novaRec:()=>editLanc(null,{tipo:'receita'}),novaDesp:()=>editLanc(null,{tipo:'despesa'}),editLanc:id=>editLanc(id),
   novaLucro:()=>editLanc(null,{tipo:'despesa',categoria:LUCROS,descricao:'Distribuição de lucros aos sócios',pago:true,pagoEm:today(),forma:'Transferência'}),
   novaRecCli:id=>editLanc(null,{tipo:'receita',clienteId:id}),
@@ -117,14 +118,6 @@ const A={
   restaurarModelos:()=>{let n=0;modelosPadrao().forEach(m=>{if(!db.modelos.some(x=>x.nome===m.nome)){db.modelos.push(m);n++;}});save();render();toast(n?n+' modelo(s) restaurado(s)':'Todos os modelos padrão já existem');},
   tabProc:k=>{ui.tabProc=k;render();},procView:k=>{ui.procView=k;render();},
   setFase:k=>{const i=k.indexOf('|');const p=proc(k.slice(0,i));aplicarFase(p,k.slice(i+1));save();render();toast('Fase atualizada ✓');},
-  tabSm:k=>{ui.tabSm=k;render();},novoSm:()=>editSm(),novoSmCli:id=>editSm(null,{clienteId:id}),editSm:id=>editSm(id),
-  setSmStatus:k=>{const i=k.indexOf('|');const c=db.sm.find(x=>x.id===k.slice(0,i));c.status=k.slice(i+1);if(c.status==='Deferido'&&!c.dataDeferimento){c.dataDeferimento=today();celebrarEvento('deferido','Benefício deferido!',nomeCli(c.clienteId));setTimeout(()=>editSm(c.id),1800);}save();render();toast('Etapa atualizada ✓');},
-  novaGuia:id=>editGuia(id),editGuia:k=>{const[s,g]=k.split('|');editGuia(s,g);},gerarGuias:id=>gerarGuias(id),
-  guiaEmitida:k=>{const[s,gid]=k.split('|');const g=db.sm.find(x=>x.id===s).guias.find(x=>x.id===gid);g.emitidaEm=today();save();render();toast('Guia marcada como emitida ✓');},
-  guiaPaga:k=>{const[s,gid]=k.split('|');const g=db.sm.find(x=>x.id===s).guias.find(x=>x.id===gid);g.pagaEm=today();if(!g.emitidaEm)g.emitidaEm=today();save();render();toast('Guia paga ✓');},
-  smContrato:id=>{const c=db.sm.find(x=>x.id===id);const m=db.modelos.find(x=>/salário-maternidade/i.test(x.nome));ui.tabDoc='gerador';ui.f.doc={...(ui.f.doc||{}),mcli:c.clienteId,mproc:'',mctr:'',modelo:m?.id};location.hash='documentos';render();},
-  novoProcSm:id=>{const c=db.sm.find(x=>x.id===id);editProcesso(null,{clienteId:c.clienteId,tipo:'Administrativo',area:'Previdenciário',objeto:'Salário-maternidade',parteContraria:'INSS',orgaoAdm:'INSS',fase:'Requerimento a protocolar'});},
-  docsPadraoSm:cid=>{let n=0;SM_DOCS.forEach(nome=>{if(!db.documentos.some(d=>d.clienteId===cid&&norm(d.nome)===norm(nome))){db.documentos.push({id:uid(),clienteId:cid,nome,recebido:false,data:''});n++;}});save();render();toast(n+' documento(s) adicionado(s) ao checklist');},
   vincularDrive:id=>{const c=cli(id);
     form('Pasta do cliente no Google Drive',[{k:'driveLink',l:'Link da pasta',t:'url',full:1,req:1,ph:'https://drive.google.com/drive/folders/…'}],{},v=>{
       const l=v.driveLink.trim(),fid=(l.match(/folders\/([\w-]+)/)||l.match(/[?&]id=([\w-]+)/)||[])[1];
@@ -174,7 +167,7 @@ const A={
   importar:()=>$('#file-import').click(),
   importarXls:()=>$('#file-xlsx').click(),importarWa:()=>importarWhatsApp(),
 };
-Object.assign(A,FUNIL_API_ACOES,FX_ACOES,ANX_ACOES,ACORDO_ACOES,PET_AUD_ACOES,VOZ_ACOES,CONT_ACOES,RTC_ACOES,ESC_ACOES,TRAF_ACOES,FLUXO_ACOES,LEMB_ACOES,INTEG_ACOES,SEG_ACOES,{portalAba:id=>{ui.tabCli='portal';location.hash='cliente/'+id;render();},smLembretes:()=>{ui.tabSm='lembretes';location.hash='sm';render();}});
+Object.assign(A,SM_ACOES,FUNIL_API_ACOES,FX_ACOES,ANX_ACOES,ACORDO_ACOES,PET_AUD_ACOES,VOZ_ACOES,CONT_ACOES,RTC_ACOES,ESC_ACOES,TRAF_ACOES,FLUXO_ACOES,LEMB_ACOES,INTEG_ACOES,SEG_ACOES,{portalAba:id=>{ui.tabCli='portal';location.hash='cliente/'+id;render();},smLembretes:()=>{ui.tabSm='lembretes';location.hash='sm';render();}});
 function lerTipos(){document.querySelectorAll('[data-tipo-nome]').forEach(el=>{const i=+el.dataset.tipoNome;if(db.tiposEvento[i])db.tiposEvento[i].nome=el.value.trim();});
   document.querySelectorAll('[data-tipo-cor]').forEach(el=>{const i=+el.dataset.tipoCor;if(db.tiposEvento[i])db.tiposEvento[i].cor=el.value;});}
 function lancarFixas(ym,ids){

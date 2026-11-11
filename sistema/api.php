@@ -299,7 +299,7 @@ function rotinaDiaria(PDO $pdo, array $cfg): void
             $fill = function (string $t, array $v): string { return trim(preg_replace('/\s{2,}/', ' ', preg_replace_callback('/\{(\w+)\}/', fn($m) => $v[$m[1]] ?? '', $t))); };
             foreach (nuc_listar($pdo, 'sm') as $caso) {
                 $c = $clientes[$caso['clienteId'] ?? ''] ?? null;
-                if (!$c || empty($c['email']) || in_array($caso['status'] ?? '', ['Concluído', 'Indeferido'], true)) continue;
+                if (!$c || empty($c['email']) || nuc_sm_etapa($caso) === 'Encerrado') continue;
                 $nome = explode(' ', trim((string) $c['nome']))[0];
                 $mudou = false;
                 foreach (($caso['guias'] ?? []) as $i => $g) {
@@ -397,7 +397,7 @@ function avisosDeMudancas(PDO $pdo, array $u, array $mud): void
             $checarMetas = true;
         }
         if ($col === 'leads' && !$ant) $checarMetas = true;
-        if ($col === 'sm' && ($novo['status'] ?? '') === 'Deferido' && ($ant['status'] ?? '') !== 'Deferido')
+        if ($col === 'sm' && nuc_sm_etapa($novo) === 'Deferido — a receber' && nuc_sm_etapa($ant ?? []) !== 'Deferido — a receber' && ($ant['status'] ?? '') !== 'Deferido')
             nuc_push($pdo, $eqMenosEu, 'conquista', '✅ Benefício deferido! 🎉', $cliNome($novo) . ' · ' . $u['nome'], '#sm/' . $id, 'smdef:' . $id, 'high');
         if ($col === 'processos' && ($ant['status'] ?? '') !== ($novo['status'] ?? '') && in_array($novo['status'] ?? '', ['Ganho', 'Acordo', 'Deferido'], true)) {
             $tt = ['Ganho' => '🏆 Processo ganho!', 'Acordo' => '🤝 Acordo fechado!', 'Deferido' => '✅ Requerimento deferido!'][$novo['status']];

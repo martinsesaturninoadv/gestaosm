@@ -8,7 +8,7 @@ Guia do que foi criado para o Claude (claude.ai) e outras automações lerem e g
 |---|---|---|
 | API REST | `https://gestao.martinsesaturninoadvocacia.com.br/api/v1` | Clientes, leads, funil e anúncios, com chave de API |
 | Webhook do WaSpeed | `…/api/v1/webhooks/waspeed` | Recebe os eventos do WaSpeed e atualiza o funil sozinho |
-| Conector MCP do Claude | `…/api/v1/mcp` | O Claude usa as 13 ferramentas, com login por OAuth |
+| Conector MCP do Claude | `…/api/v1/mcp` | O Claude usa as 24 ferramentas, com login por OAuth |
 | Documentação OpenAPI | `…/api/v1/openapi.yaml` | Especificação completa (pode abrir no editor.swagger.io) |
 
 **Tecnologia**
@@ -147,6 +147,25 @@ Sem nada configurado, o sistema já procura os nomes mais comuns: `phone`, `numb
 | `listar_anuncios` / `cadastrar_anuncio` | Tabela de códigos de anúncio |
 | `relatorio_por_anuncio` | Leads, fechados e conversão por anúncio e campanha |
 
+**Salário-maternidade** (as mesmas regras da tela):
+
+| Ferramenta | O que faz |
+|---|---|
+| `sm_buscar_caso` | Procura por caso, cliente, nome, CPF, telefone ou etapa; com um resultado, traz a ficha completa e os alertas |
+| `sm_criar_caso` | Abre o caso de uma cliente já cadastrada (etapa Documentos, com o checklist básico) |
+| `sm_atualizar_caso` | Categoria, estratégia, DPP, data do parto (nunca no futuro), honorários etc. |
+| `sm_mover_etapa` | Muda a etapa; Encerrado exige o desfecho |
+| `sm_registrar_guia` | Guia com vencimento (dia 15, ou 20 no DAS-MEI, no próximo dia útil) e valor pelo % do código sobre o salário mínimo da competência |
+| `sm_marcar_guia_paga` | Marca paga, avisa atraso; paga pelo escritório vira reembolso |
+| `sm_registrar_requerimento` | NB e DER; move para No INSS |
+| `sm_registrar_exigencia` | Abre ou marca como cumprida a exigência do INSS |
+| `sm_registrar_deferimento` | NB, DER, valor e parcelas do INSS; move para "Deferido — a receber" |
+| `sm_registrar_parcela_recebida` | A cliente recebeu a parcela: os honorários dela vencem 5 dias úteis depois |
+| `sm_a_receber` | O que cobrar agora, o que aguarda o benefício e o previsto ainda não lançado |
+
+Converter um lead de salário-maternidade (`converter_lead_em_cliente`) já cria o caso no quadro e devolve `caso_sm_id`.
+O financeiro do caso (honorários e reembolso de guia) é montado pelo sistema na próxima abertura; nada é lançado em dobro.
+
 **Segurança**
 - Só administradoras conseguem autorizar.
 - O registro automático do cliente OAuth só aceita o endereço de retorno do Claude (`https://claude.ai/api/mcp/auth_callback`).
@@ -284,13 +303,13 @@ curl -s -X POST $API/mcp -H "Authorization: Bearer $CHAVE" -H "Content-Type: app
 
 ## 9. Testes
 
-Bateria automática com 120 verificações. Ela cobre:
+Bateria automática com 143 verificações. Ela cobre:
 - migração, reversão e nova aplicação;
 - todos os endpoints e os erros 400, 401, 403, 404, 409, 422 e 503;
 - telefone E.164 e código do anúncio;
 - webhook;
 - OAuth completo (PKCE, rotação e revogação);
-- as 13 ferramentas MCP;
+- as 24 ferramentas MCP (13 do CRM e 11 do salário-maternidade);
 - o registro de acesso.
 
 Para rodar (precisa de PHP e Python 3 na máquina):

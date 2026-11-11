@@ -14,7 +14,7 @@ if (!is_file(__DIR__ . '/config.php')) { http_response_code(503); exit('Sistema 
 $cfg = require __DIR__ . '/config.php';
 require __DIR__ . '/nucleo.php';
 
-const SM_ETAPAS = ['Triagem / viabilidade', 'Coleta de documentos', 'Guias em andamento', 'Aguardando o parto', 'Pronto para protocolo', 'Protocolado — em análise', 'Em exigência', 'Deferido', 'Concluído'];
+const SM_ETAPAS = ['Documentos', 'Guias', 'Aguardando o parto', 'Pedido no INSS', 'Benefício deferido', 'Concluído'];
 const FASES_JUD = ['Inicial / Distribuição', 'Citação', 'Contestação / réplica', 'Instrução', 'Sentença', 'Recurso', 'Cumprimento de sentença', 'Execução / RPV-precatório', 'Encerrado'];
 const FASES_ADM = ['Requerimento a protocolar', 'Protocolado — em análise', 'Em exigência', 'Perícia / avaliação agendada', 'Deferido', 'Recurso administrativo', 'Encerrado'];
 const EXTENSOES = ['pdf', 'jpg', 'jpeg', 'png', 'heic', 'webp', 'doc', 'docx'];
@@ -129,7 +129,8 @@ foreach ($sms as $c) {
     usort($guias, fn($a, $b) => strcmp((string) ($a['competencia'] ?? ''), (string) ($b['competencia'] ?? '')));
     $pagas = count(array_filter($guias, fn($g) => !empty($g['pagaEm'])));
     $car = (int) ($c['carenciaMeses'] ?? 0);
-    $html .= '<div class="card"><h2>💗 Salário-maternidade</h2>' . $etapas(SM_ETAPAS, (string) ($c['status'] ?? ''));
+    $html .= '<div class="card"><h2>💗 Salário-maternidade</h2>' . $etapas(SM_ETAPAS, [ 'Documentos' => 'Documentos', 'Guia a pagar' => 'Guias', 'Aguardando parto' => 'Aguardando o parto', 'No INSS' => 'Pedido no INSS', 'Deferido — a receber' => 'Benefício deferido', 'Encerrado' => 'Concluído'][nuc_sm_etapa($c)])
+        . (nuc_sm_desfecho($c) === 'Indeferido' ? '<div class="linha">Situação: <b>pedido indeferido pelo INSS</b> — fale com o escritório sobre os próximos passos.</div>' : '');
     $html .= '<div class="linha">' . (!empty($c['dataParto']) ? '👶 Nascimento: <b>' . nuc_data($c['dataParto']) . '</b>' : (!empty($c['dpp']) ? '📅 Data provável do parto: <b>' . nuc_data($c['dpp']) . '</b>' : '')) . '</div>';
     if ($car) $html .= '<div class="linha">Contribuições pagas: <b>' . $pagas . ' de ' . $car . '</b><div class="barra"><i style="width:' . min(100, round($pagas / max(1, $car) * 100)) . '%"></i></div></div>';
     if ($guias) {

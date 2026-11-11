@@ -256,51 +256,7 @@ function editNota(id,cid){
     if(id)Object.assign(n,v);else{db.notas.push({id:uid(),clienteId:cid,autor:db.usuarioAtual,...v});const c=cli(cid);if(c)c.ultimoContato=today();}},
     id&&(()=>{db.notas=db.notas.filter(x=>x.id!==id);}));
 }
-/* ---------- salário-maternidade ---------- */
-function editSm(id,pre){
-  const c=id?db.sm.find(x=>x.id===id):{status:SM_STATUS[0],categoria:SM_CATEG[0],responsavelId:db.usuarioAtual,guias:[],beneficioEstimado:Math.round((+db.escritorio.salarioMinimo||1518)*4),...pre};
-  form(id?'Editar caso de salário-maternidade':'Novo caso de salário-maternidade',[
-    {k:'clienteId',l:'Segurada (cliente)',t:'select',o:O.clientes,req:1,full:1},
-    {k:'categoria',l:'Categoria da segurada',t:'select',o:SM_CATEG,req:1},{k:'estrategia',l:'Estratégia',t:'select',o:SM_ESTRAT},
-    {k:'status',l:'Etapa',t:'select',o:SM_STATUS,req:1},{k:'responsavelId',l:'Responsável',t:'select',o:O.usuarios},
-    {t:'sec',l:'Gestação e criança'},
-    {k:'dpp',l:'Data provável do parto (DPP)',t:'date'},{k:'dataParto',l:'Data do parto / adoção',t:'date'},
-    {k:'crianca',l:'Nome da criança'},{k:'carenciaMeses',l:'Carência exigida (nº de contribuições)',t:'number',dica:'CLT, doméstica e avulsa: em regra, sem carência. Contribuinte individual, facultativa e MEI: confira as regras vigentes.'},
-    {t:'sec',l:'INSS'},
-    {k:'qualidadeAte',l:'Qualidade de segurada até',t:'date'},{k:'der',l:'DER — data do requerimento',t:'date'},
-    {t:'sec',l:'✅ Quando o benefício for deferido'},{k:'dataDeferimento',l:'Data do deferimento',t:'date',dica:'Preenchida sozinha ao mudar para Deferido.'},{k:'dib',l:'DIB — início do benefício',t:'date'},
-    {k:'valorConcedido',l:'Valor total concedido (R$)',t:'number'},{k:'previsaoPagamento',l:'Previsão do pagamento',t:'date'},{k:'pagoClienteEm',l:'Pago à cliente em',t:'date'},
-    {k:'nb',l:'NB / protocolo'},{k:'beneficioEstimado',l:'Valor total estimado do benefício (R$)',t:'number'},
-    {k:'obs',l:'Observações',t:'textarea',full:1,rows:2}],
-    c,v=>{if(v.status==='Deferido'&&!v.dataDeferimento)v.dataDeferimento=today();if(v.status==='Deferido'&&c.status!=='Deferido')setTimeout(()=>celebrarEvento('deferido','Benefício deferido!',nomeCli(v.clienteId||c.clienteId)),200);
-      if(v.status==='Aguardando o parto'&&v.dataParto){v.status='Pronto para protocolo';setTimeout(()=>toast('Parto informado: caso movido para "Pronto para protocolo" 👶'),300);}
-      const nid=upsert('sm',id,v,{guias:[]});if(!id)location.hash='sm/'+nid;},id&&(()=>{db.sm=db.sm.filter(x=>x.id!==id);if(ui.page==='sm'&&ui.id)location.hash='sm';}),
-    'Cadastre também os documentos padrão do salário-maternidade no checklist do cliente (botão na ficha do caso).');
-}
-const vencGuia=comp=>diaNoMes(ymAdd(comp,1),15);
-function guiaStatus(g){if(g.pagaEm)return 'Paga';if(g.emitidaEm)return diff(g.venc)<0?'Vencida':'Emitida';return diff(g.venc)<0?'Vencida':'A emitir';}
-function editGuia(smId,gid){
-  const caso=db.sm.find(x=>x.id===smId);const g=gid?caso.guias.find(x=>x.id===gid):{competencia:today().slice(0,7),codigo:'1007',quemPaga:'Cliente'};
-  if(!gid){g.venc=vencGuia(g.competencia);g.valor=Math.round((+db.escritorio.salarioMinimo||1518)*0.2*100)/100;}
-  form(gid?'Editar guia':'Nova guia de recolhimento',[
-    {k:'competencia',l:'Competência (mês/ano)',t:'month',req:1},{k:'codigo',l:'Código de pagamento',list:GPS_CODIGOS.map(x=>[x[0]]),dica:GPS_CODIGOS.map(x=>x[0]+' = '+x[1]).join(' · ')},
-    {k:'valor',l:'Valor (R$)',t:'number',req:1},{k:'venc',l:'Vencimento',t:'date',req:1,dica:'GPS de contribuinte individual/facultativo: dia 15 do mês seguinte à competência (dia útil seguinte se cair em fim de semana ou feriado).'},
-    {k:'emitidaEm',l:'Emitida em',t:'date'},{k:'pagaEm',l:'Paga em',t:'date'},
-    {k:'quemPaga',l:'Quem paga',t:'select',o:['Cliente','Escritório (reembolsável)']},{k:'link',l:'Link da guia / comprovante',t:'url'},{k:'obs',l:'Observação',full:1}],
-    g,v=>{if(gid)Object.assign(g,v);else caso.guias.push({id:uid(),...v});caso.guias.sort((a,b)=>a.competencia.localeCompare(b.competencia));},
-    gid&&(()=>{caso.guias=caso.guias.filter(x=>x.id!==gid);}));
-}
-function gerarGuias(smId){
-  const caso=db.sm.find(x=>x.id===smId);const sal=+db.escritorio.salarioMinimo||1518;
-  form('Gerar guias em lote',[
-    {k:'inicio',l:'Primeira competência',t:'month',req:1},{k:'qtd',l:'Quantidade de meses',t:'number',req:1},
-    {k:'codigo',l:'Código',t:'select',o:GPS_CODIGOS.map(x=>[x[0],x[0]+' — '+x[1]]),req:1},{k:'base',l:'Salário de contribuição (R$)',t:'number',req:1,dica:'Salário mínimo configurado: '+brl(sal)+' (atualize em Configurações).'}],
-    {inicio:today().slice(0,7),qtd:Math.max(1,(+caso.carenciaMeses||10)-caso.guias.filter(g=>g.pagaEm).length),codigo:'1007',base:sal},v=>{
-      const al=(GPS_CODIGOS.find(x=>x[0]===v.codigo)||[0,0,20])[2];let n=0;
-      for(let i=0;i<Math.min(60,Math.round(v.qtd));i++){const c=ymAdd(v.inicio,i);if(caso.guias.some(g=>g.competencia===c))continue;
-        caso.guias.push({id:uid(),competencia:c,codigo:v.codigo,valor:Math.round(v.base*al)/100,venc:vencGuia(c),emitidaEm:'',pagaEm:'',quemPaga:'Cliente',link:'',obs:''});n++;}
-      caso.guias.sort((a,b)=>a.competencia.localeCompare(b.competencia));toast(n+' guia(s) criada(s)');});
-}
+/* salário-maternidade: formulários em 46-salario-maternidade.js */
 /* ---------- scripts e modelos ---------- */
 function editScript(id){
   const s=id?db.scripts.find(x=>x.id===id):{categoria:SCRIPT_CATS[0]};

@@ -349,3 +349,20 @@ function nuc_etapa_do_tipo(PDO $pdo, string $tipo): string
     foreach (nuc_funil($pdo) as $e) if ($e['tipo'] === $tipo) return $e['nome'];
     return $tipo === 'ganho' ? 'Fechado' : 'Perdido';
 }
+
+/* ---------- salário-maternidade: 6 etapas (as 11 antigas são convertidas na primeira abertura do sistema) ---------- */
+const NUC_SM_ETAPAS = ['Documentos', 'Guia a pagar', 'Aguardando parto', 'No INSS', 'Deferido — a receber', 'Encerrado'];
+const NUC_SM_MAPA = ['Triagem / viabilidade' => 'Documentos', 'Coleta de documentos' => 'Documentos', 'Guias em andamento' => 'Guia a pagar', 'Aguardando o parto' => 'Aguardando parto',
+    'Pronto para protocolo' => 'No INSS', 'Protocolado — em análise' => 'No INSS', 'Em exigência' => 'No INSS', 'Deferido' => 'Deferido — a receber',
+    'Concluído' => 'Encerrado', 'Indeferido' => 'Encerrado', 'Recurso / judicial' => 'Encerrado'];
+function nuc_sm_etapa(array $c): string
+{
+    $s = (string) ($c['status'] ?? '');
+    return in_array($s, NUC_SM_ETAPAS, true) ? $s : (NUC_SM_MAPA[$s] ?? 'Documentos');
+}
+function nuc_sm_desfecho(array $c): string
+{
+    if (!empty($c['desfecho'])) return (string) $c['desfecho'];
+    $s = (string) ($c['status'] ?? '');
+    return in_array($s, ['Concluído', 'Indeferido', 'Recurso / judicial'], true) ? $s : '';
+}
