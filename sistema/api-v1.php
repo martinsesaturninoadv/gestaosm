@@ -311,12 +311,22 @@ function oa_cliente(PDO $pdo, string $id): ?array
     if ($c && ($c['origem'] !== 'cimd' || (int) $c['criado_em'] > nuc_ms() - 86400000)) return $c + ['uris' => json_decode((string) $c['redirect_uris'], true) ?: []];
     if (!preg_match('#^https://([^/:]+)/#', $id, $m) || !in_array(strtolower($m[1]), V1_HOSTS_CIMD, true) || !function_exists('curl_init')) return $c ? $c + ['uris' => json_decode((string) $c['redirect_uris'], true) ?: []] : null;
     $ch = curl_init($id);
-    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 6, CURLOPT_CONNECTTIMEOUT => 4, CURLOPT_FOLLOWLOCATION => false, CURLOPT_HTTPHEADER => ['Accept: application/json'], CURLOPT_MAXFILESIZE => 65536]);
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 4, CURLOPT_CONNECTTIMEOUT => 3, CURLOPT_FOLLOWLOCATION => true, CURLOPT_MAXREDIRS => 2,
+        CURLOPT_HTTPHEADER => ['Accept: application/json'], CURLOPT_USERAGENT => 'GestaoEscritorio-OAuth/1.0', CURLOPT_MAXFILESIZE => 65536]);
     $raw = curl_exec($ch);
-    $ok = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200;
+    $cod = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    $doc = $ok ? json_decode((string) $raw, true) : null;
-    if (!is_array($doc) || ($doc['client_id'] ?? '') !== $id) return null;
+    $doc = $cod === 200 ? json_decode((string) $raw, true) : null;
+    if (!is_array($doc) || ($doc['client_id'] ?? '') !== $id) {
+        // O claude.ai às vezes recusa leituras automáticas vindas de servidores. Como o client_id é do próprio Claude
+        // e o retorno só pode ir para o endereço oficial dele (V1_REDIRECTS), aceitamos sem o documento.
+        error_log('oauth: documento do cliente ' . $id . ' indisponível (HTTP ' . $cod . '); usando o retorno oficial do Claude');
+        if (!in_array(strtolower($m[1]), ['claude.ai', 'www.claude.ai', 'claude.com', 'www.claude.com'], true)) return null;
+        $pdo->prepare('DELETE FROM oauth_clientes WHERE client_id = ?')->execute([$id]);
+        $pdo->prepare('INSERT INTO oauth_clientes (client_id, nome, redirect_uris, segredo_hash, origem, criado_em) VALUES (?,?,?,?,?,?)')
+            ->execute([$id, 'Claude', json_encode(V1_REDIRECTS), null, 'cimd', nuc_ms()]); // guarda por 24 h (o token não espera uma nova tentativa)
+        return ['client_id' => $id, 'nome' => 'Claude', 'segredo_hash' => null, 'origem' => 'cimd', 'uris' => V1_REDIRECTS];
+    }
     $uris = array_values(array_filter((array) ($doc['redirect_uris'] ?? []), 'is_string'));
     $pdo->prepare('DELETE FROM oauth_clientes WHERE client_id = ?')->execute([$id]);
     $pdo->prepare('INSERT INTO oauth_clientes (client_id, nome, redirect_uris, segredo_hash, origem, criado_em) VALUES (?,?,?,?,?,?)')

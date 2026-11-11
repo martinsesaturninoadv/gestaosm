@@ -364,6 +364,25 @@ def main():
         st, j, _, _ = A.req('POST', '/oauth/token', form={'grant_type': 'authorization_code', 'code': code, 'redirect_uri': cb, 'client_id': client_id, 'code_verifier': verif})
         M = {'Authorization': 'Bearer ' + j['access_token']}
 
+        print('\n== OAuth com identidade publicada do Claude (client_id é um endereço) ==')
+        cimd = 'https://claude.ai/oauth/mcp-oauth-client-metadata'
+        v2, d2 = pkce()
+        q2 = {'response_type': 'code', 'client_id': cimd, 'redirect_uri': cb, 'code_challenge': d2, 'code_challenge_method': 'S256', 'state': 's2', 'resource': base + '/api/v1/mcp'}
+        N2 = Cliente(base)
+        st, _, _, html = N2.req('GET', '/oauth/authorize?' + urllib.parse.urlencode(q2))
+        ok(st == 200 and 'administradora' in html, 'Claude identificado por endereço chega à tela de login (mesmo se o documento não puder ser lido)')
+        csrf = re.search(r'name="csrf" value="([^"]+)"', html).group(1)
+        st, _, _, html = N2.req('POST', '/oauth/authorize', form=dict(q2, csrf=csrf, acao='login', email='admin@teste.com', senha='senha12345'))
+        csrf = re.search(r'name="csrf" value="([^"]+)"', html).group(1)
+        st, _, h, _ = N2.req('POST', '/oauth/authorize', form=dict(q2, csrf=csrf, acao='autorizar'))
+        code2 = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(h.get('Location') or '').query)).get('code', '')
+        st, j2, _, _ = A.req('POST', '/oauth/token', form={'grant_type': 'authorization_code', 'code': code2, 'redirect_uri': cb, 'client_id': cimd, 'code_verifier': v2})
+        ok(st == 200 and j2 and j2.get('access_token', '').startswith('gat_'), 'token emitido para o Claude identificado por endereço')
+        st, _, _, html = N2.req('GET', '/oauth/authorize?' + urllib.parse.urlencode(dict(q2, client_id='https://site-estranho.com/cliente.json')))
+        ok('Pedido de acesso inválido' in html, 'endereço de cliente fora do Claude é recusado')
+        st, _, _, html = N2.req('GET', '/oauth/authorize?' + urllib.parse.urlencode(dict(q2, redirect_uri='https://site-estranho.com/cb')))
+        ok('Pedido de acesso inválido' in html, 'retorno para outro site é recusado mesmo com client_id do Claude')
+
         print('\n== Servidor MCP ==')
 
         def mcp(metodo, params=None, id_=1):
