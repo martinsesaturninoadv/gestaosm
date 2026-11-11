@@ -68,7 +68,7 @@ if (!$https && !$local) v1_erro('Use https:// para acessar a API.', 403);
 /* log de cada chamada (LGPD): quem, quando, o quê. Não guarda dados pessoais da consulta (só os nomes dos parâmetros). */
 register_shutdown_function(function () use ($pdo, $rota, $metodo) {
     global $LOG;
-    if (!sv_migrado($pdo) || $rota === '' || strpos($rota, 'wk/') === 0) return;
+    if (!sv_migrado($pdo) || $rota === '' || strpos($rota, 'wk/') === 0 || $metodo === 'OPTIONS') return; // a pergunta do navegador (OPTIONS) não precisa ir para o registro
     $q = array_keys($_GET);
     $q = array_values(array_diff($q, ['r']));
     $r = '/' . ($rota === 'mcp' || strpos($rota, 'oauth/') === 0 ? $rota : 'api/v1/' . $rota) . ($q ? '?' . implode('&', array_map(fn($k) => $k . '=…', $q)) : '');
@@ -220,6 +220,13 @@ function wsp_rota(PDO $pdo): void
     global $LOG, $metodo;
     $LOG['quem'] = 'WaSpeed (webhook)';
     $LOG['auth'] = 'webhook';
+    // O WaSpeed é uma extensão do navegador: o Chrome pergunta antes (OPTIONS, "preflight" de CORS) se pode enviar.
+    // Liberamos qualquer origem porque o envio só é aceito com o token secreto.
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, X-Webhook-Token, X-Waspeed-Token, X-Token, Authorization');
+    header('Access-Control-Max-Age: 86400');
+    if ($metodo === 'OPTIONS') { http_response_code(204); exit; }
     if ($metodo === 'GET') v1_json(['ok' => true, 'mensagem' => 'Endereço do webhook ativo. O WaSpeed deve enviar POST com o token.']);
     if ($metodo !== 'POST') v1_erro('Use POST.', 405);
     $ip = $_SERVER['REMOTE_ADDR'] ?? '';
