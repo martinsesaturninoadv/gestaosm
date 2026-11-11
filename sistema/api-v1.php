@@ -129,7 +129,17 @@ try {
     }
     if (strpos($rota, 'wk/') === 0) oa_metadados($pdo, $rota);
     if (strpos($rota, 'oauth/') === 0) { v1_ativa($pdo); oa_rota($pdo, substr($rota, 6)); }
-    if ($rota === 'webhooks/waspeed') { v1_ativa($pdo); wsp_rota($pdo); }
+    if ($rota === 'webhooks/waspeed') {
+        v1_ativa($pdo);
+        try { wsp_rota($pdo); }
+        catch (Throwable $e) {
+            $det = 'Falha interna: ' . get_class($e) . ': ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
+            error_log('webhook waspeed: ' . $det);
+            try { $pdo->prepare('INSERT INTO webhook_log (em, origem, ip, evento, status, detalhe, lead_id, payload) VALUES (?,?,?,?,?,?,?,?)')
+                ->execute([nuc_ms(), 'waspeed', $_SERVER['REMOTE_ADDR'] ?? '', null, 'erro', mb_substr($det, 0, 500), null, mb_substr((string) file_get_contents('php://input'), 0, 262144)]); } catch (Throwable $e2) { error_log('webhook waspeed (log): ' . $e2->getMessage()); }
+            v1_erro($det, 500);
+        }
+    }
     if ($rota === 'mcp') { v1_ativa($pdo); mcp_rota($pdo); }
 
     v1_ativa($pdo);
@@ -237,6 +247,10 @@ function wsp_rota(PDO $pdo): void
         if (!is_array($ev)) continue;
         try { $r = wsp_processar($pdo, $ev); }
         catch (SvErro $e) { $r = ['status' => 'erro', 'detalhe' => $e->getMessage(), 'lead_id' => null, 'extraido' => null]; }
+        catch (Throwable $e) { // qualquer falha fica registrada em "Eventos recebidos" para conferência
+            error_log('webhook waspeed: ' . get_class($e) . ': ' . $e->getMessage() . ' em ' . basename($e->getFile()) . ':' . $e->getLine());
+            $r = ['status' => 'erro', 'detalhe' => 'Falha interna: ' . get_class($e) . ': ' . $e->getMessage() . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')', 'lead_id' => null, 'extraido' => null];
+        }
         $log->execute([nuc_ms(), 'waspeed', $ip, mb_substr((string) ($r['extraido']['evento'] ?? ''), 0, 80) ?: null, $r['status'], mb_substr((string) $r['detalhe'], 0, 500), $r['lead_id'] ?? null,
             mb_substr(json_encode($ev, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: $raw, 0, 262144)]);
         $res[] = ['status' => $r['status'], 'detalhe' => $r['detalhe'], 'lead_id' => $r['lead_id'] ?? null];

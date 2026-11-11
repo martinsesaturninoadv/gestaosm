@@ -760,11 +760,19 @@ function wsp_texto_de($v): string
 function wsp_extrair(array $p, array $cfg): array
 {
     $out = [];
+    $lid = '';
+    // "…@lid", "…@g.us" (grupo), "…@newsletter" e "status@broadcast" não são telefones: procura o número em outro campo
+    $naoTel = fn($v) => is_scalar($v) && preg_match('/@(lid|g\.us|newsletter|broadcast)\b/i', (string) $v);
     foreach (WSP_CAMINHOS as $campo => $caminhos) {
         $lista = !empty($cfg['caminhos'][$campo]) ? array_merge([(string) $cfg['caminhos'][$campo]], $caminhos) : $caminhos;
         $v = null;
-        foreach ($lista as $c) if (($v = wsp_pegar($p, $c)) !== null && $v !== '' && $v !== []) break;
+        foreach ($lista as $c) {
+            $v = wsp_pegar($p, $c);
+            if ($campo === 'telefone' && $naoTel($v)) { if ($lid === '' && stripos((string) $v, '@lid') !== false) $lid = (string) $v; $v = null; continue; }
+            if ($v !== null && $v !== '' && $v !== []) break;
+        }
         if ($v === null || $v === '' || $v === []) $v = wsp_procurar($p, array_map(fn($c) => mb_strtolower((string) preg_replace('/^.*\./', '', $c)), $caminhos));
+        if ($campo === 'telefone' && $naoTel($v)) { if ($lid === '' && stripos((string) $v, '@lid') !== false) $lid = (string) $v; $v = null; }
         $out[$campo] = $v;
     }
     $tel = wsp_texto_de($out['telefone']);
@@ -773,7 +781,7 @@ function wsp_extrair(array $p, array $cfg): array
     if (is_string($out['etiquetas'] ?? null)) $etq = array_filter(array_map('trim', explode(',', $out['etiquetas'])));
     return ['evento' => sv_texto(wsp_texto_de($out['evento']), 80), 'telefone' => strpos($tel, '@g.us') !== false ? '' : $tel, 'nome' => sv_texto(wsp_texto_de($out['nome']), 120),
         'mensagem' => sv_texto(wsp_texto_de($out['mensagem']), 2000), 'coluna' => sv_texto(wsp_texto_de($out['coluna']), 80), 'etiquetas' => array_values($etq),
-        'de_mim' => $out['de_mim'] !== null && sv_bool($out['de_mim'])];
+        'de_mim' => $out['de_mim'] !== null && !is_array($out['de_mim']) && sv_bool($out['de_mim']), 'lid' => $lid];
 }
 function wsp_etapa_da_coluna(PDO $pdo, string $coluna, array $cfg): string
 {
@@ -787,7 +795,9 @@ function wsp_processar(PDO $pdo, array $payload): array
 {
     $cfg = wsp_config($pdo);
     $x = wsp_extrair($payload, $cfg);
-    if ($x['telefone'] === '' || sv_telefone_e164($x['telefone']) === '') return ['status' => 'ignorado', 'detalhe' => 'Telefone não encontrado no evento: ajuste o mapeamento em Configurações → API e conector.', 'extraido' => $x];
+    if ($x['telefone'] === '' || sv_telefone_e164($x['telefone']) === '') return ['status' => 'ignorado', 'extraido' => $x, 'detalhe' => $x['lid'] !== ''
+        ? 'O WaSpeed mandou só o identificador interno do WhatsApp (' . $x['lid'] . '), sem o número de telefone. Confira em "Dados a enviar" se há opção de enviar o número.'
+        : 'Telefone não encontrado no evento: ajuste o mapeamento em Configurações → API e conector.'];
     $quem = ['tipo' => 'webhook', 'nome' => 'WaSpeed', 'uid' => null, 'membro' => ''];
     $in = ['telefone' => $x['telefone'], 'nome' => $x['nome'], 'plataforma' => ''];
     if ($x['mensagem'] !== '' && !$x['de_mim']) { $in['primeira_mensagem'] = $x['mensagem']; $in['data_primeiro_contato'] = sv_hoje(); }
