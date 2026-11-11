@@ -32,10 +32,13 @@ V.painel=()=>{
   if(ehParceiro())return painelParceiro();
   const ym=today().slice(0,7),me=db.usuarioAtual;
   const evs=db.eventos.filter(e=>!e.feito);
-  const atrasE=evs.filter(e=>diff(e.data)<0),hojeE=evs.filter(e=>diff(e.data)===0);
+  // pendências e atrasos: só os da pessoa logada (ou sem responsável); "ver todas" mostra o escritório inteiro
+  const meu=x=>ui.pendTodos||!respDe(x).length||ehResp(x,me);
+  const cliMeu=cid=>ui.pendTodos||(()=>{const xs=[...db.sm.filter(c=>c.clienteId===cid&&smAtivo(c)),...db.processos.filter(p=>p.clienteId===cid&&p.status==='Em andamento')];return !xs.length||xs.some(meu);})();
+  const atrasE=evs.filter(e=>diff(e.data)<0&&meu(e)),hojeE=evs.filter(e=>diff(e.data)===0);
   const semana=evs.filter(e=>diff(e.data)>=0&&diff(e.data)<=7).sort((a,b)=>(a.data+(a.hora||'')).localeCompare(b.data+(b.hora||'')));
   const aud=semana.filter(e=>/audi|per[ií]cia/i.test(e.tipo));
-  const tAtras=db.tarefas.filter(t=>t.status!=='done'&&t.prazo&&diff(t.prazo)<0);
+  const tAtras=db.tarefas.filter(t=>t.status!=='done'&&t.prazo&&diff(t.prazo)<0&&meu(t));
   const minhas=db.tarefas.filter(t=>t.status!=='done'&&ehResp(t,me));
   const nome=sessao?sessao.nome:nomeUsr(me);const h=new Date().getHours();
   const frase=FRASES[new Date().getDate()%FRASES.length];
@@ -49,17 +52,17 @@ V.painel=()=>{
   const pend=[];
   atrasE.forEach(e=>pend.push(['r','⏰',`Prazo vencido: ${e.titulo}`,nomeCli(e.clienteId),`editEv`,e.id]));
   tAtras.forEach(t=>pend.push(['r','☑',`Tarefa atrasada: ${t.titulo}`,nomesResp(t),'editTar',t.id]));
-  db.sm.filter(c=>c.status==='Aguardando parto').forEach(c=>{const nome=nomeCli(c.clienteId);
+  db.sm.filter(c=>c.status==='Aguardando parto'&&meu(c)).forEach(c=>{const nome=nomeCli(c.clienteId);
     if(c.dpp&&diff(c.dpp)<0)pend.push(['r','👶',`Data provável do parto já passou (${fd(c.dpp)}): confirmar nascimento e protocolar`,nome,'go','sm/'+c.id]);
     else if(c.dpp&&diff(c.dpp)<=10)pend.push(['a','👶',`Parto previsto para ${fd(c.dpp)}: preparar o protocolo do benefício`,nome,'go','sm/'+c.id]);});
-  db.processos.filter(p=>p.status==='Em andamento'&&p.fase==='Em exigência').forEach(p=>pend.push(['a','⚑',`Exigência em aberto: ${p.numero}`,nomeCli(p.clienteId),'go','processo/'+p.id]));
-  db.processos.filter(p=>p.status==='Em andamento'&&p.tipo==='Administrativo'&&p.prazoAnalise&&diff(p.prazoAnalise)<0&&/análise/.test(p.fase)).forEach(p=>pend.push(['a','⌛',`Análise do INSS passou do prazo: ${p.numero}`,nomeCli(p.clienteId),'go','processo/'+p.id]));
-  guiasPendentes(10).forEach(({c,g,st})=>pend.push([st==='Vencida'?'r':'a','₲',`Guia ${mLabel(g.competencia)} ${st==='Vencida'?'VENCIDA':st==='A emitir'?'a emitir':'aguardando pagamento'} — vence ${fd(g.venc)}`,nomeCli(c.clienteId),'go','sm/'+c.id]));
-  leadsSemRetorno().forEach(l=>pend.push(['b','◈',`Atendimento sem retorno há ${-diff(l.ultimoContato||l.primeiroContato||l.criado)} dias: ${l.nome}`,l.etapa,'editLead',l.id]));
+  db.processos.filter(p=>p.status==='Em andamento'&&p.fase==='Em exigência'&&meu(p)).forEach(p=>pend.push(['a','⚑',`Exigência em aberto: ${p.numero}`,nomeCli(p.clienteId),'go','processo/'+p.id]));
+  db.processos.filter(p=>p.status==='Em andamento'&&p.tipo==='Administrativo'&&p.prazoAnalise&&diff(p.prazoAnalise)<0&&/análise/.test(p.fase)&&meu(p)).forEach(p=>pend.push(['a','⌛',`Análise do INSS passou do prazo: ${p.numero}`,nomeCli(p.clienteId),'go','processo/'+p.id]));
+  guiasPendentes(10).filter(x=>meu(x.c)).forEach(({c,g,st})=>pend.push([st==='Vencida'?'r':'a','₲',`Guia ${mLabel(g.competencia)} ${st==='Vencida'?'VENCIDA':st==='A emitir'?'a emitir':'aguardando pagamento'} — vence ${fd(g.venc)}`,nomeCli(c.clienteId),'go','sm/'+c.id]));
+  leadsSemRetorno().filter(meu).forEach(l=>pend.push(['b','◈',`Atendimento sem retorno há ${-diff(l.ultimoContato||l.primeiroContato||l.criado)} dias: ${l.nome}`,l.etapa,'editLead',l.id]));
   const docsPend={};db.documentos.filter(d=>!d.recebido).forEach(d=>docsPend[d.clienteId]=(docsPend[d.clienteId]||0)+1);
-  Object.entries(docsPend).forEach(([cid,n])=>pend.push(['b','▤',`${n} documento(s) pendente(s)`,nomeCli(cid),'go','cliente/'+cid]));
+  Object.entries(docsPend).filter(([cid])=>cliMeu(cid)).forEach(([cid,n])=>pend.push(['b','▤',`${n} documento(s) pendente(s)`,nomeCli(cid),'go','cliente/'+cid]));
   pendenciasReq().forEach(x=>pend.push(x));
-  db.peticoes.filter(p=>p.status!=='Protocolada'&&p.prazo&&diff(p.prazo)<=1).forEach(p=>pend.push([diff(p.prazo)<0?'r':'a','🔎',`Petição ${p.status.toLowerCase()} com prazo ${diff(p.prazo)<0?'vencido':diff(p.prazo)===0?'HOJE':'amanhã'}${p.hora?' até '+p.hora:''}: ${p.titulo}`,nomeCli(p.clienteId),'editPet',p.id]));
+  db.peticoes.filter(p=>p.status!=='Protocolada'&&p.prazo&&diff(p.prazo)<=1&&(ui.pendTodos||[p.autorId,p.conferenteId,p.responsavelId].filter(Boolean).every(x=>!x)||[p.autorId,p.conferenteId,p.responsavelId].includes(me))).forEach(p=>pend.push([diff(p.prazo)<0?'r':'a','🔎',`Petição ${p.status.toLowerCase()} com prazo ${diff(p.prazo)<0?'vencido':diff(p.prazo)===0?'HOJE':'amanhã'}${p.hora?' até '+p.hora:''}: ${p.titulo}`,nomeCli(p.clienteId),'editPet',p.id]));
   db.conteudos.filter(c=>contAtrasado(c)&&((c.responsaveis||[]).includes(db.usuarioAtual)||c.editorId===db.usuarioAtual||c.criadoPor===db.usuarioAtual)).forEach(c=>pend.push([diff(c.dataPublicacao)<0?'r':'a','🎬',`Conteúdo ${c.etapa==='Agendado'?'agendado':'ainda em '+c.etapa.toLowerCase()} para ${diff(c.dataPublicacao)<0?'postar em '+fd(c.dataPublicacao)+' (atrasado)':'postar HOJE'+(c.hora?' às '+c.hora:'')}: ${c.titulo}`,(c.plataformas||[]).join(', '),'editCont',c.id]));
   {const pc=db.peticoes.filter(p=>p.conferenteId===db.usuarioAtual&&p.status==='A conferir').length;if(pc)pend.push(['a','🔎',`${pc} petição(ões) esperando a sua conferência`,'Conferência de petições','go','peticoes']);}
   {const por={};db.recados.filter(r=>r.origem==='cliente'&&!r.lidoEscritorio).forEach(r=>por[r.clienteId]=(por[r.clienteId]||0)+1);Object.entries(por).forEach(([cid,n])=>pend.push(['a','💬',`${n} mensagem(ns) nova(s) da cliente no portal`,nomeCli(cid),'portalAba',cid]));}
@@ -92,7 +95,7 @@ V.painel=()=>{
     </div>
     <div class="grid g-2">
       <div class="card"><h3>📅 Agenda — próximos 7 dias <a class="btn btn-ghost btn-sm" href="#agenda">Agenda completa</a></h3><div class="timeline-dias">${agenda}</div></div>
-      <div class="card"><h3>⚠️ Pendências <small>${pend.length} item(ns)</small></h3><div class="pend-lista">${pendHtml}</div></div>
+      <div style="display:flex;flex-direction:column;gap:14px;min-width:0"><div class="card"><h3>⚠️ ${ui.pendTodos?'Pendências do escritório':'Minhas pendências'} <small>${pend.length} item(ns) · <button class="btn btn-sm lnk" data-act="pendTodos">${ui.pendTodos?'ver só as minhas':'ver de todos'}</button></small></h3><div class="pend-lista">${pendHtml}</div></div>${htmlBlocoNotas(5)}</div>
     </div>
     ${ehParceiro()?'':`<div class="grid g-2">${metasHtml}${rankHtml}</div>`}
     <div class="grid g-3">
@@ -236,27 +239,30 @@ function corpoDocHTML(texto){
 }
 V.documentos=()=>{
   const t=ui.tabDoc;
-  const tabs=`<div class="tabs">${[['gerador','📝 Gerador de documentos'],['ia','🤖 Peças com IA'],['checklist','✅ Checklist de documentos'],['modelos','🗂️ Modelos (editar)']].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabDoc" data-id="${k}">${l}</button>`).join('')}</div>`;
+  const tabs=`<div class="tabs">${[['checklist','📁 Documentos dos clientes'],['modelos','🗂️ Modelos prontos'],['gerador','📝 Gerar a partir de modelo'],['ia','🤖 Peças com IA']].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabDoc" data-id="${k}">${l}</button>`).join('')}</div>`;
   if(t==='ia')return htmlPecasIA(tabs);
   if(t==='checklist'){
     const f=ui.f.dcl||(ui.f.dcl={cli:''});const pend=db.documentos.filter(d=>!d.recebido);
     const byCli={};db.documentos.filter(d=>!f.cli||d.clienteId===f.cli).forEach(d=>(byCli[d.clienteId]=byCli[d.clienteId]||[]).push(d));
     return tabs+`<div class="toolbar"><select data-f="dcl.cli"><option value="">Todos os clientes</option>${O.clientes().map(([id,n])=>`<option value="${id}"${f.cli===id?' selected':''}>${esc(n)}</option>`).join('')}</select><span class="small muted">${pend.length} pendente(s)</span><span class="grow"></span><button class="btn btn-gold" data-act="novoDoc">+ Documento</button></div>
-    <div class="hint">Use <b>Anexar</b> para enviar o arquivo direto para a pasta do cliente no <b>Google Drive</b> (na versão hospedada, com o Google conectado), ou cole o link do arquivo ao editar o documento.</div>
+    <div class="hint">Procurações, contratos e declarações feitos no <b>Claude</b> entram aqui sozinhos quando você pede "anexe no sistema" (ferramenta <i>anexar_documento_cliente</i>, com o link do Google Docs/Drive). Use <b>Anexar</b> para enviar um arquivo para a pasta do cliente no Drive.</div>
+    ${(()=>{const gs=db.clientes.filter(c=>(!f.cli||c.id===f.cli)&&(c.docsGerados||[]).length).flatMap(c=>(c.docsGerados||[]).map(d=>({c,d}))).sort((a,b)=>String(b.d.data).localeCompare(String(a.d.data)));
+      return gs.length?`<div class="card" style="margin-bottom:14px"><h3>📄 Documentos gerados (Claude / Google Docs) <small>${gs.length}</small></h3>${gs.slice(0,40).map(({c,d})=>`<div class="ev"><span class="pic">📄</span><div class="body"><a href="${esc(d.url)}" target="_blank" rel="noopener" class="strong">${esc(d.titulo||TIPOS_DOC_GERADO[d.tipo]||d.tipo)}</a><div class="small muted"><a href="#cliente/${c.id}">${esc(c.nome)}</a> · ${esc(TIPOS_DOC_GERADO[d.tipo]||d.tipo)} · ${fd(d.data)}</div></div></div>`).join('')}</div>`:'';})()}
     <div class="card">${Object.entries(byCli).map(([cid,ds])=>`<div class="dgroup"><a href="#cliente/${cid}">${esc(nomeCli(cid))}</a> · ${ds.filter(d=>d.recebido).length}/${ds.length}${cli(cid)?.driveLink?` · <a href="${esc(cli(cid).driveLink)}" target="_blank" rel="noopener">📁 Drive</a>`:''}</div>${docList(ds)}`).join('')||'<div class="empty">Nenhum documento</div>'}</div>`;
   }
   if(t==='modelos'){
     const grupos={};db.modelos.forEach(m=>(grupos[m.categoria]=grupos[m.categoria]||[]).push(m));
-    return tabs+`<div class="toolbar"><span class="hint" style="margin:0">Todos os modelos são editáveis. Use os campos automáticos entre chaves duplas, ex.: {{cliente}}, {{valor}}, {{valor_extenso}}.</span><span class="grow"></span><button class="btn btn-ghost" data-act="restaurarModelos">Restaurar modelos padrão</button><button class="btn btn-gold" data-act="novoModelo">+ Modelo</button></div>
-    ${Object.entries(grupos).map(([g,ms])=>`<div class="card" style="margin-bottom:14px"><h3>${esc(g)} <small>${ms.length}</small></h3>${ms.map(m=>`<div class="ev"><div class="body" data-act="editModelo" data-id="${m.id}"><div class="t">${esc(m.nome)}</div><div class="small muted">${esc(m.area||'Geral')} · ${esc(String(m.texto).slice(0,110))}…</div></div><div class="flx"><button class="btn btn-ghost btn-sm" data-act="usarModelo" data-id="${m.id}">Usar</button><button class="btn btn-ghost btn-sm" data-act="duplicarModelo" data-id="${m.id}">Duplicar</button></div></div>`).join('')}</div>`).join('')||'<div class="empty">Nenhum modelo</div>'}`;
+    return tabs+`<div class="toolbar"><span class="hint" style="margin:0">Guarde aqui os <b>seus modelos prontos</b>: envie o arquivo (Word/PDF) ou cole o link do Google Docs. Modelos com texto e campos como {{cliente}} também podem ser preenchidos automaticamente na aba "Gerar".</span><span class="grow"></span><button class="btn btn-ghost" data-act="restaurarModelos">Restaurar modelos padrão</button><button class="btn btn-gold" data-act="novoModelo">+ Modelo</button></div>
+    ${Object.entries(grupos).map(([g,ms])=>`<div class="card" style="margin-bottom:14px"><h3>${esc(g)} <small>${ms.length}</small></h3>${ms.map(m=>`<div class="ev"><div class="body" data-act="editModelo" data-id="${m.id}"><div class="t">${m.link||(m.anexos||[]).length?'📎 ':''}${esc(m.nome)}</div><div class="small muted">${esc(m.area||'Geral')}${m.texto?' · '+esc(String(m.texto).slice(0,110))+'…':''}${(m.anexos||[]).length?' · '+(m.anexos.length)+' arquivo(s)':''}</div></div><div class="flx">${m.link?`<a class="btn btn-ghost btn-sm" style="text-decoration:none" href="${esc(m.link)}" target="_blank" rel="noopener">Abrir</a>`:''}${m.texto?`<button class="btn btn-ghost btn-sm" data-act="usarModelo" data-id="${m.id}">Usar</button>`:''}<button class="btn btn-ghost btn-sm" data-act="duplicarModelo" data-id="${m.id}">Duplicar</button></div></div>`).join('')}</div>`).join('')||'<div class="empty">Nenhum modelo</div>'}`;
   }
   const f=ui.f.doc||(ui.f.doc={});
   if(f.modelo==='__ia'&&!f.iaTexto)f.modelo='';
-  if(f.modelo!=='__ia'&&(!f.modelo||!db.modelos.some(m=>m.id===f.modelo)))f.modelo=db.modelos[0]?.id||'';
+  const MT=db.modelos.filter(x=>x.texto);
+  if(f.modelo!=='__ia'&&(!f.modelo||!MT.some(m=>m.id===f.modelo)))f.modelo=MT[0]?.id||'';
   const m=f.modelo==='__ia'?{id:'__ia',nome:f.iaNome||'Minuta gerada pela IA',categoria:'IA',texto:f.iaTexto}:db.modelos.find(x=>x.id===f.modelo);
   const procsCli=db.processos.filter(p=>!f.mcli||p.clienteId===f.mcli),ctrsCli=db.contratos.filter(k=>!f.mcli||k.clienteId===f.mcli);
   const ctx=contextoModelo(f.mcli,f.mproc,f.mctr,parseValor(f.valor)||0,f.validade);
-  const grupos={};db.modelos.forEach(x=>(grupos[x.categoria]=grupos[x.categoria]||[]).push(x));
+  const grupos={};MT.forEach(x=>(grupos[x.categoria]=grupos[x.categoria]||[]).push(x));
   const gOk=!gIndisponivel();
   return tabs+`<div class="grid" style="grid-template-columns:minmax(0,330px) minmax(0,1fr)" id="doc-grid">
     <div class="card"><h3>Dados do documento</h3><div class="fgrid" style="grid-template-columns:1fr">
@@ -331,10 +337,12 @@ V.previsao=()=>{
   if(!podeFin())return semPermissao();
   const f=ui.f.prev||(ui.f.prev={mes:today().slice(0,7),n:12});
   const meses=Array.from({length:+f.n},(_,i)=>ymAdd(f.mes,i));const ini=meses[0]+'-01',fim=fimMes(meses[meses.length-1]);
-  const recs=db.lancamentos.filter(l=>l.tipo==='receita'&&l.venc>=ini&&l.venc<=fim);
+  const recs=db.lancamentos.filter(l=>l.tipo==='receita'&&l.venc>=ini&&l.venc<=fim&&lancStatus(l)!=='Aguardando benefício');
+  const agu=db.lancamentos.filter(l=>l.tipo==='receita'&&!l.pago&&lancStatus(l)==='Aguardando benefício');
+  const det=f.det&&meses.includes(f.det)?f.det:meses[0];const dls=recs.filter(l=>l.venc.startsWith(det)).sort((a,b)=>a.venc.localeCompare(b.venc));
   const por=meses.map(m=>{const ls=recs.filter(l=>l.venc.startsWith(m));return {m,rec:sumBy(ls.filter(l=>l.pago),l=>l.valor),aber:sumBy(ls.filter(l=>!l.pago&&diff(l.venc)>=0),l=>l.valor),atr:sumBy(ls.filter(l=>!l.pago&&diff(l.venc)<0),l=>l.valor),n:ls.length};});
   const tot=sumBy(por,x=>x.rec+x.aber+x.atr);
-  const prox=db.lancamentos.filter(l=>l.tipo==='receita'&&!l.pago&&diff(l.venc)>=-60&&diff(l.venc)<=30).sort((a,b)=>a.venc.localeCompare(b.venc));
+  const prox=db.lancamentos.filter(l=>l.tipo==='receita'&&!l.pago&&lancStatus(l)!=='Aguardando benefício'&&diff(l.venc)>=-60&&diff(l.venc)<=30).sort((a,b)=>a.venc.localeCompare(b.venc));
   // tabela detalhada (dias 10/20/30)
   const grupos=[['Vencimento até o dia 10',d=>d<=10],['Vencimento do dia 11 ao 20',d=>d>10&&d<=20],['Vencimento do dia 21 ao 31',d=>d>20]];
   const corpo=grupos.map(([titulo,fn])=>{const gl=recs.filter(l=>fn(+l.venc.slice(8)));if(!gl.length)return '';
@@ -346,8 +354,10 @@ V.previsao=()=>{
     <span class="grow"></span><button class="btn btn-ghost" data-act="xlsPrev">Exportar Excel</button><button class="btn btn-gold" data-act="novoCtr">Novo contrato</button></div>
   <div class="grid g-kpi">${kpi('Previsto no período',brl(tot))}${kpi('Já recebido',brl(sumBy(por,x=>x.rec)),tot?num(sumBy(por,x=>x.rec)/tot*100,0)+'% do previsto':'','good')}${kpi('A receber',brl(sumBy(por,x=>x.aber)))}${kpi('Em atraso (no período)',brl(sumBy(por,x=>x.atr)),brl(sumBy(db.lancamentos.filter(l=>l.tipo==='receita'&&lancStatus(l)==='Atrasado'),l=>l.valor))+' em atraso no total','bad')}</div>
   <div class="card" style="margin-bottom:14px"><h3>Recebimentos mês a mês</h3>${barras([{nome:'Recebido',cor:'#2E7D4E',vals:por.map(x=>x.rec)},{nome:'A receber',cor:'#2E6DA4',vals:por.map(x=>x.aber)},{nome:'Em atraso',cor:'#C0392B',vals:por.map(x=>x.atr)}],por.map(x=>mLabel(x.m)),brl,true,180)}</div>
-  <div class="mes-cards">${por.map(x=>{const t=x.rec+x.aber+x.atr;return `<div class="mes-card ${x.m===today().slice(0,7)?'atual':''}"><div class="small muted">${MESES_L[+x.m.slice(5)-1]} ${x.m.slice(0,4)}</div><div class="v">${brlK(t)}</div>
+  <div class="mes-cards">${por.map(x=>{const t=x.rec+x.aber+x.atr;return `<div class="mes-card ${x.m===det?'atual':''}" data-act="prevDet" data-id="${x.m}" style="cursor:pointer" title="Ver o que entra neste mês"><div class="small muted">${MESES_L[+x.m.slice(5)-1]} ${x.m.slice(0,4)}</div><div class="v">${brlK(t)}</div>
     <div class="prog"><i style="width:${t?x.rec/t*100:0}%;background:var(--green)"></i></div><div class="small">${t?num(x.rec/t*100,0):0}% recebido${x.atr?` · <span class="c-bad">${brlK(x.atr)} atrasado</span>`:''}</div><div class="small muted">${x.n} parcela(s)</div></div>`;}).join('')}</div>
+  <div class="card" style="margin-top:14px"><h3>O que entra em ${mLong(det)} <small>${dls.length} recebimento(s) · ${brl(sumBy(dls,l=>l.valor))} · clique em outro mês acima para trocar</small></h3>${lancTable(dls)}</div>
+  ${agu.length?`<div class="card" style="margin-top:14px"><h3>Aguardando benefício (salário-maternidade) <small>${brl(sumBy(agu,l=>l.valor))} · sem data até a cliente receber a parcela do INSS</small></h3>${lancTable(agu.sort((a,b)=>nomeCli(a.clienteId).localeCompare(nomeCli(b.clienteId))))}</div>`:''}
   <div class="grid g-2" style="margin-top:14px">
     <div class="card"><h3>Próximos 30 dias e atrasados</h3>${prox.length?prox.slice(0,15).map(l=>{const c=cli(l.clienteId);return `<div class="ev"><div class="body" data-act="editLanc" data-id="${l.id}"><div class="t">${esc(nomeCli(l.clienteId))}</div><div class="small muted">${esc(l.descricao)} · ${fd(l.venc)} · ${prazoTxt(l.venc)}</div></div><div class="num"><b>${brl(l.valor)}</b>${c?.tel?`<br><a class="small" target="_blank" rel="noopener" href="${waLink(c.tel,personalizar((db.scripts.find(s=>s.categoria==='Cobrança')||{}).texto||'',c))}">cobrar</a>`:''}</div></div>`;}).join(''):'<div class="empty">Nada a receber nos próximos 30 dias</div>'}</div>
     <div class="card"><h3>Por dia de vencimento</h3>${hbars(grupos.map(([t,fn])=>[t.replace('Vencimento ',''),sumBy(recs.filter(l=>!l.pago&&fn(+l.venc.slice(8))),l=>l.valor)]),brlK)}<div class="small muted">Valores ainda não recebidos no período.</div></div>

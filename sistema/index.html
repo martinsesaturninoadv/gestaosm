@@ -820,7 +820,7 @@ const valorCampo=v=>v===''||v==null?'':typeof v==='number'?String(v).replace('.'
    ========================================================= */
 let db;
 let modo='local',sessao=null;
-const ui={page:'painel',id:null,agendaView:'lista',agendaMes:today().slice(0,7),f:{},tabCli:'processos',tabProc:'Judicial',procView:'lista',tabSm:'casos',tabDoc:'gerador'};
+const ui={page:'painel',id:null,agendaView:'lista',agendaMes:today().slice(0,7),f:{},tabCli:'processos',tabProc:'Judicial',procView:'lista',tabSm:'casos',tabDoc:'checklist'};
 const COLS=['clientes','processos','eventos','tarefas','leads','lancamentos','documentos','notas','contratos','despesasFixas','usuarios','sm','scripts','modelos','trafego','requisitorios','nps','recados','peticoes','conteudos','anuncios'];
 const SINGLES=['escritorio','metas','produtos','tiposEvento','indAjustes','indExtras','salas','fluxos','funil','waspeed'];
 const COLS_FIN=['lancamentos','contratos','despesasFixas','trafego','requisitorios'];
@@ -962,7 +962,7 @@ function api(acao,corpo,params){
     if(!r.ok||!j||!j.ok){if(r.status===401&&!['login','sessao'].includes(acao))mostrarLogin('Sua sessão expirou. Entre novamente.');throw {status:r.status,msg:j&&j.erro,dados:j};}
     return j;});
 }
-function save(){processarFluxos();propagarParceiro();smReconciliar(db);agendarEnvio();}
+function save(){processarFluxos();propagarParceiro();smReconciliar(db);agendarEnvio();if(typeof gcalAuto==='function')gcalAuto();}
 /* registros ligados a um cliente de parceria herdam o parceiro (é o que permite ao parceiro vê-los) */
 function propagarParceiro(){
   if(!db)return;
@@ -1006,7 +1006,7 @@ function puxar(inicial){
       if(x.excluido)delete snap[k];else snap[k]=novo;
     });
     ultimoSync=r.agora;
-    if(mudou&&!inicial){migrar(db);renderSeguro();if(feitos.length)feedEquipe(feitos);}
+    if(mudou&&!inicial){migrar(db);renderSeguro();if(feitos.length)feedEquipe(feitos);if(typeof gcalAuto==='function')gcalAuto();}
   }).catch(()=>{});
 }
 function renderSeguro(){
@@ -1593,18 +1593,24 @@ function corpoGcal(tipo,o){
   else{b.start={date:data};b.end={date:addDays(1,data)};}
   return b;
 }
-async function sincronizarGoogleAgenda(todos){
+/* automático: com o Google conectado, cada compromisso novo ou alterado (inclusive os que o Claude registrar) vai para o Google Agenda */
+let tGcal=null,gcalRodando=false;
+function gcalAuto(){if(!G.token||Date.now()>G.exp||localStorage.getItem('gcal_auto')==='0'||gcalRodando)return;clearTimeout(tGcal);
+  tGcal=setTimeout(async()=>{gcalRodando=true;try{await sincronizarGoogleAgenda(false,true);}catch(e){}finally{gcalRodando=false;}},6000);}
+async function sincronizarGoogleAgenda(todos,silencioso){
   const cal=encodeURIComponent(localStorage.getItem('gcal_cal')||'primary');const base='https://www.googleapis.com/calendar/v3/calendars/'+cal+'/events';
   const em=meuEmail();let criados=0,atualizados=0,removidos=0;
-  setSync('sincronizando com o Google Agenda…');
+  if(!silencioso)setSync('sincronizando com o Google Agenda…');
   for(const [tipo,o] of itensAgenda(todos)){
-    o.gcal=o.gcal||{};const id=o.gcal[em];const fim=tipo==='evento'?o.feito:o.status==='done';
-    if(fim){if(id){try{await gFetch(base+'/'+encodeURIComponent(id),{method:'DELETE'});}catch(e){}delete o.gcal[em];removidos++;}continue;}
-    const body=JSON.stringify(corpoGcal(tipo,o));const H={'Content-Type':'application/json'};
-    if(id){try{await gFetch(base+'/'+encodeURIComponent(id),{method:'PATCH',headers:H,body});atualizados++;continue;}catch(e){if(!/ 404| 410/.test(e.message))throw e;}}
-    const r=await gFetch(base,{method:'POST',headers:H,body});o.gcal[em]=r.id;criados++;
+    o.gcal=o.gcal||{};o.gcalH=o.gcalH||{};const id=o.gcal[em];const fim=tipo==='evento'?o.feito:o.status==='done';
+    if(fim){if(id){try{await gFetch(base+'/'+encodeURIComponent(id),{method:'DELETE'});}catch(e){}delete o.gcal[em];delete o.gcalH[em];removidos++;}continue;}
+    const body=JSON.stringify(corpoGcal(tipo,o));const H={'Content-Type':'application/json'};const h=String(hashTxt(body));
+    if(id&&o.gcalH[em]===h)continue; // sem mudança desde a última vez
+    if(id){try{await gFetch(base+'/'+encodeURIComponent(id),{method:'PATCH',headers:H,body});o.gcalH[em]=h;atualizados++;continue;}catch(e){if(!/ 404| 410/.test(e.message))throw e;}}
+    const r=await gFetch(base,{method:'POST',headers:H,body});o.gcal[em]=r.id;o.gcalH[em]=h;criados++;
   }
-  save();render();toast(`Google Agenda: ${criados} criado(s), ${atualizados} atualizado(s), ${removidos} removido(s) ✓`);
+  if(criados||atualizados||removidos){save();render();}
+  if(!silencioso)toast(`Google Agenda: ${criados} criado(s), ${atualizados} atualizado(s), ${removidos} removido(s) ✓`);else setSync('✓ salvo','ok');
 }
 function exportarICS(todos){
   const L=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Gestao do Escritorio//PT-BR','CALSCALE:GREGORIAN'];
@@ -1803,17 +1809,44 @@ function editLanc(id,pre){
     {k:'produto',l:'Produto / nicho (opcional)',t:'select',o:O.produtos},
     {k:'pago',l:l.tipo==='despesa'?'Pago':'Recebido',t:'check'},{k:'pagoEm',l:'Data do pagamento',t:'date'},
     {k:'obs',l:'Observação',t:'textarea',full:1,rows:2}],
-    l,v=>{if(!v.valor){toast('Informe o valor',1);return false;}if(v.pago&&!v.pagoEm)v.pagoEm=today();if(!v.pago)v.pagoEm='';if(v.processoId&&!v.clienteId)v.clienteId=proc(v.processoId)?.clienteId||'';upsert('lancamentos',id,v,{tipo:l.tipo,criado:today()});},
-    id&&(()=>{db.lancamentos=db.lancamentos.filter(x=>x.id!==id);}));
+    l,v=>{if(!v.valor){toast('Informe o valor',1);return false;}if(v.pago&&!v.pagoEm)v.pagoEm=today();if(!v.pago)v.pagoEm='';if(v.processoId&&!v.clienteId)v.clienteId=proc(v.processoId)?.clienteId||'';if(id&&l.smId&&l.auto&&(+v.valor!==+l.valor||v.descricao!==l.descricao))v.auto=false; // valor ajustado à mão: o sistema não recalcula mais
+      upsert('lancamentos',id,v,{tipo:l.tipo,criado:today()});},
+    id&&(()=>{if(l.smId){const c=db.sm.find(x=>x.id===l.smId);if(c&&!(c.lancExcluidos||[]).includes(id))(c.lancExcluidos=c.lancExcluidos||[]).push(id);} // não volta sozinho
+      db.lancamentos=db.lancamentos.filter(x=>x.id!==id);}),
+    l.smId?'Lançamento do salário-maternidade: o sistema calcula sozinho. Se você mudar o valor, ele passa a valer como digitado. Excluir não volta a gerar (dá para restaurar na ficha do caso).':'');
+}
+function editContratoSm(id,pre){
+  const k=id?ctr(id):{data:today(),ambito:'Administrativo',forma:'PIX',responsavelId:db.usuarioAtual,produto:'Salário-maternidade',canal:cli(pre?.clienteId)?.canal||CANAIS[1],...pre};
+  const caso=db.sm.filter(x=>x.clienteId===k.clienteId).sort((a,b)=>smAtivo(b)-smAtivo(a))[0];
+  const v0={...k,exitoPct:+(caso?.honorariosPct??'')||+k.exitoPct||25,parcelasSm:Math.min(3,+(caso?.parcelasHonorarios||k.parcelasSm||1)),beneficio:+caso?.valorConcedido||+caso?.beneficioEstimado||beneficioPadraoSm(caso)};
+  form(id?'Editar contrato — salário-maternidade':'Contrato de honorários — salário-maternidade',[
+    {k:'clienteId',l:'Cliente (segurada)',t:'select',o:O.clientes,req:1,full:1},{k:'data',l:'Data do contrato',t:'date',req:1},
+    {k:'responsavelId',l:'Quem fechou o contrato',t:'select',o:O.usuarios},{k:'canal',l:'WhatsApp de origem',t:'select',o:canaisWhats(),dica:'Em qual número a cliente fechou.'},
+    {t:'sec',l:'Honorários: só no final, depois que a cliente recebe o benefício (sem entrada)'},
+    {k:'exitoPct',l:'Percentual do benefício',t:'select',o:SM_PCTS.map(x=>[x,x+'%']),req:1},{k:'parcelasSm',l:'Pagamento',t:'select',o:SM_PARC_OPC,req:1},
+    {k:'beneficio',l:'Benefício estimado (R$)',t:'number',dica:'Padrão: 4 salários mínimos. Depois do deferimento vale o valor concedido.'},{k:'forma',l:'Forma de pagamento',t:'select',o:FORMAS},
+    {k:'obs',l:'Observações',t:'textarea',full:1,rows:2}],v0,v=>{
+      const pct=+v.exitoPct,n=+v.parcelasSm,ben=+v.beneficio||beneficioPadraoSm(caso);
+      const dados={...v,produto:'Salário-maternidade',ambito:'Administrativo',exitoPct:pct,parcelasSm:n,valorTotal:Math.round(ben*pct)/100,entrada:0,parcelas:0,valorParcela:0};delete dados.beneficio;
+      const nid=upsert('contratos',id,dados);
+      let c=db.sm.find(x=>x.clienteId===v.clienteId&&smAtivo(x));
+      if(!c){const cl=cli(v.clienteId);db.sm.push(c={id:uid(),clienteId:v.clienteId,status:'Documentos',categoria:'A definir (triagem)',estrategia:'',responsavelId:v.responsavelId||db.usuarioAtual,guias:[],guiasRevisadas:1,honFinalMigrado:1,
+        historico:[{de:'',para:'Documentos',em:Date.now(),por:nomeUsr(db.usuarioAtual)}]});garantirDocsSm(c);if(cl&&!cl.produto)cl.produto='Salário-maternidade';}
+      c.honorariosPct=pct;c.parcelasHonorarios=n;if(!+c.valorConcedido)c.beneficioEstimado=ben;
+      const cl=cli(v.clienteId);if(cl)cl.status='Ativo';
+      if(!id)setTimeout(()=>celebrarEvento('contrato','Contrato fechado!',nomeCli(v.clienteId)),250);
+      setTimeout(()=>toast(`Honorários: ${pct}% de ${brl(ben)} = ${brl(dados.valorTotal)} ${n===1?'à vista':'em '+n+'x'}, cobrados depois que a cliente receber (ficam "aguardando benefício" no financeiro).`),300);},
+    id&&(()=>{db.contratos=db.contratos.filter(x=>x.id!==id);}));
 }
 function editContrato(id,pre){
-  const k=id?ctr(id):{data:today(),ambito:'Judicial',forma:'PIX',diaVenc:10,parcelas:0,entrada:0,gerar:true,responsavelId:db.usuarioAtual,...pre};
+  if(/maternidade/i.test((id?ctr(id)?.produto:pre?.produto||cli(pre?.clienteId)?.produto)||''))return editContratoSm(id,pre);
+  const k=id?ctr(id):{data:today(),ambito:'Judicial',forma:'PIX',diaVenc:10,parcelas:0,entrada:0,gerar:true,responsavelId:db.usuarioAtual,canal:cli(pre?.clienteId)?.canal||'',...pre};
   if(!id&&k.clienteId&&!k.produto)k.produto=cli(k.clienteId)?.produto||'';
   const campos=[
     {k:'clienteId',l:'Cliente (contratante)',t:'select',o:O.clientes,req:1,full:1},{k:'titular',l:'Titular da ação (se diferente)'},
     {k:'processoId',l:'Processo',t:'select',o:O.processos},{k:'produto',l:'Produto / nicho',t:'select',o:O.produtos},{k:'ambito',l:'Âmbito',t:'select',o:AMBITOS},
     {k:'data',l:'Data do contrato',t:'date',req:1},{k:'forma',l:'Forma de pagamento',t:'select',o:FORMAS},
-    {k:'responsavelId',l:'Quem fechou o contrato',t:'select',o:O.usuarios,dica:'Conta pontos no ranking da equipe.'},{k:'parceriaPct',l:'% do parceiro (se for caso de parceria)',t:'number'},
+    {k:'responsavelId',l:'Quem fechou o contrato',t:'select',o:O.usuarios,dica:'Conta pontos no ranking da equipe.'},{k:'canal',l:'WhatsApp de origem',t:'select',o:canaisWhats()},{k:'parceriaPct',l:'% do parceiro (se for caso de parceria)',t:'number'},
     {t:'sec',l:'Honorários'},
     {k:'valorTotal',l:'H.O. inicial — valor do contrato (R$)',t:'number',req:1},{k:'entrada',l:'Valor de entrada (R$)',t:'number'},
     {k:'parcelas',l:'Quantidade de parcelas',t:'number'},{k:'valorParcela',l:'Valor da parcela (vazio = calcular)',t:'number',vazio:0},
@@ -1825,6 +1858,7 @@ function editContrato(id,pre){
     {k:'proposta',l:'Texto da proposta',t:'textarea',full:1,rows:2},{k:'obs',l:'Observações',t:'textarea',full:1,rows:2}];
   if(!id)campos.push({k:'gerar',l:'Gerar entrada e parcelas no financeiro (contas a receber)',t:'check',full:1});
   form(id?'Editar contrato':'Novo contrato de honorários',campos,k,v=>{
+    if(/maternidade/i.test(v.produto||'')){setTimeout(()=>editContratoSm(id,v),50);return;} // produto trocado para salário-maternidade
     if(!v.valorTotal){toast('Informe o valor do contrato',1);return false;}
     if(+v.entrada>+v.valorTotal){toast('A entrada não pode ser maior que o valor do contrato',1);return false;}
     if(!v.valorParcela&&+v.parcelas>0)v.valorParcela=Math.round((v.valorTotal-(v.entrada||0))/v.parcelas*100)/100;
@@ -1866,7 +1900,9 @@ function editMetas(){
     {k:'entradas',l:'Valor total de entradas (R$)',t:'number'},{k:'ticket',l:'Valor médio do contrato (R$)',t:'number'},
     {k:'entradaMedia',l:'Valor médio das entradas (R$)',t:'number'},{k:'parcelasMedia',l:'Quantidade média de parcelas (máximo)',t:'number'},
     {k:'parcelaMedia',l:'Valor médio das parcelas (R$)',t:'number'},{k:'atendimentos',l:'Novos atendimentos / mês',t:'number'},
-    {k:'premio',l:'Gratificação / prêmio ao bater a meta',t:'textarea',full:1,rows:2,dica:'Aparece no painel para motivar a equipe.'}],db.metas,v=>{db.metas={...db.metas,...v};});
+    {k:'premio',l:'Gratificação / prêmio ao bater a meta',t:'textarea',full:1,rows:2,dica:'Aparece no painel para motivar a equipe.'},
+    {t:'sec',l:'Meta de contratos por pessoa (por mês)'},...db.usuarios.filter(u=>!/parceir|editor/i.test(u.papel||'')).map(u=>({k:'pp_'+u.id,l:u.nome,t:'number'}))],
+    {...db.metas,...Object.fromEntries(Object.entries(db.metas.porPessoa||{}).map(([k,v])=>['pp_'+k,v]))},v=>{const pp={};Object.keys(v).filter(k=>k.startsWith('pp_')).forEach(k=>{if(+v[k])pp[k.slice(3)]=+v[k];delete v[k];});db.metas={...db.metas,...v,porPessoa:pp};});
 }
 function pagarReal(id){
   const l=db.lancamentos.find(x=>x.id===id);
@@ -1910,8 +1946,11 @@ function editScript(id){
 function editModelo(id){
   const m=id?db.modelos.find(x=>x.id===id):{categoria:MODELO_CATS[0],texto:''};
   form(id?'Editar modelo':'Novo modelo de documento',[{k:'nome',l:'Nome do modelo',req:1,full:1},{k:'categoria',l:'Tipo',t:'select',o:MODELO_CATS,req:1},{k:'area',l:'Área / nicho',list:O.produtos},
-    {k:'texto',l:'Texto do modelo',t:'textarea',req:1,full:1,rows:16,dica:'Campos automáticos: '+CAMPOS_MODELO.map(c=>'{{'+c+'}}').join(' ')}],
-    m,v=>{const nid=upsert('modelos',id,v);ui.f.doc=ui.f.doc||{};ui.f.doc.modelo=nid;},id&&(()=>{db.modelos=db.modelos.filter(x=>x.id!==id);}));
+    {k:'link',l:'Link do modelo pronto (Google Docs / Drive)',t:'url',full:1,ph:'https://docs.google.com/…'},
+    {t:'sec',html:id?`<div class="dgroup" style="margin:8px 0 4px">📎 Arquivo do modelo (Word/PDF)</div>${anexosBox('modelos',m)}`:'<div class="hint" style="margin:8px 0 0">📎 Depois de salvar, abra o modelo de novo para <b>enviar o arquivo</b> (Word ou PDF).</div>'},
+    {k:'texto',l:'Texto com campos automáticos (opcional)',t:'textarea',full:1,rows:12,dica:'Só se quiser preencher sozinho na aba "Gerar". Campos: '+CAMPOS_MODELO.map(c=>'{{'+c+'}}').join(' ')}],
+    m,v=>{if(!v.texto&&!v.link&&!(m.anexos||[]).length&&id){toast('Envie o arquivo, cole o link ou escreva o texto do modelo',1);return false;}const nid=upsert('modelos',id,v);ui.f.doc=ui.f.doc||{};ui.f.doc.modelo=nid;
+      if(!id&&!v.texto&&!v.link)setTimeout(()=>{editModelo(nid);toast('Modelo criado ✓ Agora envie o arquivo 📎');},350);},id&&(()=>{db.modelos=db.modelos.filter(x=>x.id!==id);}));
 }
 /* =========================================================
    COMPONENTES DE VISUALIZAÇÃO
@@ -2078,13 +2117,21 @@ V.clientes=()=>{
   </tbody></table></div>`;
 };
 
+/* referência do lançamento: processo, caso de salário-maternidade ou contrato */
+function refLanc(l){
+  const p=proc(l.processoId);if(p)return 'Processo '+p.numero+(p.parteContraria?' x '+p.parteContraria:'');
+  if(l.smId)return 'Salário-maternidade'+(l.smTipo==='reembolso'?' — reembolso de guia':'');
+  const k=l.contratoId&&ctr(l.contratoId);if(k)return 'Contrato '+(k.produto||'')+' de '+fd(k.data);
+  if(l.fixaId)return 'Despesa fixa';return l.produto||'';
+}
 function lancTable(list,showCli=true){
   if(!list.length)return '<div class="empty">Nenhum lançamento</div>';
-  return `<div class="tbl"><table><thead><tr><th>Vencimento</th><th>Descrição</th>${showCli?'<th class="hide-m">Cliente</th>':''}<th class="hide-m">Categoria</th><th class="num">Valor</th><th>Status</th><th></th></tr></thead><tbody>
-  ${list.map(l=>{const st=lancStatus(l);return `<tr data-act="editLanc" data-id="${l.id}"><td>${fd(l.venc)}</td><td><div class="strong">${esc(l.descricao)}</div>${l.processoId&&proc(l.processoId)?`<div class="small muted">${esc(proc(l.processoId).numero)}</div>`:''}${l.obs?`<div class="small muted">${esc(l.obs)}</div>`:''}</td>
-    ${showCli?`<td class="hide-m">${esc(l.clienteId?nomeCli(l.clienteId):'—')}</td>`:''}<td class="hide-m small">${esc(l.categoria)}</td>
+  return `<div class="tbl"><table><thead><tr><th>Quando</th>${showCli?'<th>De quem / para quem</th>':''}<th>O quê</th><th class="hide-m">Referente a</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
+  ${list.map(l=>{const st=lancStatus(l);const ag=st==='Aguardando benefício';return `<tr data-act="editLanc" data-id="${l.id}"><td>${ag?'<span class="small muted">quando a cliente receber</span>':fd(l.venc)}${!l.pago&&!ag?`<div class="small muted">${prazoTxt(l.venc)}</div>`:''}</td>
+    ${showCli?`<td class="strong">${l.clienteId?`<a href="#cliente/${l.clienteId}">${esc(nomeCli(l.clienteId))}</a>`:'<span class="muted">—</span>'}</td>`:''}
+    <td><div class="strong">${esc(l.descricao)}</div><div class="small muted">${esc(l.categoria)}${l.obs?' · '+esc(l.obs):''}</div></td><td class="hide-m small">${esc(refLanc(l))||'—'}</td>
     <td class="num" style="color:${l.tipo==='despesa'?'var(--red)':'var(--green)'};font-weight:600">${l.tipo==='despesa'?'− ':''}${brl(l.valor)}</td><td>${pStatusLanc(st)}${l.pago&&l.pagoEm&&l.pagoEm!==l.venc?`<div class="small muted">em ${fd(l.pagoEm)}</div>`:''}</td>
-    <td class="num">${l.pago?'':`${l.tipo==='receita'&&l.clienteId?`<button class="btn btn-ghost btn-sm" data-act="asaasCobrar" data-id="${l.id}" title="${l.cobranca?'Ver o link de pagamento':'Gerar cobrança PIX/boleto (Asaas)'}">${l.cobranca?'💳 Link':'💳 Cobrar'}</button>`:''}<button class="btn btn-ghost btn-sm" data-act="baixar" data-id="${l.id}">${l.tipo==='despesa'?'Pagar':'Receber'}</button>`}</td></tr>`;}).join('')}</tbody></table></div>`;
+    <td class="num">${l.pago||ag?'':`${l.tipo==='receita'&&l.clienteId?`<button class="btn btn-ghost btn-sm" data-act="asaasCobrar" data-id="${l.id}" title="${l.cobranca?'Ver o link de pagamento':'Gerar cobrança PIX/boleto (Asaas)'}">${l.cobranca?'💳 Link':'💳 Cobrar'}</button>`:''}<button class="btn btn-ghost btn-sm" data-act="baixar" data-id="${l.id}">${l.tipo==='despesa'?'Pagar':'Receber'}</button>`}</td></tr>`;}).join('')}</tbody></table></div>`;
 }
 function contratosTable(list,showCli=true){
   if(!list.length)return '<div class="empty">Nenhum contrato</div>';
@@ -2116,7 +2163,10 @@ V.cliente=()=>{
     <button class="btn btn-ghost btn-sm" data-act="novaRecCli" data-id="${c.id}">+ Receita avulsa</button><button class="btn btn-gold btn-sm" data-act="ctrCli" data-id="${c.id}">Novo contrato</button></div>${lancTable(ls,false)}`;
   if(tab==='documentos')body=`<div class="toolbar">${c.driveLink?`<a class="btn btn-ghost btn-sm" href="${esc(c.driveLink)}" target="_blank" rel="noopener" style="text-decoration:none">📁 Pasta no Google Drive</a>`:`<button class="btn btn-ghost btn-sm" data-act="vincularDrive" data-id="${c.id}">📁 Vincular pasta do Drive</button>`}<span class="grow"></span><button class="btn btn-ghost btn-sm" data-act="docsPadraoSm" data-id="${c.id}">+ Documentos padrão do salário-maternidade</button><button class="btn btn-ghost btn-sm" data-act="modeloCli" data-id="${c.id}">Gerar contrato / proposta / procuração</button><button class="btn btn-gold btn-sm" data-act="novoDocCli" data-id="${c.id}">+ Documento</button></div>`+docList(docs);
   if(tab==='documentos')body=htmlDocsGerados(c)+body;
-  if(tab==='sm')body=`<div class="toolbar"><span class="grow"></span><button class="btn btn-gold btn-sm" data-act="novoSmCli" data-id="${c.id}">+ Caso de salário-maternidade</button></div>`+(sms.length?sms.map(x=>{const pg=x.guias.filter(g=>g.pagaEm).length;return `<div class="ev"><div class="body" data-go="sm/${x.id}"><div class="t">${esc(x.categoria)} · ${esc(x.estrategia||'')}</div><div class="small muted">DPP/parto ${fd(x.dataParto||x.dpp)} · guias pagas ${pg}/${x.guias.length}</div></div>${pill(x.status,smCor(x.status))}</div>`;}).join(''):'<div class="empty">Nenhum caso cadastrado</div>');
+  if(tab==='sm')body=`<div class="toolbar"><span class="grow"></span><button class="btn btn-gold btn-sm" data-act="novoSmCli" data-id="${c.id}">+ Caso de salário-maternidade</button></div>`+(sms.length?sms.map(x=>{const pg=x.guias.filter(g=>g.pagaEm).length,pa=proximaAcaoSm(x),fs=podeFin()?financeiroSm(x):null;return `<div class="ev"><div class="body" data-go="sm/${x.id}" style="cursor:pointer"><div class="t">${esc(x.categoria)}${x.estrategia?' · '+esc(x.estrategia):''}</div>
+    <div class="small muted">${x.dataParto?'Parto '+fd(x.dataParto):x.dpp?'DPP '+fd(x.dpp):'Sem DPP'} · guias pagas ${pg}/${x.guias.length}${x.nb?' · NB '+esc(x.nb):''}</div>
+    ${pa.txt?`<div class="prox-acao sev-${pa.sev||'n'}">➜ ${esc(pa.txt)}</div>`:''}${fs&&fs.total?`<div class="small">💰 ${brl(fs.total)} em aberto${fs.aCobrar?` · <b style="color:var(--red)">${brl(fs.aCobrar)} já pode cobrar</b>`:' (aguardando benefício)'}</div>`:''}</div>
+    <div style="text-align:right">${pill(x.status,smCor(x.status))}<div><button class="btn btn-sm lnk" data-act="editSm" data-id="${x.id}">editar</button></div></div></div>`;}).join(''):'<div class="empty">Nenhum caso cadastrado</div>');
   if(tab==='agenda')body=`<div class="toolbar"><span class="grow"></span><button class="btn btn-gold btn-sm" data-act="novoEvCli" data-id="${c.id}">+ Compromisso</button></div>`+(evs.length?evs.map(e=>evItem(e)).join(''):'<div class="empty">Nenhum compromisso pendente</div>');
   if(tab==='portal'){body=htmlRecados(c);if(recadosNaoLidos(c.id)){db.recados.forEach(r=>{if(r.clienteId===c.id&&r.origem==='cliente')r.lidoEscritorio=true;});setTimeout(save,50);}}
   if(tab==='historico')body=`<div style="display:flex;gap:8px;margin-bottom:14px"><textarea id="nota-txt" rows="2" style="flex:1" placeholder="Registrar atendimento, ligação, reunião…"></textarea><button class="btn btn-brand" data-act="addNota" data-id="${c.id}">Registrar</button></div>
@@ -2194,30 +2244,35 @@ V.atendimentos=()=>{
 /* ---------- FINANCEIRO ---------- */
 V.financeiro=()=>{
   if(!podeFin())return semPermissao();
-  const f=ui.f.fin||(ui.f.fin={tipo:'',status:'',mes:today().slice(0,7),q:''});
-  const L=db.lancamentos;
-  const rec=L.filter(l=>l.tipo==='receita'&&!l.pago),desp=L.filter(l=>l.tipo==='despesa'&&!l.pago);
-  const atras=rec.filter(l=>diff(l.venc)<0);
+  const f=ui.f.fin||(ui.f.fin={tipo:'receita',status:'',mes:today().slice(0,7),q:''});
+  const L=db.lancamentos;const ab=l=>!l.pago&&lancStatus(l)!=='Aguardando benefício';
+  const rec=L.filter(l=>l.tipo==='receita'&&ab(l)),desp=L.filter(l=>l.tipo==='despesa'&&ab(l)),agu=L.filter(l=>l.tipo==='receita'&&!l.pago&&lancStatus(l)==='Aguardando benefício');
+  const atrR=rec.filter(l=>diff(l.venc)<0),atrD=desp.filter(l=>diff(l.venc)<0);
   const prox30=d=>diff(d)>=0&&diff(d)<=30;
-  const q=norm(f.q);
-  const list=filtroFin().sort((a,b)=>a.venc.localeCompare(b.venc));
+  const list=filtroFin().sort((a,b)=>(lancStatus(b)==='Atrasado')-(lancStatus(a)==='Atrasado')||a.venc.localeCompare(b.venc));
   const tR=sumBy(list.filter(l=>l.tipo==='receita'),l=>l.valor),tD=sumBy(list.filter(l=>l.tipo==='despesa'),l=>l.valor);
+  const aba=(k,l,n)=>`<button class="tab ${f.tipo===k?'active':''}" data-act="finAba" data-id="${k}">${l}${n?` <span class="nb" style="position:static">${n}</span>`:''}</button>`;
+  const titulo=f.tipo==='receita'?'A receber':f.tipo==='despesa'?'A pagar':'Todos os lançamentos';
   return `<div class="grid g-kpi">
-    ${kpi('A receber (crédito em carteira)',brl(sumBy(rec,l=>l.valor)),brl(sumBy(rec.filter(l=>prox30(l.venc)),l=>l.valor))+' nos próximos 30 dias')}
-    ${kpi('Em atraso',brl(sumBy(atras,l=>l.valor)),atras.length+' lançamento(s)',atras.length?'bad':'good')}
+    ${kpi('A receber',brl(sumBy(rec,l=>l.valor)),brl(sumBy(rec.filter(l=>prox30(l.venc)),l=>l.valor))+' nos próximos 30 dias')}
+    ${kpi('Recebimentos atrasados',brl(sumBy(atrR,l=>l.valor)),atrR.length+' a cobrar',atrR.length?'bad':'good')}
+    ${kpi('Aguardando benefício (salário-maternidade)',brl(sumBy(agu,l=>l.valor)),'vence 5 dias úteis depois que a cliente recebe')}
     ${kpi('A pagar',brl(sumBy(desp,l=>l.valor)),brl(sumBy(desp.filter(l=>prox30(l.venc)),l=>l.valor))+' nos próximos 30 dias')}
+    ${kpi('Contas atrasadas',brl(sumBy(atrD,l=>l.valor)),atrD.length+' conta(s)',atrD.length?'bad':'good')}
   </div>
+  <div class="tabs">${aba('receita','💰 A receber',atrR.length)}${aba('despesa','💸 A pagar',atrD.length)}${aba('','Tudo')}</div>
   <div class="toolbar">
-    <input data-f="fin.q" value="${esc(f.q)}" placeholder="Buscar descrição, cliente…" style="min-width:200px">
-    <select data-f="fin.tipo"><option value="">Receitas e despesas</option><option value="receita"${f.tipo==='receita'?' selected':''}>Receitas (entradas)</option><option value="despesa"${f.tipo==='despesa'?' selected':''}>Despesas (saídas)</option></select>
-    <select data-f="fin.status"><option value="">Todos os status</option>${['Em aberto','Atrasado','Pago'].map(s=>`<option${f.status===s?' selected':''}>${s}</option>`).join('')}</select>
+    <input data-f="fin.q" value="${esc(f.q)}" placeholder="Buscar: cliente, descrição, processo…" style="min-width:200px">
+    <select data-f="fin.status"><option value="">Todas as situações</option>${['Em aberto','Atrasado','Aguardando benefício','Pago'].map(s=>`<option${f.status===s?' selected':''}>${s}</option>`).join('')}</select>
     ${mesSel('fin',f.mes)}<button class="btn btn-ghost btn-sm" data-act="finTodos">Todos os meses</button>
     <span class="grow"></span>
     <button class="btn btn-ghost" data-act="xlsFin">Exportar Excel</button>
-    <button class="btn btn-ghost" data-act="novaDesp">+ Despesa</button><button class="btn btn-ghost" data-act="novaRec">+ Receita</button><button class="btn btn-gold" data-act="novoCtr">Novo contrato</button></div>
-  <div class="card"><h3>Lançamentos ${f.mes?'— '+mLong(f.mes):'— todos os meses'}<small>Receitas ${brl(tR)} · Despesas ${brl(tD)} · Saldo <b style="color:${tR-tD>=0?'var(--green)':'var(--red)'}">${brl(tR-tD)}</b></small></h3>${lancTable(list)}</div>`;
+    <button class="btn btn-ghost" data-act="novaDesp">+ Conta a pagar</button><button class="btn btn-ghost" data-act="novaRec">+ Conta a receber</button><button class="btn btn-gold" data-act="novoCtr">Novo contrato</button></div>
+  <div class="card"><h3>${titulo} ${f.mes?'— '+mLong(f.mes):'— todos os meses'}<small>${f.tipo!=='despesa'?'Entradas '+brl(tR):''}${!f.tipo?' · ':''}${f.tipo!=='receita'?'Saídas '+brl(tD):''}${!f.tipo?` · Saldo <b style="color:${tR-tD>=0?'var(--green)':'var(--red)'}">${brl(tR-tD)}</b>`:''}</small></h3>${lancTable(list)}
+  <div class="small muted" style="margin-top:8px">Os atrasados aparecem primeiro. "Aguardando benefício" são honorários e reembolsos de salário-maternidade: o vencimento é definido quando a cliente recebe a parcela do INSS.</div></div>`;
 };
-function filtroFin(){const f=ui.f.fin;const q=norm(f.q);return db.lancamentos.filter(l=>(!f.tipo||l.tipo===f.tipo)&&(!f.status||lancStatus(l)===f.status)&&(!f.mes||l.venc.startsWith(f.mes))&&(!q||norm(l.descricao+' '+nomeCli(l.clienteId)+' '+l.categoria+' '+(l.obs||'')).includes(q)));}
+function filtroFin(){const f=ui.f.fin;const q=norm(f.q);return db.lancamentos.filter(l=>{const st=lancStatus(l);
+  return (!f.tipo||l.tipo===f.tipo)&&(!f.status||st===f.status)&&(!f.mes||l.venc.startsWith(f.mes)||(f.status!=='Pago'&&!l.pago&&(st==='Atrasado'&&f.mes===today().slice(0,7)||st==='Aguardando benefício')))&&(!q||norm(l.descricao+' '+nomeCli(l.clienteId)+' '+l.categoria+' '+(l.obs||'')+' '+refLanc(l)).includes(q));});}
 
 V.fixas=()=>{
   if(!podeFin())return semPermissao();
@@ -2234,7 +2289,7 @@ V.fixas=()=>{
   const faltam=fixas.filter(x=>x.ativo&&!db.lancamentos.some(l=>l.fixaId===x.id&&l.venc>=ini&&l.venc<=fim)).length;
   return `<div class="toolbar">${mesSel('fixas',ym)}<span class="grow"></span>${faltam?`<button class="btn btn-brand" data-act="lancarFixas">Lançar ${faltam} despesa(s) fixa(s) de ${mLabel(ym)}</button>`:''}<button class="btn btn-gold" data-act="novaFixa">+ Despesa fixa</button></div>
   <div class="grid g-kpi">${kpi('Previsto no mês',brl(tPrev))}${kpi('Real (pago)',brl(tReal),tPrev?num(tReal/tPrev*100,0)+'% do previsto':'')}${kpi('Despesas variáveis',brl(sumBy(variaveis,l=>l.valor)),variaveis.length+' lançamento(s)')}</div>
-  <div class="hint">Igual à aba <b>Despesas fixas</b> da planilha: valor previsto × valor real. Cadastre cada despesa uma vez; todo mês clique em <b>Lançar</b> e, ao pagar, informe o valor real.</div>
+  <div class="hint">Valor previsto × valor real. Cadastre cada despesa uma vez; todo mês clique em <b>Lançar</b> e, ao pagar, informe o valor real. Dica: mande ao Claude o boleto, a fatura ou uma lista ("aluguel R$ 2.000 dia 5, contador R$ 600 dia 10…") e peça para <b>registrar as despesas fixas</b> — elas aparecem aqui.</div>
   <div class="card tbl"><table><thead><tr><th>Descrição</th><th class="num">Dia</th><th class="num">Valor previsto</th><th class="num">Valor real</th><th class="num">Diferença</th><th>Status</th><th></th></tr></thead><tbody>
     ${linhas||'<tr><td colspan="7" class="empty">Nenhuma despesa fixa cadastrada</td></tr>'}
     <tr class="tot"><td>Total</td><td></td><td class="num">${brl(tPrev)}</td><td class="num">${brl(tReal)}</td><td class="num">${brl(tReal-tPrev)}</td><td></td><td></td></tr></tbody></table></div>
@@ -2248,8 +2303,9 @@ V.fluxo=()=>{
   const sai=despesasPagas(ini,fim,l=>l.categoria!==LUCROS).sort((a,b)=>dataCaixa(a).localeCompare(dataCaixa(b)));
   const luc=despesasPagas(ini,fim,l=>l.categoria===LUCROS);
   const tE=sumBy(ent,l=>l.valor),tS=sumBy(sai,l=>l.valor),tL=sumBy(luc,l=>l.valor),ant=saldoAntes(ini),saldo=ant+tE-tS;
-  const origem=l=>{const p=proc(l.processoId);return [l.clienteId?nomeCli(l.clienteId):'',p?(p.numero+(p.parteContraria?' x '+p.parteContraria:'')):''].filter(Boolean).join(' · ')||'—';};
-  const tab=(arr,isE)=>arr.length?`<div class="tbl"><table><thead><tr><th>Data</th><th class="num">Valor</th><th>Descrição</th>${isE?'<th class="hide-m">Origem</th>':''}</tr></thead><tbody>${arr.map(l=>`<tr data-act="editLanc" data-id="${l.id}"><td>${fd(dataCaixa(l))}</td><td class="num strong" style="color:${isE?'var(--green)':'var(--red)'}">${brl(l.valor)}</td><td>${esc(l.categoria)}<div class="small muted">${esc(l.descricao)}</div></td>${isE?`<td class="hide-m small">${esc(origem(l))}</td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="empty">Nenhum lançamento pago</div>';
+  const origem=l=>[l.clienteId?nomeCli(l.clienteId):'',refLanc(l)].filter(Boolean).join(' · ')||'—';
+  const tab=(arr,isE)=>arr.length?`<div class="tbl"><table><thead><tr><th>Data</th><th>O quê</th><th class="hide-m">${isE?'De quem / referente a':'Para quem / referente a'}</th><th class="num">Valor</th></tr></thead><tbody>${arr.map(l=>`<tr data-act="editLanc" data-id="${l.id}"><td>${fd(dataCaixa(l))}</td><td>${esc(l.descricao)}<div class="small muted">${esc(l.categoria)}</div></td><td class="hide-m small">${esc(origem(l))}</td><td class="num strong" style="color:${isE?'var(--green)':'var(--red)'}">${brl(l.valor)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Nenhum lançamento pago</div>';
+  const porCat=arr=>{const m={};arr.forEach(l=>m[l.categoria||'—']=(m[l.categoria||'—']||0)+l.valor);return Object.entries(m).sort((a,b)=>b[1]-a[1]);};
   const semIni=!db.escritorio.saldoInicialData&&!+db.escritorio.saldoInicial;
   return `<div class="toolbar">${mesSel('fluxo',ym)}<span class="grow"></span><button class="btn btn-ghost" data-act="xlsFluxo">Exportar Excel</button><button class="btn btn-ghost" data-act="novaLucro">+ Distribuição de lucros</button><button class="btn btn-ghost" data-act="novaDesp">+ Saída</button><button class="btn btn-gold" data-act="novaRec">+ Entrada</button></div>
   ${semIni?'<div class="nota">Informe o <b>saldo inicial do caixa</b> em <a href="#config">Configurações</a> para o saldo anterior ("herança") ficar correto.</div>':''}
@@ -2257,6 +2313,7 @@ V.fluxo=()=>{
     ${kpi('Saldo do mês anterior',brl(ant),'"herança" recebida')}${kpi('Total de entradas',brl(tE),ent.length+' recebimento(s)','good')}${kpi('Total de saídas',brl(tS),sai.length+' pagamento(s)','bad')}
     ${kpi('Saldo do mês',brl(saldo),'anterior + entradas − saídas',saldo>=0?'good':'bad')}${kpi('Distribuição de lucros',brl(tL))}${kpi('Saldo transportado',brl(saldo-tL),'"herança" para o próximo mês',saldo-tL>=0?'good':'bad')}
   </div>
+  <div class="grid g-2" style="margin-bottom:14px"><div class="card"><h3>De onde veio o dinheiro <small>por categoria</small></h3>${hbars(porCat(ent),brlK)}</div><div class="card"><h3>Para onde foi <small>por categoria</small></h3>${hbars(porCat(sai),brlK)}</div></div>
   <div class="grid g-2"><div class="card"><h3>Entradas — ${mLong(ym)} <small>${brl(tE)}</small></h3>${tab(ent,true)}</div><div class="card"><h3>Saídas — ${mLong(ym)} <small>${brl(tS)}</small></h3>${tab(sai,false)}</div></div>
   <div class="card"><h3>Evolução — últimos 6 meses</h3>${fluxo6()}</div>`;
 };
@@ -2266,6 +2323,14 @@ function avaliarMetas(list){
   return [['Quantidade de contratos no mês',m.qtd,n,'int',1],['Valor total de contratos',m.valorTotal,sumBy(list,k=>k.valorTotal),'brl',1],['Valor total de entradas',m.entradas,sumBy(list,k=>k.entrada),'brl',1],
     ['Valor médio do contrato',m.ticket,avg(k=>k.valorTotal),'brl',1],['Valor médio das entradas',m.entradaMedia,avg(k=>k.entrada),'brl',1],
     ['Quantidade média de parcelas',m.parcelasMedia,avg(k=>k.parcelas),'dec',-1],['Valor médio das parcelas',m.parcelaMedia,avg(valorParcela),'brl',1]];
+}
+const canalCtr=k=>{const c=cli(k.clienteId)||{};const l=c.leadId?db.leads.find(x=>x.id===c.leadId):null;const v=k.canal||c.canal||l?.canal||'';return v?(ehCanalSm(v)?'WhatsApp 2 — Salário-maternidade':'WhatsApp 1 — Geral'):'Não informado';};
+function resumoCtrPor(list){
+  const grupo=(fn)=>{const m={};list.forEach(k=>{const g=fn(k);(m[g]=m[g]||[]).push(k);});return Object.entries(m).sort((a,b)=>b[1].length-a[1].length);};
+  const tab=(tit,gs,metaDe)=>`<h3 style="margin-top:6px">${tit}</h3><div class="tbl"><table><thead><tr><th></th><th class="num">Contratos</th><th class="num">Valor</th>${metaDe?'<th class="num">Meta</th>':''}</tr></thead><tbody>${gs.map(([g,ks])=>{const mt=metaDe?metaDe(g):0;
+    return `<tr><td>${esc(g)}</td><td class="num strong">${ks.length}</td><td class="num">${brl(sumBy(ks,k=>k.valorTotal))}</td>${metaDe?`<td class="num">${mt?`${ks.length}/${mt} ${ks.length>=mt?'✅':''}`:'—'}</td>`:''}</tr>`;}).join('')||'<tr><td colspan="4" class="empty">—</td></tr>'}</tbody></table></div>`;
+  const metaP=nome=>{const u=db.usuarios.find(x=>x.nome===nome);return u?+(db.metas.porPessoa||{})[u.id]||0:0;};
+  return tab('Por WhatsApp de origem',grupo(canalCtr))+tab('Por quem fechou',grupo(k=>nomeUsr(k.responsavelId)||'Não informado'),metaP);
 }
 V.contratos=()=>{
   if(!podeFin())return semPermissao();
@@ -2277,13 +2342,13 @@ V.contratos=()=>{
   return `<div class="toolbar">${mesSel('ctr',ym)}<span class="grow"></span><button class="btn btn-ghost" data-act="editMetas">Editar metas</button><button class="btn btn-ghost" data-act="xlsCtr">Exportar Excel</button><button class="btn btn-gold" data-act="novoCtr">+ Contrato</button></div>
   <div class="grid g-2">
     <div class="card"><h3>Contratos de ${mLong(ym)} <small>${n} contrato(s)</small></h3>
-      ${n?`<div class="tbl"><table><thead><tr><th>#</th><th>Cliente</th><th class="num">Valor do contrato</th><th class="num">Entrada</th><th class="num">Parcelas</th><th class="num">Valor da parcela</th></tr></thead><tbody>
-      ${list.map((k,i)=>`<tr data-act="editCtr" data-id="${k.id}"><td>${i+1}</td><td class="strong">${esc(nomeCli(k.clienteId))}<div class="small muted">${esc(k.produto)} · ${fd(k.data)}</div></td><td class="num">${brl(k.valorTotal)}</td><td class="num">${brl(k.entrada)}</td><td class="num">${num(k.parcelas,0)}</td><td class="num">${brl(valorParcela(k))}</td></tr>`).join('')}
-      <tr class="tot"><td></td><td>Total</td><td class="num">${brl(sumBy(list,k=>k.valorTotal))}</td><td class="num">${brl(sumBy(list,k=>k.entrada))}</td><td class="num">${num(sumBy(list,k=>k.parcelas),0)}</td><td class="num">${brl(sumBy(list,valorParcela))}</td></tr>
-      <tr><td></td><td class="muted">Média</td><td class="num">${brl(sumBy(list,k=>k.valorTotal)/n)}</td><td class="num">${brl(sumBy(list,k=>k.entrada)/n)}</td><td class="num">${num(sumBy(list,k=>k.parcelas)/n)}</td><td class="num">${brl(sumBy(list,valorParcela)/n)}</td></tr></tbody></table></div>`:'<div class="empty">Nenhum contrato neste mês</div>'}</div>
+      ${n?`<div class="tbl"><table><thead><tr><th>#</th><th>Cliente</th><th>Fechado por / WhatsApp</th><th class="num">Valor do contrato</th><th class="num">Entrada</th><th class="num">Parcelas</th><th class="num">Valor da parcela</th></tr></thead><tbody>
+      ${list.map((k,i)=>`<tr data-act="editCtr" data-id="${k.id}"><td>${i+1}</td><td class="strong">${esc(nomeCli(k.clienteId))}<div class="small muted">${esc(k.produto)} · ${fd(k.data)}</div></td><td class="small">${esc(nomeUsr(k.responsavelId)||'—')}<div class="muted">${esc(canalCtr(k))}</div></td><td class="num">${brl(k.valorTotal)}</td><td class="num">${brl(k.entrada)}</td><td class="num">${num(k.parcelas,0)}</td><td class="num">${brl(valorParcela(k))}</td></tr>`).join('')}
+      <tr class="tot"><td></td><td>Total</td><td></td><td class="num">${brl(sumBy(list,k=>k.valorTotal))}</td><td class="num">${brl(sumBy(list,k=>k.entrada))}</td><td class="num">${num(sumBy(list,k=>k.parcelas),0)}</td><td class="num">${brl(sumBy(list,valorParcela))}</td></tr>
+      <tr><td></td><td class="muted">Média</td><td></td><td class="num">${brl(sumBy(list,k=>k.valorTotal)/n)}</td><td class="num">${brl(sumBy(list,k=>k.entrada)/n)}</td><td class="num">${num(sumBy(list,k=>k.parcelas)/n)}</td><td class="num">${brl(sumBy(list,valorParcela)/n)}</td></tr></tbody></table></div>`:'<div class="empty">Nenhum contrato neste mês</div>'}</div>
     <div class="card"><h3>Metas do mês</h3><div class="tbl"><table><thead><tr><th></th><th class="num">Meta</th><th class="num">Resultado</th><th>Status</th></tr></thead><tbody>
       ${metas.map(([l,meta,res,t,dir])=>{const ok=n?(dir>0?res>=meta:res<=meta):null;return `<tr><td>${l}</td><td class="num">${fmt(meta,t)}</td><td class="num strong">${n?fmt(res,t):'—'}</td><td>${ok==null?pill('Sem contratos','p-gray'):ok?pill('Batida','p-green'):pill('Não batida','p-red')}</td></tr>`;}).join('')}</tbody></table></div>
-      <div class="small muted" style="margin-top:8px">Em "quantidade média de parcelas", a meta é um teto: quanto menos parcelas, melhor.</div></div>
+      <div class="small muted" style="margin-top:8px">Em "quantidade média de parcelas", a meta é um teto: quanto menos parcelas, melhor.</div>${resumoCtrPor(list)}</div>
   </div>
   <div class="card"><h3>Resumo de ${ano}</h3><div class="tbl"><table class="wide"><thead><tr><th>Mês</th><th class="num">Contratos</th><th class="num">Valor total</th><th class="num">Entradas</th><th class="num">Ticket médio</th><th>Meta de quantidade</th><th>Meta de valor</th></tr></thead><tbody>
     ${mesesAno.map(m=>{const ks=db.contratos.filter(k=>k.data.startsWith(m));const v=sumBy(ks,k=>k.valorTotal);const fut=m>today().slice(0,7);
@@ -2418,10 +2483,13 @@ V.painel=()=>{
   if(ehParceiro())return painelParceiro();
   const ym=today().slice(0,7),me=db.usuarioAtual;
   const evs=db.eventos.filter(e=>!e.feito);
-  const atrasE=evs.filter(e=>diff(e.data)<0),hojeE=evs.filter(e=>diff(e.data)===0);
+  // pendências e atrasos: só os da pessoa logada (ou sem responsável); "ver todas" mostra o escritório inteiro
+  const meu=x=>ui.pendTodos||!respDe(x).length||ehResp(x,me);
+  const cliMeu=cid=>ui.pendTodos||(()=>{const xs=[...db.sm.filter(c=>c.clienteId===cid&&smAtivo(c)),...db.processos.filter(p=>p.clienteId===cid&&p.status==='Em andamento')];return !xs.length||xs.some(meu);})();
+  const atrasE=evs.filter(e=>diff(e.data)<0&&meu(e)),hojeE=evs.filter(e=>diff(e.data)===0);
   const semana=evs.filter(e=>diff(e.data)>=0&&diff(e.data)<=7).sort((a,b)=>(a.data+(a.hora||'')).localeCompare(b.data+(b.hora||'')));
   const aud=semana.filter(e=>/audi|per[ií]cia/i.test(e.tipo));
-  const tAtras=db.tarefas.filter(t=>t.status!=='done'&&t.prazo&&diff(t.prazo)<0);
+  const tAtras=db.tarefas.filter(t=>t.status!=='done'&&t.prazo&&diff(t.prazo)<0&&meu(t));
   const minhas=db.tarefas.filter(t=>t.status!=='done'&&ehResp(t,me));
   const nome=sessao?sessao.nome:nomeUsr(me);const h=new Date().getHours();
   const frase=FRASES[new Date().getDate()%FRASES.length];
@@ -2435,17 +2503,17 @@ V.painel=()=>{
   const pend=[];
   atrasE.forEach(e=>pend.push(['r','⏰',`Prazo vencido: ${e.titulo}`,nomeCli(e.clienteId),`editEv`,e.id]));
   tAtras.forEach(t=>pend.push(['r','☑',`Tarefa atrasada: ${t.titulo}`,nomesResp(t),'editTar',t.id]));
-  db.sm.filter(c=>c.status==='Aguardando parto').forEach(c=>{const nome=nomeCli(c.clienteId);
+  db.sm.filter(c=>c.status==='Aguardando parto'&&meu(c)).forEach(c=>{const nome=nomeCli(c.clienteId);
     if(c.dpp&&diff(c.dpp)<0)pend.push(['r','👶',`Data provável do parto já passou (${fd(c.dpp)}): confirmar nascimento e protocolar`,nome,'go','sm/'+c.id]);
     else if(c.dpp&&diff(c.dpp)<=10)pend.push(['a','👶',`Parto previsto para ${fd(c.dpp)}: preparar o protocolo do benefício`,nome,'go','sm/'+c.id]);});
-  db.processos.filter(p=>p.status==='Em andamento'&&p.fase==='Em exigência').forEach(p=>pend.push(['a','⚑',`Exigência em aberto: ${p.numero}`,nomeCli(p.clienteId),'go','processo/'+p.id]));
-  db.processos.filter(p=>p.status==='Em andamento'&&p.tipo==='Administrativo'&&p.prazoAnalise&&diff(p.prazoAnalise)<0&&/análise/.test(p.fase)).forEach(p=>pend.push(['a','⌛',`Análise do INSS passou do prazo: ${p.numero}`,nomeCli(p.clienteId),'go','processo/'+p.id]));
-  guiasPendentes(10).forEach(({c,g,st})=>pend.push([st==='Vencida'?'r':'a','₲',`Guia ${mLabel(g.competencia)} ${st==='Vencida'?'VENCIDA':st==='A emitir'?'a emitir':'aguardando pagamento'} — vence ${fd(g.venc)}`,nomeCli(c.clienteId),'go','sm/'+c.id]));
-  leadsSemRetorno().forEach(l=>pend.push(['b','◈',`Atendimento sem retorno há ${-diff(l.ultimoContato||l.primeiroContato||l.criado)} dias: ${l.nome}`,l.etapa,'editLead',l.id]));
+  db.processos.filter(p=>p.status==='Em andamento'&&p.fase==='Em exigência'&&meu(p)).forEach(p=>pend.push(['a','⚑',`Exigência em aberto: ${p.numero}`,nomeCli(p.clienteId),'go','processo/'+p.id]));
+  db.processos.filter(p=>p.status==='Em andamento'&&p.tipo==='Administrativo'&&p.prazoAnalise&&diff(p.prazoAnalise)<0&&/análise/.test(p.fase)&&meu(p)).forEach(p=>pend.push(['a','⌛',`Análise do INSS passou do prazo: ${p.numero}`,nomeCli(p.clienteId),'go','processo/'+p.id]));
+  guiasPendentes(10).filter(x=>meu(x.c)).forEach(({c,g,st})=>pend.push([st==='Vencida'?'r':'a','₲',`Guia ${mLabel(g.competencia)} ${st==='Vencida'?'VENCIDA':st==='A emitir'?'a emitir':'aguardando pagamento'} — vence ${fd(g.venc)}`,nomeCli(c.clienteId),'go','sm/'+c.id]));
+  leadsSemRetorno().filter(meu).forEach(l=>pend.push(['b','◈',`Atendimento sem retorno há ${-diff(l.ultimoContato||l.primeiroContato||l.criado)} dias: ${l.nome}`,l.etapa,'editLead',l.id]));
   const docsPend={};db.documentos.filter(d=>!d.recebido).forEach(d=>docsPend[d.clienteId]=(docsPend[d.clienteId]||0)+1);
-  Object.entries(docsPend).forEach(([cid,n])=>pend.push(['b','▤',`${n} documento(s) pendente(s)`,nomeCli(cid),'go','cliente/'+cid]));
+  Object.entries(docsPend).filter(([cid])=>cliMeu(cid)).forEach(([cid,n])=>pend.push(['b','▤',`${n} documento(s) pendente(s)`,nomeCli(cid),'go','cliente/'+cid]));
   pendenciasReq().forEach(x=>pend.push(x));
-  db.peticoes.filter(p=>p.status!=='Protocolada'&&p.prazo&&diff(p.prazo)<=1).forEach(p=>pend.push([diff(p.prazo)<0?'r':'a','🔎',`Petição ${p.status.toLowerCase()} com prazo ${diff(p.prazo)<0?'vencido':diff(p.prazo)===0?'HOJE':'amanhã'}${p.hora?' até '+p.hora:''}: ${p.titulo}`,nomeCli(p.clienteId),'editPet',p.id]));
+  db.peticoes.filter(p=>p.status!=='Protocolada'&&p.prazo&&diff(p.prazo)<=1&&(ui.pendTodos||[p.autorId,p.conferenteId,p.responsavelId].filter(Boolean).every(x=>!x)||[p.autorId,p.conferenteId,p.responsavelId].includes(me))).forEach(p=>pend.push([diff(p.prazo)<0?'r':'a','🔎',`Petição ${p.status.toLowerCase()} com prazo ${diff(p.prazo)<0?'vencido':diff(p.prazo)===0?'HOJE':'amanhã'}${p.hora?' até '+p.hora:''}: ${p.titulo}`,nomeCli(p.clienteId),'editPet',p.id]));
   db.conteudos.filter(c=>contAtrasado(c)&&((c.responsaveis||[]).includes(db.usuarioAtual)||c.editorId===db.usuarioAtual||c.criadoPor===db.usuarioAtual)).forEach(c=>pend.push([diff(c.dataPublicacao)<0?'r':'a','🎬',`Conteúdo ${c.etapa==='Agendado'?'agendado':'ainda em '+c.etapa.toLowerCase()} para ${diff(c.dataPublicacao)<0?'postar em '+fd(c.dataPublicacao)+' (atrasado)':'postar HOJE'+(c.hora?' às '+c.hora:'')}: ${c.titulo}`,(c.plataformas||[]).join(', '),'editCont',c.id]));
   {const pc=db.peticoes.filter(p=>p.conferenteId===db.usuarioAtual&&p.status==='A conferir').length;if(pc)pend.push(['a','🔎',`${pc} petição(ões) esperando a sua conferência`,'Conferência de petições','go','peticoes']);}
   {const por={};db.recados.filter(r=>r.origem==='cliente'&&!r.lidoEscritorio).forEach(r=>por[r.clienteId]=(por[r.clienteId]||0)+1);Object.entries(por).forEach(([cid,n])=>pend.push(['a','💬',`${n} mensagem(ns) nova(s) da cliente no portal`,nomeCli(cid),'portalAba',cid]));}
@@ -2478,7 +2546,7 @@ V.painel=()=>{
     </div>
     <div class="grid g-2">
       <div class="card"><h3>📅 Agenda — próximos 7 dias <a class="btn btn-ghost btn-sm" href="#agenda">Agenda completa</a></h3><div class="timeline-dias">${agenda}</div></div>
-      <div class="card"><h3>⚠️ Pendências <small>${pend.length} item(ns)</small></h3><div class="pend-lista">${pendHtml}</div></div>
+      <div style="display:flex;flex-direction:column;gap:14px;min-width:0"><div class="card"><h3>⚠️ ${ui.pendTodos?'Pendências do escritório':'Minhas pendências'} <small>${pend.length} item(ns) · <button class="btn btn-sm lnk" data-act="pendTodos">${ui.pendTodos?'ver só as minhas':'ver de todos'}</button></small></h3><div class="pend-lista">${pendHtml}</div></div>${htmlBlocoNotas(5)}</div>
     </div>
     ${ehParceiro()?'':`<div class="grid g-2">${metasHtml}${rankHtml}</div>`}
     <div class="grid g-3">
@@ -2622,27 +2690,30 @@ function corpoDocHTML(texto){
 }
 V.documentos=()=>{
   const t=ui.tabDoc;
-  const tabs=`<div class="tabs">${[['gerador','📝 Gerador de documentos'],['ia','🤖 Peças com IA'],['checklist','✅ Checklist de documentos'],['modelos','🗂️ Modelos (editar)']].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabDoc" data-id="${k}">${l}</button>`).join('')}</div>`;
+  const tabs=`<div class="tabs">${[['checklist','📁 Documentos dos clientes'],['modelos','🗂️ Modelos prontos'],['gerador','📝 Gerar a partir de modelo'],['ia','🤖 Peças com IA']].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabDoc" data-id="${k}">${l}</button>`).join('')}</div>`;
   if(t==='ia')return htmlPecasIA(tabs);
   if(t==='checklist'){
     const f=ui.f.dcl||(ui.f.dcl={cli:''});const pend=db.documentos.filter(d=>!d.recebido);
     const byCli={};db.documentos.filter(d=>!f.cli||d.clienteId===f.cli).forEach(d=>(byCli[d.clienteId]=byCli[d.clienteId]||[]).push(d));
     return tabs+`<div class="toolbar"><select data-f="dcl.cli"><option value="">Todos os clientes</option>${O.clientes().map(([id,n])=>`<option value="${id}"${f.cli===id?' selected':''}>${esc(n)}</option>`).join('')}</select><span class="small muted">${pend.length} pendente(s)</span><span class="grow"></span><button class="btn btn-gold" data-act="novoDoc">+ Documento</button></div>
-    <div class="hint">Use <b>Anexar</b> para enviar o arquivo direto para a pasta do cliente no <b>Google Drive</b> (na versão hospedada, com o Google conectado), ou cole o link do arquivo ao editar o documento.</div>
+    <div class="hint">Procurações, contratos e declarações feitos no <b>Claude</b> entram aqui sozinhos quando você pede "anexe no sistema" (ferramenta <i>anexar_documento_cliente</i>, com o link do Google Docs/Drive). Use <b>Anexar</b> para enviar um arquivo para a pasta do cliente no Drive.</div>
+    ${(()=>{const gs=db.clientes.filter(c=>(!f.cli||c.id===f.cli)&&(c.docsGerados||[]).length).flatMap(c=>(c.docsGerados||[]).map(d=>({c,d}))).sort((a,b)=>String(b.d.data).localeCompare(String(a.d.data)));
+      return gs.length?`<div class="card" style="margin-bottom:14px"><h3>📄 Documentos gerados (Claude / Google Docs) <small>${gs.length}</small></h3>${gs.slice(0,40).map(({c,d})=>`<div class="ev"><span class="pic">📄</span><div class="body"><a href="${esc(d.url)}" target="_blank" rel="noopener" class="strong">${esc(d.titulo||TIPOS_DOC_GERADO[d.tipo]||d.tipo)}</a><div class="small muted"><a href="#cliente/${c.id}">${esc(c.nome)}</a> · ${esc(TIPOS_DOC_GERADO[d.tipo]||d.tipo)} · ${fd(d.data)}</div></div></div>`).join('')}</div>`:'';})()}
     <div class="card">${Object.entries(byCli).map(([cid,ds])=>`<div class="dgroup"><a href="#cliente/${cid}">${esc(nomeCli(cid))}</a> · ${ds.filter(d=>d.recebido).length}/${ds.length}${cli(cid)?.driveLink?` · <a href="${esc(cli(cid).driveLink)}" target="_blank" rel="noopener">📁 Drive</a>`:''}</div>${docList(ds)}`).join('')||'<div class="empty">Nenhum documento</div>'}</div>`;
   }
   if(t==='modelos'){
     const grupos={};db.modelos.forEach(m=>(grupos[m.categoria]=grupos[m.categoria]||[]).push(m));
-    return tabs+`<div class="toolbar"><span class="hint" style="margin:0">Todos os modelos são editáveis. Use os campos automáticos entre chaves duplas, ex.: {{cliente}}, {{valor}}, {{valor_extenso}}.</span><span class="grow"></span><button class="btn btn-ghost" data-act="restaurarModelos">Restaurar modelos padrão</button><button class="btn btn-gold" data-act="novoModelo">+ Modelo</button></div>
-    ${Object.entries(grupos).map(([g,ms])=>`<div class="card" style="margin-bottom:14px"><h3>${esc(g)} <small>${ms.length}</small></h3>${ms.map(m=>`<div class="ev"><div class="body" data-act="editModelo" data-id="${m.id}"><div class="t">${esc(m.nome)}</div><div class="small muted">${esc(m.area||'Geral')} · ${esc(String(m.texto).slice(0,110))}…</div></div><div class="flx"><button class="btn btn-ghost btn-sm" data-act="usarModelo" data-id="${m.id}">Usar</button><button class="btn btn-ghost btn-sm" data-act="duplicarModelo" data-id="${m.id}">Duplicar</button></div></div>`).join('')}</div>`).join('')||'<div class="empty">Nenhum modelo</div>'}`;
+    return tabs+`<div class="toolbar"><span class="hint" style="margin:0">Guarde aqui os <b>seus modelos prontos</b>: envie o arquivo (Word/PDF) ou cole o link do Google Docs. Modelos com texto e campos como {{cliente}} também podem ser preenchidos automaticamente na aba "Gerar".</span><span class="grow"></span><button class="btn btn-ghost" data-act="restaurarModelos">Restaurar modelos padrão</button><button class="btn btn-gold" data-act="novoModelo">+ Modelo</button></div>
+    ${Object.entries(grupos).map(([g,ms])=>`<div class="card" style="margin-bottom:14px"><h3>${esc(g)} <small>${ms.length}</small></h3>${ms.map(m=>`<div class="ev"><div class="body" data-act="editModelo" data-id="${m.id}"><div class="t">${m.link||(m.anexos||[]).length?'📎 ':''}${esc(m.nome)}</div><div class="small muted">${esc(m.area||'Geral')}${m.texto?' · '+esc(String(m.texto).slice(0,110))+'…':''}${(m.anexos||[]).length?' · '+(m.anexos.length)+' arquivo(s)':''}</div></div><div class="flx">${m.link?`<a class="btn btn-ghost btn-sm" style="text-decoration:none" href="${esc(m.link)}" target="_blank" rel="noopener">Abrir</a>`:''}${m.texto?`<button class="btn btn-ghost btn-sm" data-act="usarModelo" data-id="${m.id}">Usar</button>`:''}<button class="btn btn-ghost btn-sm" data-act="duplicarModelo" data-id="${m.id}">Duplicar</button></div></div>`).join('')}</div>`).join('')||'<div class="empty">Nenhum modelo</div>'}`;
   }
   const f=ui.f.doc||(ui.f.doc={});
   if(f.modelo==='__ia'&&!f.iaTexto)f.modelo='';
-  if(f.modelo!=='__ia'&&(!f.modelo||!db.modelos.some(m=>m.id===f.modelo)))f.modelo=db.modelos[0]?.id||'';
+  const MT=db.modelos.filter(x=>x.texto);
+  if(f.modelo!=='__ia'&&(!f.modelo||!MT.some(m=>m.id===f.modelo)))f.modelo=MT[0]?.id||'';
   const m=f.modelo==='__ia'?{id:'__ia',nome:f.iaNome||'Minuta gerada pela IA',categoria:'IA',texto:f.iaTexto}:db.modelos.find(x=>x.id===f.modelo);
   const procsCli=db.processos.filter(p=>!f.mcli||p.clienteId===f.mcli),ctrsCli=db.contratos.filter(k=>!f.mcli||k.clienteId===f.mcli);
   const ctx=contextoModelo(f.mcli,f.mproc,f.mctr,parseValor(f.valor)||0,f.validade);
-  const grupos={};db.modelos.forEach(x=>(grupos[x.categoria]=grupos[x.categoria]||[]).push(x));
+  const grupos={};MT.forEach(x=>(grupos[x.categoria]=grupos[x.categoria]||[]).push(x));
   const gOk=!gIndisponivel();
   return tabs+`<div class="grid" style="grid-template-columns:minmax(0,330px) minmax(0,1fr)" id="doc-grid">
     <div class="card"><h3>Dados do documento</h3><div class="fgrid" style="grid-template-columns:1fr">
@@ -2717,10 +2788,12 @@ V.previsao=()=>{
   if(!podeFin())return semPermissao();
   const f=ui.f.prev||(ui.f.prev={mes:today().slice(0,7),n:12});
   const meses=Array.from({length:+f.n},(_,i)=>ymAdd(f.mes,i));const ini=meses[0]+'-01',fim=fimMes(meses[meses.length-1]);
-  const recs=db.lancamentos.filter(l=>l.tipo==='receita'&&l.venc>=ini&&l.venc<=fim);
+  const recs=db.lancamentos.filter(l=>l.tipo==='receita'&&l.venc>=ini&&l.venc<=fim&&lancStatus(l)!=='Aguardando benefício');
+  const agu=db.lancamentos.filter(l=>l.tipo==='receita'&&!l.pago&&lancStatus(l)==='Aguardando benefício');
+  const det=f.det&&meses.includes(f.det)?f.det:meses[0];const dls=recs.filter(l=>l.venc.startsWith(det)).sort((a,b)=>a.venc.localeCompare(b.venc));
   const por=meses.map(m=>{const ls=recs.filter(l=>l.venc.startsWith(m));return {m,rec:sumBy(ls.filter(l=>l.pago),l=>l.valor),aber:sumBy(ls.filter(l=>!l.pago&&diff(l.venc)>=0),l=>l.valor),atr:sumBy(ls.filter(l=>!l.pago&&diff(l.venc)<0),l=>l.valor),n:ls.length};});
   const tot=sumBy(por,x=>x.rec+x.aber+x.atr);
-  const prox=db.lancamentos.filter(l=>l.tipo==='receita'&&!l.pago&&diff(l.venc)>=-60&&diff(l.venc)<=30).sort((a,b)=>a.venc.localeCompare(b.venc));
+  const prox=db.lancamentos.filter(l=>l.tipo==='receita'&&!l.pago&&lancStatus(l)!=='Aguardando benefício'&&diff(l.venc)>=-60&&diff(l.venc)<=30).sort((a,b)=>a.venc.localeCompare(b.venc));
   // tabela detalhada (dias 10/20/30)
   const grupos=[['Vencimento até o dia 10',d=>d<=10],['Vencimento do dia 11 ao 20',d=>d>10&&d<=20],['Vencimento do dia 21 ao 31',d=>d>20]];
   const corpo=grupos.map(([titulo,fn])=>{const gl=recs.filter(l=>fn(+l.venc.slice(8)));if(!gl.length)return '';
@@ -2732,8 +2805,10 @@ V.previsao=()=>{
     <span class="grow"></span><button class="btn btn-ghost" data-act="xlsPrev">Exportar Excel</button><button class="btn btn-gold" data-act="novoCtr">Novo contrato</button></div>
   <div class="grid g-kpi">${kpi('Previsto no período',brl(tot))}${kpi('Já recebido',brl(sumBy(por,x=>x.rec)),tot?num(sumBy(por,x=>x.rec)/tot*100,0)+'% do previsto':'','good')}${kpi('A receber',brl(sumBy(por,x=>x.aber)))}${kpi('Em atraso (no período)',brl(sumBy(por,x=>x.atr)),brl(sumBy(db.lancamentos.filter(l=>l.tipo==='receita'&&lancStatus(l)==='Atrasado'),l=>l.valor))+' em atraso no total','bad')}</div>
   <div class="card" style="margin-bottom:14px"><h3>Recebimentos mês a mês</h3>${barras([{nome:'Recebido',cor:'#2E7D4E',vals:por.map(x=>x.rec)},{nome:'A receber',cor:'#2E6DA4',vals:por.map(x=>x.aber)},{nome:'Em atraso',cor:'#C0392B',vals:por.map(x=>x.atr)}],por.map(x=>mLabel(x.m)),brl,true,180)}</div>
-  <div class="mes-cards">${por.map(x=>{const t=x.rec+x.aber+x.atr;return `<div class="mes-card ${x.m===today().slice(0,7)?'atual':''}"><div class="small muted">${MESES_L[+x.m.slice(5)-1]} ${x.m.slice(0,4)}</div><div class="v">${brlK(t)}</div>
+  <div class="mes-cards">${por.map(x=>{const t=x.rec+x.aber+x.atr;return `<div class="mes-card ${x.m===det?'atual':''}" data-act="prevDet" data-id="${x.m}" style="cursor:pointer" title="Ver o que entra neste mês"><div class="small muted">${MESES_L[+x.m.slice(5)-1]} ${x.m.slice(0,4)}</div><div class="v">${brlK(t)}</div>
     <div class="prog"><i style="width:${t?x.rec/t*100:0}%;background:var(--green)"></i></div><div class="small">${t?num(x.rec/t*100,0):0}% recebido${x.atr?` · <span class="c-bad">${brlK(x.atr)} atrasado</span>`:''}</div><div class="small muted">${x.n} parcela(s)</div></div>`;}).join('')}</div>
+  <div class="card" style="margin-top:14px"><h3>O que entra em ${mLong(det)} <small>${dls.length} recebimento(s) · ${brl(sumBy(dls,l=>l.valor))} · clique em outro mês acima para trocar</small></h3>${lancTable(dls)}</div>
+  ${agu.length?`<div class="card" style="margin-top:14px"><h3>Aguardando benefício (salário-maternidade) <small>${brl(sumBy(agu,l=>l.valor))} · sem data até a cliente receber a parcela do INSS</small></h3>${lancTable(agu.sort((a,b)=>nomeCli(a.clienteId).localeCompare(nomeCli(b.clienteId))))}</div>`:''}
   <div class="grid g-2" style="margin-top:14px">
     <div class="card"><h3>Próximos 30 dias e atrasados</h3>${prox.length?prox.slice(0,15).map(l=>{const c=cli(l.clienteId);return `<div class="ev"><div class="body" data-act="editLanc" data-id="${l.id}"><div class="t">${esc(nomeCli(l.clienteId))}</div><div class="small muted">${esc(l.descricao)} · ${fd(l.venc)} · ${prazoTxt(l.venc)}</div></div><div class="num"><b>${brl(l.valor)}</b>${c?.tel?`<br><a class="small" target="_blank" rel="noopener" href="${waLink(c.tel,personalizar((db.scripts.find(s=>s.categoria==='Cobrança')||{}).texto||'',c))}">cobrar</a>`:''}</div></div>`;}).join(''):'<div class="empty">Nada a receber nos próximos 30 dias</div>'}</div>
     <div class="card"><h3>Por dia de vencimento</h3>${hbars(grupos.map(([t,fn])=>[t.replace('Vencimento ',''),sumBy(recs.filter(l=>!l.pago&&fn(+l.venc.slice(8))),l=>l.valor)]),brlK)}<div class="small muted">Valores ainda não recebidos no período.</div></div>
@@ -2899,6 +2974,10 @@ function migrarSm(d){
       if(ant==='Em exigência'&&!c.exigencia)c.exigencia={aberta:true,descricao:'Exigência em aberto (anotada antes da mudança do quadro)',prazo:'',abertaEm:hoje};
       if(ant==='Indeferido'&&!c.desfecho)c.desfecho='Indeferido';
       (c.historico=c.historico||[]).push({de:ant,para:novo,em:Date.now(),por:'mudança do quadro (6 colunas)'});mudou=true;}
+    if(!c.honFinalMigrado){const k=(d.contratos||[]).filter(k=>k.clienteId===c.clienteId&&/maternidade/i.test(k.produto||'')).sort((a,b)=>String(b.data).localeCompare(String(a.data)))[0];
+      if(k&&c.desfecho!=='Recurso / judicial'){d.lancamentos=d.lancamentos.filter(l=>!(l.contratoId===k.id&&!l.smId&&!l.pago&&l.tipo==='receita'));
+        if((c.honorariosPct===undefined||c.honorariosPct==='')&&+k.exitoPct)c.honorariosPct=+k.exitoPct;}
+      if(+c.parcelasHonorarios>3)c.parcelasHonorarios=3;c.honFinalMigrado=1;mudou=true;}
     // data do parto no futuro é DPP
     if(c.dataParto&&c.dataParto>hoje){if(!c.dpp)c.dpp=c.dataParto;c.dataParto='';mudou=true;}
     // guias: vencimento pela regra e código da lista (uma vez)
@@ -2910,15 +2989,19 @@ function migrarSm(d){
 
 /* ---------- financeiro do caso (reconciliado sozinho; ids fixos: nunca duplica) ---------- */
 const smContrato=c=>db.contratos.filter(k=>k.clienteId===c.clienteId&&/maternidade/i.test(k.produto||'')).sort((a,b)=>String(b.data).localeCompare(String(a.data)))[0];
+const SM_PCTS=[20,25];
+const SM_PARC_OPC=[[1,'À vista'],[2,'2 vezes'],[3,'3 vezes']];
+const beneficioPadraoSm=c=>Math.round(salarioMinimoDe((c&&(c.dataParto||c.dpp))||today())*4); // 4 salários mínimos
+/* honorários do salário-maternidade: não há honorário inicial; só o final = % do benefício (concedido ou estimado), à vista ou em 2/3 vezes */
 function honorariosSm(c){
   if(c.desfecho==='Indeferido'||(smEncerrado(c)&&c.desfecho!=='Concluído'))return null;
   const k=smContrato(c);
-  if(k&&db.lancamentos.some(l=>l.contratoId===k.id&&!l.smId))return null; // o contrato já gerou as parcelas no financeiro
-  let n,val,pct;
-  if(k&&+k.parcelas>0&&valorParcela(k)>0){n=Math.round(+k.parcelas);val=valorParcela(k);pct=+k.exitoPct||0;}
-  else{pct=c.honorariosPct!==undefined&&c.honorariosPct!==''?+c.honorariosPct:(+db.escritorio.smHonorariosPct||25);const base=+c.valorConcedido||+c.beneficioEstimado||0;
-    n=Math.max(1,Math.round(+c.parcelasHonorarios||2));if(!base||!pct)return null;val=Math.round(base*pct/100/n*100)/100;}
-  return {n,val,pct,contratoId:k?.id||'',total:Math.round(n*val*100)/100,doContrato:!!k&&+k.parcelas>0};
+  const pct=c.honorariosPct!==undefined&&c.honorariosPct!==''?+c.honorariosPct:(+k?.exitoPct||+db.escritorio.smHonorariosPct||25);
+  const n=Math.max(1,Math.min(12,Math.round(+c.parcelasHonorarios||1)));
+  const base=+c.valorConcedido||+c.beneficioEstimado||beneficioPadraoSm(c);
+  const jaPago=k?sumBy(db.lancamentos.filter(l=>l.contratoId===k.id&&!l.smId&&l.pago&&l.tipo==='receita'),l=>l.valor):0;
+  const total=Math.max(0,Math.round(base*pct)/100-jaPago);if(!pct||!total)return null;
+  return {n,val:Math.round(total/n*100)/100,pct,base,contratoId:k?.id||'',total:Math.round(total*100)/100,jaPago,estimado:!+c.valorConcedido};
 }
 const vencAguardando=c=>c.previsaoPagamento&&c.previsaoPagamento>addDays(1)?c.previsaoPagamento:addDays(30);
 function smReconciliar(d){
@@ -2926,20 +3009,22 @@ function smReconciliar(d){
   let mudou=false;const L=d.lancamentos;const porId=new Map(L.map(l=>[l.id,l]));
   const garantir=(id,dados)=>{const l=porId.get(id);
     if(!l){const n={id,tipo:'receita',forma:'PIX',produto:'Salário-maternidade',obs:'',pagoEm:'',pago:false,auto:true,criado:today(),...dados};L.push(n);porId.set(id,n);mudou=true;return n;}
-    if(l.pago||!l.auto)return l;
+    if(l.pago)return l;
+    if(!l.auto){if(dados.aguardandoBeneficio===false&&l.aguardandoBeneficio){l.aguardandoBeneficio=false;l.venc=dados.venc;mudou=true;}return l;} // editado à mão: só libera a cobrança
     for(const k in dados)if(JSON.stringify(l[k])!==JSON.stringify(dados[k])){l[k]=dados[k];mudou=true;}
     return l;};
   const remover=id=>{const l=porId.get(id);if(l&&!l.pago&&l.auto){d.lancamentos.splice(d.lancamentos.indexOf(l),1);porId.delete(id);mudou=true;}};
   d.sm.forEach(c=>{
-    const h=honorariosSm(c),parc=c.parcelasInss||[];
+    const h=honorariosSm(c),parc=c.parcelasInss||[],exc=new Set(c.lancExcluidos||[]);
     const liberar=i=>{const p=parc[i-1];return p&&p.recebidaEm?calcularPrazo(p.recebidaEm,5,{recesso:false}):'';};
     for(let i=1;i<=12;i++){const id='sm'+c.id+'h'+i;
+      if(exc.has(id)){remover(id);continue;}
       if(h&&i<=h.n){const lib=liberar(i);garantir(id,{categoria:'H.O. finais — êxito',descricao:`Honorários salário-maternidade — parcela ${i}/${h.n}`,clienteId:c.clienteId,contratoId:h.contratoId,
         valor:h.val,venc:lib||vencAguardando(c),aguardandoBeneficio:!lib,smId:c.id,smTipo:'honorarios',smParcela:i});}
       else remover(id);}
     const libReemb=liberar(1);
     c.guias.forEach(g=>{const id='sm'+c.id+'g'+g.id;
-      if(g.pagaEm&&/escrit/i.test(g.quemPaga||'')&&c.desfecho!=='Indeferido')garantir(id,{categoria:'Reembolso de custas',descricao:`Reembolso guia comp. ${mLabel(g.competencia)}`,clienteId:c.clienteId,contratoId:'',
+      if(g.pagaEm&&/escrit/i.test(g.quemPaga||'')&&c.desfecho!=='Indeferido'&&!exc.has(id))garantir(id,{categoria:'Reembolso de custas',descricao:`Reembolso guia comp. ${mLabel(g.competencia)}`,clienteId:c.clienteId,contratoId:'',
         valor:+g.valor||0,venc:libReemb||vencAguardando(c),aguardandoBeneficio:!libReemb,smId:c.id,smTipo:'reembolso',guiaId:g.id});
       else remover(id);});
   });
@@ -2947,12 +3032,12 @@ function smReconciliar(d){
   d.lancamentos.filter(l=>l.auto&&l.smId&&!l.pago).forEach(l=>{const c=d.sm.find(x=>x.id===l.smId);if(!c||(l.smTipo==='reembolso'&&!c.guias.some(g=>g.id===l.guiaId)))remover(l.id);});
   return mudou;
 }
-const lancSm=c=>db.lancamentos.filter(l=>l.smId===c.id);
+const lancSm=c=>{const k=smContrato(c);return db.lancamentos.filter(l=>l.smId===c.id||(k&&l.contratoId===k.id&&!l.smId&&l.tipo==='receita'&&l.pago));};
 function financeiroSm(c){
-  const ls=lancSm(c),hon=ls.filter(l=>l.smTipo==='honorarios'),ree=ls.filter(l=>l.smTipo==='reembolso');
+  const ls=lancSm(c),hon=ls.filter(l=>l.smTipo!=='reembolso'),ree=ls.filter(l=>l.smTipo==='reembolso');
   const aberto=x=>x.filter(l=>!l.pago);const cobravel=x=>aberto(x).filter(l=>!l.aguardandoBeneficio);
   return {ls,hon,ree,contratado:sumBy(hon,l=>l.valor),recebido:sumBy(ls.filter(l=>l.pago),l=>l.valor),honAberto:sumBy(aberto(hon),l=>l.valor),reeAberto:sumBy(aberto(ree),l=>l.valor),
-    aCobrar:sumBy(cobravel(ls),l=>l.valor),cobravel:cobravel(ls),total:sumBy(aberto(ls),l=>l.valor),semHonorarios:!hon.length&&!honorariosSm(c)&&!smContrato(c)};
+    aCobrar:sumBy(cobravel(ls),l=>l.valor),cobravel:cobravel(ls),total:sumBy(aberto(ls),l=>l.valor),semHonorarios:!hon.length&&!honorariosSm(c)};
 }
 
 /* ---------- próxima ação e alertas do caso ---------- */
@@ -2967,7 +3052,6 @@ function proximaAcaoSm(c){
   if(c.status==='Aguardando parto')return c.dataParto?{txt:'Parto informado: protocolar no INSS',data:today(),sev:'a'}:{txt:'Pedir certidão — parto previsto '+fd(c.dpp),data:c.dpp||'',sev:c.dpp&&diff(c.dpp)<0?'a':''};
   if(c.status==='No INSS')return !(c.nb||c.der)?{txt:'Protocolar no Meu INSS',data:today(),sev:'a'}:{txt:`Acompanhar análise (DER ${fd(c.der)}${c.der?', '+(-diff(c.der))+' dias':''})`,data:'',sev:c.der&&diff(c.der)<-45?'a':''};
   if(c.status==='Deferido — a receber'){const f=financeiroSm(c);
-    if(!f.hon.length&&!f.semHonorarios&&!honorariosSm(c))return {txt:'Cadastrar contrato de honorários',data:today(),sev:'a'};
     if(!f.hon.length)return {txt:'Informar valor do benefício e % de honorários',data:today(),sev:'a'};
     const cob=f.cobravel.sort((a,b)=>a.venc.localeCompare(b.venc))[0];
     if(cob)return {txt:`Cobrar ${cob.smTipo==='reembolso'?'reembolso':'parcela '+cob.smParcela} ${brl(cob.valor)}`,data:cob.venc,sev:diff(cob.venc)<0?'r':'a'};
@@ -3007,7 +3091,8 @@ function docsInaplicaveis(c){const cat=norm(c.categoria||'');if(/definir/.test(c
 
 /* ---------- formulários ---------- */
 function editSm(id,pre){
-  const c=id?db.sm.find(x=>x.id===id):{status:'Documentos',categoria:SM_CATEG[0],responsavelId:db.usuarioAtual,guias:[],beneficioEstimado:Math.round(salarioMinimoDe(today())*4),honorariosPct:+db.escritorio.smHonorariosPct||25,parcelasHonorarios:2,...pre};
+  const c=id?db.sm.find(x=>x.id===id):{status:'Documentos',categoria:SM_CATEG[0],responsavelId:db.usuarioAtual,guias:[],beneficioEstimado:beneficioPadraoSm(pre),honorariosPct:+db.escritorio.smHonorariosPct||25,parcelasHonorarios:1,...pre};
+  if(id){c.honorariosPct=+(c.honorariosPct??'')||+smContrato(c)?.exitoPct||25;c.parcelasHonorarios=Math.min(3,+c.parcelasHonorarios||1);}
   form(id?'Editar caso de salário-maternidade':'Novo caso de salário-maternidade',[
     {k:'clienteId',l:'Segurada (cliente)',t:'select',o:O.clientes,req:1,full:1},
     {k:'categoria',l:'Categoria da segurada',t:'select',o:SM_CATEG,req:1},{k:'estrategia',l:'Estratégia',t:'select',o:SM_ESTRAT},
@@ -3019,9 +3104,9 @@ function editSm(id,pre){
     {k:'qualidadeAte',l:'Qualidade de segurada até',t:'date'},{k:'nb',l:'NB / protocolo'},{k:'der',l:'DER — data do requerimento',t:'date'},
     {t:'sec',l:'✅ Deferimento'},{k:'dataDeferimento',l:'Data do deferimento',t:'date'},{k:'dib',l:'DIB — início do benefício',t:'date'},
     {k:'valorConcedido',l:'Valor total concedido (R$)',t:'number'},{k:'previsaoPagamento',l:'Previsão da 1ª parcela do INSS',t:'date'},
-    {t:'sec',l:'💰 Honorários deste caso'},{k:'beneficioEstimado',l:'Valor total estimado do benefício (R$)',t:'number'},
-    {k:'honorariosPct',l:'Honorários (% do benefício)',t:'number',dica:'Contratos atuais: 25%. Contratos antigos podem ser 20%. Se houver contrato de salário-maternidade com parcelas, ele vale.'},
-    {k:'parcelasHonorarios',l:'Honorários em quantas parcelas',t:'number'},
+    {t:'sec',l:'💰 Honorários (só no final, depois que a cliente recebe)'},{k:'beneficioEstimado',l:'Valor total estimado do benefício (R$)',t:'number',dica:'Padrão: 4 salários mínimos. Depois do deferimento vale o valor concedido.'},
+    {k:'honorariosPct',l:'Honorários (% do benefício)',t:'select',o:SM_PCTS.map(x=>[x,x+'%'])},
+    {k:'parcelasHonorarios',l:'Pagamento dos honorários',t:'select',o:SM_PARC_OPC},
     {k:'obs',l:'Observações',t:'textarea',full:1,rows:2}],
     c,v=>{if(v.dataParto&&v.dataParto>today()){toast('A data do parto não pode ser no futuro: use a DPP.',1);$('#f_dataParto')?.classList.add('err');return false;}
       if(v.status==='Encerrado'&&!v.desfecho){toast('Escolha o desfecho do caso encerrado',1);return false;}
@@ -3029,8 +3114,10 @@ function editSm(id,pre){
       if(v.status==='Deferido — a receber'&&!v.dataDeferimento)v.dataDeferimento=today();
       if(v.status==='Deferido — a receber'&&c.status!=='Deferido — a receber')setTimeout(()=>celebrarEvento('deferido','Benefício deferido!',nomeCli(v.clienteId||c.clienteId)),200);
       if(id&&v.status!==c.status)(c.historico=c.historico||[]).push({de:c.status,para:v.status,em:Date.now(),por:nomeUsr(db.usuarioAtual)});
+      v.honorariosPct=+v.honorariosPct;v.parcelasHonorarios=+v.parcelasHonorarios;
+      const k0=smContrato({...c,...v});if(k0){k0.exitoPct=v.honorariosPct;k0.parcelasSm=v.parcelasHonorarios;}
       const nid=upsert('sm',id,v,{guias:[],historico:[{de:'',para:v.status,em:Date.now(),por:nomeUsr(db.usuarioAtual)}],guiasRevisadas:1});
-      if(!id){garantirDocsSm(db.sm.find(x=>x.id===nid));location.hash='sm/'+nid;}
+      if(!id){garantirDocsSm(db.sm.find(x=>x.id===nid));const cl=cli(v.clienteId);if(cl&&!cl.produto)cl.produto='Salário-maternidade';location.hash='sm/'+nid;}
       setTimeout(()=>smSugerir(db.sm.find(x=>x.id===nid)),400);},
     id&&(()=>{db.sm=db.sm.filter(x=>x.id!==id);if(ui.page==='sm'&&ui.id)location.hash='sm';}));
 }
@@ -3116,21 +3203,23 @@ function guiaBotoes(c,g,st){
 }
 const codGuia=g=>g.codigo==='Outro'?'Outro: '+(g.codigoDesc||'?'):g.codigo;
 /* indicadores do topo: todos clicáveis, com a regra no "title" */
+const SM_KPIS=[['acao','Ação hoje'],['guias','Guias a pagar'],['partos','Partos próximos'],['inss','No INSS'],['receber','A receber'],['recebido','Recebido no mês']];
+const smKpiCfg=()=>({ocultos:[],nomes:{},diasGuia:7,diasParto:30,...(db.escritorio.smKpis||{})});
 function kpisSm(){
-  const ativos=db.sm.filter(smAtivo);const hoje=today();
+  const ativos=db.sm.filter(smAtivo);const hoje=today();const cfg=smKpiCfg();
   const acaoHoje=ativos.filter(c=>{const p=proximaAcaoSm(c);return p.data&&p.data<=hoje;});
-  const g7=guiasPendentes(7),venc=g7.filter(x=>x.st==='Vencida');
-  const partos=ativos.filter(c=>!c.dataParto&&c.dpp&&diff(c.dpp)>=0&&diff(c.dpp)<=30);
+  const g7=guiasPendentes(cfg.diasGuia),venc=g7.filter(x=>x.st==='Vencida');
+  const partos=ativos.filter(c=>!c.dataParto&&c.dpp&&diff(c.dpp)>=0&&diff(c.dpp)<=cfg.diasParto);
   const inss=ativos.filter(c=>c.status==='No INSS'),exig=inss.filter(c=>c.exigencia?.aberta);
   const fin=podeFin();const fs=db.sm.map(financeiroSm);const ym=hoje.slice(0,7);
-  const aRec=sumBy(fs,f=>f.aCobrar),recMes=sumBy(db.lancamentos.filter(l=>l.smId&&l.pago&&String(l.pagoEm||'').startsWith(ym)),l=>l.valor);
-  const k=(id,l,v,s,cls,regra)=>`<div class="card kpi kpi-clic${ui.f.sm?.filtro===id?' ativo':''}" data-act="smFiltro" data-id="${id}" title="${esc(regra)}" role="button" tabindex="0"><div class="l">${l}</div><div class="v">${v}</div><div class="s ${cls||''}">${s||'&nbsp;'}</div></div>`;
+  const aRec=sumBy(fs,f=>f.aCobrar),aPrev=sumBy(fs,f=>f.total),recMes=sumBy(db.lancamentos.filter(l=>l.smId&&l.pago&&String(l.pagoEm||'').startsWith(ym)),l=>l.valor);
+  const k=(id,l,v,s,cls,regra)=>cfg.ocultos.includes(id)?'':`<div class="card kpi kpi-clic${ui.f.sm?.filtro===id?' ativo':''}" data-act="smFiltro" data-id="${id}" title="${esc(regra)}" role="button" tabindex="0"><div class="l">${esc(cfg.nomes[id]||l)}</div><div class="v">${v}</div><div class="s ${cls||''}">${s||'&nbsp;'}</div></div>`;
   return {ativos,acaoHoje,g7,partos,inss,exig,
     html:k('acao','Ação hoje',acaoHoje.length,'próxima ação vencida ou para hoje',acaoHoje.length?'bad':'good','Casos (não encerrados) cuja próxima ação tem data até hoje.')
-      +k('guias','Guias a pagar (7 dias)',g7.length,venc.length?venc.length+' vencida(s)!':'nenhuma vencida',venc.length?'bad':'good','Guias não pagas com vencimento em até 7 dias (inclui as vencidas), de casos não encerrados.')
-      +k('partos','Partos em 30 dias',partos.length,'DPP sem data de parto','','Casos com DPP entre hoje e daqui a 30 dias e sem data do parto.')
+      +k('guias',`Guias a pagar (${cfg.diasGuia} dias)`,g7.length,venc.length?venc.length+' vencida(s)!':'nenhuma vencida',venc.length?'bad':'good','Guias não pagas com vencimento nos próximos '+cfg.diasGuia+' dias (inclui as vencidas), de casos não encerrados.')
+      +k('partos',`Partos em ${cfg.diasParto} dias`,partos.length,'DPP sem data de parto','','Casos com DPP entre hoje e daqui a '+cfg.diasParto+' dias e sem data do parto.')
       +k('inss','No INSS',inss.length,exig.length+' com exigência',exig.length?'bad':'','Casos na coluna "No INSS". O subtítulo conta os que têm exigência em aberto.')
-      +(fin?k('receber','A receber',brlK(aRec),'liberado para cobrar',aRec?'bad':'good','Honorários e reembolsos de guia já liberados (a cliente recebeu a parcela do INSS) e ainda não pagos.')
+      +(fin?k('receber','A receber',brlK(aRec),'liberado · '+brlK(aPrev)+' previsto',aRec?'bad':'good','Honorários e reembolsos de guia já liberados (a cliente recebeu a parcela do INSS) e ainda não pagos.')
         +k('recebido','Recebido no mês',brlK(recMes),MESES_L[+ym.slice(5)-1],'good','Honorários e reembolsos de salário-maternidade pagos neste mês.'):'')};
 }
 V.sm=()=>{
@@ -3154,12 +3243,13 @@ V.sm=()=>{
       <td class="num">${guiaBotoes(c,g,st)}</td></tr>`;}).join('')||'<tr><td colspan="8" class="empty">Nenhuma guia</td></tr>'}</tbody></table></div>`;}
   if(t==='receber')corpo=htmlAReceberSm();
   if(t==='lembretes')corpo=htmlLembretes();
+  if(t==='notas')corpo=htmlBlocoNotas(22);
   if(t==='partos'){const ls=db.sm.filter(c=>c.dpp||c.dataParto);const prox=ls.filter(c=>!c.dataParto).sort((a,b)=>String(a.dpp).localeCompare(String(b.dpp))),nasc=ls.filter(c=>c.dataParto).sort((a,b)=>b.dataParto.localeCompare(a.dataParto));
     const it=c=>`<div class="ev" data-go="sm/${c.id}"><div class="av" style="background:#FDE8EF;color:#C84B6E">👶</div><div class="body"><div class="t">${esc(nomeCli(c.clienteId))} ${c.crianca?'· '+esc(c.crianca):''}</div><div class="small muted">${c.dataParto?'Nasceu em '+fd(c.dataParto):'Previsto para '+fd(c.dpp)+' ('+prazoTxt(c.dpp)+')'}</div></div>${pill(c.status,smCor(c.status))}</div>`;
     corpo=`<div class="grid g-2"><div class="card"><h3>Próximos partos</h3>${prox.map(it).join('')||'<div class="empty">Nenhum</div>'}</div><div class="card"><h3>Já nasceram</h3>${nasc.map(it).join('')||'<div class="empty">Nenhum</div>'}</div></div>`;}
   const nRec=db.sm.filter(c=>financeiroSm(c).aCobrar>0).length,nLem=lembretesPendentes().filter(x=>!x.feito).length;
-  return `<div class="grid g-kpi kpi-6">${K.html}</div>
-  <div class="toolbar"><div class="tabs" style="margin:0;border:none">${[['casos','Quadro de casos'],['guias','Guias de recolhimento'],...(podeFin()?[['receber','💰 A receber'+(nRec?' ('+nRec+')':'')]]:[]),['partos','Partos e nascimentos'],['lembretes','📲 Lembretes'+(nLem?' ('+nLem+')':'')]].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabSm" data-id="${k}">${l}</button>`).join('')}</div>
+  return `<div style="text-align:right;margin:-6px 0 2px"><button class="btn btn-sm lnk" data-act="smKpiCfg" title="Escolher, renomear e ajustar os prazos dos indicadores">⚙ editar indicadores</button></div><div class="grid g-kpi kpi-6">${K.html}</div>
+  <div class="toolbar"><div class="tabs" style="margin:0;border:none">${[['casos','Quadro de casos'],['guias','Guias de recolhimento'],...(podeFin()?[['receber','💰 A receber'+(nRec?' ('+nRec+')':'')]]:[]),['partos','Partos e nascimentos'],['lembretes','📲 Lembretes'+(nLem?' ('+nLem+')':'')],['notas','📝 Meu bloco de notas']].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabSm" data-id="${k}">${l}</button>`).join('')}</div>
     <span class="grow"></span><a class="btn btn-ghost" href="#scripts" style="text-decoration:none">Scripts</a><button class="btn btn-gold" data-act="novoSm">+ Caso</button></div>${corpo}`;
 };
 function cardSm(c){
@@ -3189,8 +3279,8 @@ function smCaso(id){
   const parc=c.parcelasInss||[];
   return `<div class="toolbar"><a class="btn btn-ghost" href="#sm" style="text-decoration:none">← Salário-maternidade</a><span class="grow"></span>
     ${cl.tel?`<a class="btn btn-ghost" style="color:#1F9D55;border-color:#1F9D55;text-decoration:none" target="_blank" rel="noopener" href="${waLink(cl.tel,scrG?personalizar(scrG.texto,cl):'')}">WhatsApp (guia)</a>`:''}
-    <button class="btn btn-ghost" data-act="smContrato" data-id="${c.id}">Gerar contrato</button><button class="btn btn-ghost" data-act="editSm" data-id="${c.id}">Editar caso</button></div>
-  <div class="card" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><div class="small muted">Salário-maternidade · ${esc(c.categoria)} <span class="sigla-sm">${esc(SM_SIGLA(c.categoria))}</span></div><div style="font-size:18px;font-weight:800"><a href="#cliente/${c.clienteId}">${esc(cl.nome||'—')}</a></div><div class="small">${esc(c.estrategia||'')}</div></div>
+    <button class="btn btn-ghost" data-act="editCli" data-id="${c.clienteId}" title="Nome, CPF, telefone e endereço ficam no cadastro da cliente (valem em todas as telas)">Dados da cliente</button>${fin?`<button class="btn btn-ghost" data-act="smHonorarios" data-id="${c.id}">Contrato de honorários</button>`:''}<button class="btn btn-ghost" data-act="smContrato" data-id="${c.id}">Gerar documento</button><button class="btn btn-ghost" data-act="editSm" data-id="${c.id}">Editar caso</button></div>
+  <div class="card" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><div class="small muted">Salário-maternidade · ${esc(c.categoria)} <span class="sigla-sm">${esc(SM_SIGLA(c.categoria))}</span></div><div style="font-size:18px;font-weight:800"><a href="#cliente/${c.clienteId}">${esc(cl.nome||'—')}</a></div><div class="small">${esc(c.estrategia||'')}</div><div class="small muted">${[cl.doc?'CPF '+esc(cl.doc):'',cl.tel?'📱 '+esc(cl.tel):'',cl.canal?esc(cl.canal):''].filter(Boolean).join(' · ')}</div></div>
     <div style="text-align:right">${pill(c.status,smCor(c.status))}${c.desfecho?' '+pill(c.desfecho,c.desfecho==='Concluído'?'p-green':'p-red'):''}${p.txt?`<div class="prox-acao sev-${p.sev||'n'}" style="margin-top:6px">➜ ${esc(p.txt)}</div>`:''}</div></div>
     <div class="fases">${SM_STATUS.map((s,i)=>`<div class="fase ${s===c.status?'atual':i<SM_STATUS.indexOf(c.status)?'feita':''}" data-act="setSmStatus" data-id="${c.id}|${esc(s)}"><i></i><span>${esc(s)}</span></div>`).join('')}</div></div>
   ${al.length?`<div class="card alertas-sm" style="margin-bottom:14px">${al.map(([s,t])=>`<div class="small" style="color:var(--${s==='r'?'red':'amber'})">⚠ ${esc(t)}</div>`).join('')}</div>`:''}
@@ -3204,9 +3294,10 @@ function smCaso(id){
       ${c.guias.length?`<div class="tbl"><table><thead><tr><th>Comp.</th><th>Código</th><th class="num">Valor</th><th>Vencimento</th><th title="Quem paga">Paga</th><th>Status</th><th></th></tr></thead><tbody>${c.guias.map(g=>{const st=guiaStatus(g),a=alertasGuia(c,g);return `<tr><td class="strong">${mLabel(g.competencia)}</td><td>${esc(codGuia(g))}</td><td class="num">${brl(g.valor)}</td><td>${fd(g.venc)}${g.pagaEm?`<div class="small muted">paga ${fd(g.pagaEm)}</div>`:''}</td><td class="small" title="${/escrit/i.test(g.quemPaga||'')?'Paga pelo escritório (reembolsável)':'Paga pela cliente'}">${/escrit/i.test(g.quemPaga||'')?'🏢':'👤'}</td><td>${pill(st,guiaCor(st))}${a.length?` <span title="${esc(a.map(x=>x[1]).join('\n'))}" style="cursor:help">⚠</span>`:''}</td><td class="num">${guiaBotoes(c,g,st)}</td></tr>`;}).join('')}</tbody></table></div>
       <div class="small muted" style="margin-top:8px">Total: ${brl(sumBy(c.guias,g=>g.valor))} · pagas ${pagas} · em aberto ${c.guias.length-pagas}</div>`:'<div class="empty">Nenhuma guia. Use "Gerar em lote" para criar as competências da carência.</div>'}</div>
     ${fin?`<div class="card" style="margin-bottom:14px"><h3>💰 Financeiro deste caso</h3>
-      ${f.hon.length||f.ree.length?`<dl class="dl"><dt>Honorários contratados</dt><dd>${brl(f.contratado)}${h?` <span class="small muted">(${h.n}x ${brl(h.val)}${h.doContrato?', do contrato':', '+num(h.pct,0)+'% do benefício'})</span>`:''}</dd><dt>Reembolso de guias</dt><dd>${brl(sumBy(f.ree,l=>l.valor))}</dd><dt>Recebido</dt><dd style="color:var(--green)">${brl(f.recebido)}</dd><dt>Saldo</dt><dd class="strong">${brl(f.total)}${f.aCobrar?` <span style="color:var(--red)">(${brl(f.aCobrar)} já pode cobrar)</span>`:''}</dd></dl>
+      ${f.hon.length||f.ree.length?`<dl class="dl"><dt>Honorários contratados</dt><dd>${brl(f.contratado)}${h?` <span class="small muted">(${h.n===1?'à vista':h.n+'x de '+brl(h.val)} · ${num(h.pct,0)}% de ${brl(h.base)}${h.estimado?' estimado':''})</span>`:''}</dd><dt>Reembolso de guias</dt><dd>${brl(sumBy(f.ree,l=>l.valor))}</dd><dt>Recebido</dt><dd style="color:var(--green)">${brl(f.recebido)}</dd><dt>Saldo</dt><dd class="strong">${brl(f.total)}${f.aCobrar?` <span style="color:var(--red)">(${brl(f.aCobrar)} já pode cobrar)</span>`:''}</dd></dl>
         <div class="tbl" style="margin-top:8px"><table><tbody>${f.ls.sort((a,b)=>a.descricao.localeCompare(b.descricao)).map(l=>`<tr data-act="editLanc" data-id="${l.id}"><td class="small">${esc(l.descricao)}</td><td class="num">${brl(l.valor)}</td><td>${pStatusLanc(lancStatus(l))}${!l.aguardandoBeneficio&&!l.pago?`<div class="small muted">vence ${fd(l.venc)}</div>`:''}</td></tr>`).join('')}</tbody></table></div>`
-        :`<div class="empty">${f.semHonorarios?'Sem contrato nem valores de honorários.':'Informe o valor do benefício e o % de honorários.'} <button class="btn btn-sm lnk" data-act="editSm" data-id="${c.id}">Editar caso</button></div>`}
+        :`<div class="empty">Informe o valor do benefício e o % de honorários. <button class="btn btn-sm lnk" data-act="editSm" data-id="${c.id}">Editar caso</button></div>`}
+      ${(c.lancExcluidos||[]).length?`<button class="btn btn-sm lnk" data-act="smRestaurarLanc" data-id="${c.id}">Restaurar ${c.lancExcluidos.length} cobrança(s) excluída(s)</button>`:''}
       ${parc.length?`<h3 style="margin-top:14px">Parcelas do INSS recebidas pela cliente</h3>${parc.map((x,i)=>`<div class="ev"><div class="body small"><b>Parcela ${i+1}</b>${x.previsao?' · previsão '+fd(x.previsao):''}${x.recebidaEm?` · <span style="color:var(--green)">recebida em ${fd(x.recebidaEm)}</span>`:''}</div>${x.recebidaEm?`<button class="btn btn-sm lnk" data-act="smParcela" data-id="${c.id}|${i}">alterar</button>`:`<button class="btn btn-ghost btn-sm" data-act="smParcela" data-id="${c.id}|${i}">Registrar recebimento</button>`}</div>`).join('')}`
         :c.status==='Deferido — a receber'?`<button class="btn btn-ghost btn-sm" style="margin-top:8px" data-act="setSmStatus" data-id="${c.id}|Deferido — a receber">Informar as parcelas do INSS</button>`:''}</div>`:''}
     </div>
@@ -3221,7 +3312,23 @@ function smCaso(id){
     </div>
   </div>`;
 }
+/* bloco de notas de cada login (aparece só para quem escreveu; salva sozinho) */
+function htmlBlocoNotas(alt){const u=usr(db.usuarioAtual);if(!u)return '';
+  return `<div class="card bloco-notas"><h3>📝 Meu bloco de notas <small id="bloco-st">${u.blocoEm?'salvo '+new Date(u.blocoEm).toLocaleString('pt-BR'):'só você vê · salva sozinho'}</small></h3>
+    <textarea id="bloco-txt" rows="${alt||10}" style="width:100%;font-family:inherit;line-height:1.5" placeholder="Anotações rápidas: ligações, lembretes, quem pediu o quê…">${esc(u.blocoNotas||'')}</textarea></div>`;}
+let tBloco=null;
+document.addEventListener('input',ev=>{if(ev.target.id!=='bloco-txt')return;const v=ev.target.value;clearTimeout(tBloco);const st=$('#bloco-st');if(st)st.textContent='digitando…';
+  tBloco=setTimeout(()=>{const u=usr(db.usuarioAtual);if(!u)return;u.blocoNotas=v;u.blocoEm=Date.now();agendarEnvio();const s2=$('#bloco-st');if(s2)s2.textContent='salvo ✓';},700);});
 const SM_ACOES={
+  smHonorarios:id=>{const c=db.sm.find(x=>x.id===id);const k=smContrato(c);editContrato(k?.id||null,k?null:{clienteId:c.clienteId,produto:'Salário-maternidade'});},
+  smRestaurarLanc:id=>{const c=db.sm.find(x=>x.id===id);c.lancExcluidos=[];save();render();toast('Cobranças restauradas');},
+  smKpiCfg:()=>{const cfg=smKpiCfg();form('Indicadores do salário-maternidade',[
+      ...SM_KPIS.map(([k,l])=>({k:'v_'+k,l:'Mostrar "'+(cfg.nomes[k]||l)+'"',t:'check'})),{t:'sec',l:'Nomes e prazos'},
+      ...SM_KPIS.map(([k,l])=>({k:'n_'+k,l:'Nome do indicador: '+l})),
+      {k:'diasGuia',l:'Guias a pagar: considerar os próximos (dias)',t:'number'},{k:'diasParto',l:'Partos: considerar os próximos (dias)',t:'number'}],
+    {...Object.fromEntries(SM_KPIS.map(([k])=>['v_'+k,!cfg.ocultos.includes(k)])),...Object.fromEntries(SM_KPIS.map(([k,l])=>['n_'+k,cfg.nomes[k]||l])),diasGuia:cfg.diasGuia,diasParto:cfg.diasParto},v=>{
+      db.escritorio.smKpis={ocultos:SM_KPIS.filter(([k])=>!v['v_'+k]).map(([k])=>k),nomes:Object.fromEntries(SM_KPIS.filter(([k,l])=>v['n_'+k]&&v['n_'+k]!==l).map(([k])=>[k,v['n_'+k]])),
+        diasGuia:Math.max(1,Math.round(+v.diasGuia||7)),diasParto:Math.max(1,Math.round(+v.diasParto||30))};toast('Indicadores salvos ✓');});},
   tabSm:k=>{ui.tabSm=k;render();},novoSm:()=>editSm(),novoSmCli:id=>editSm(null,{clienteId:id}),editSm:id=>editSm(id),
   setSmStatus:k=>{const i=k.indexOf('|');smPedirMover(k.slice(0,i),k.slice(i+1));},
   smFiltro:k=>{const f=ui.f.sm||(ui.f.sm={});if(k==='receber'){ui.tabSm='receber';f.filtro='';}else if(k==='recebido'){ui.tabSm='receber';f.filtro='';}
@@ -3530,6 +3637,7 @@ async function iniciarImportacao(file){
    ========================================================= */
 const CANAIS=['WhatsApp — Geral','WhatsApp — Salário-maternidade'];
 const ehCanalSm=c=>/matern/i.test(c||'');
+const canaisWhats=()=>CANAIS;
 /* chave do telefone: DDD + 8 últimos dígitos (ignora +55 e o 9º dígito) */
 function chaveTel(v){let d=digits(String(v??'').split('@')[0]);if(d.startsWith('55')&&d.length>=12)d=d.slice(2);if(d.startsWith('0'))d=d.slice(1);return d.length>=10?d.slice(0,2)+d.slice(-8):'';}
 function lerContatosWa(rows){
@@ -4287,6 +4395,30 @@ function sugestoesTrafego(r,ant){
 }
 
 /* ---------- página ---------- */
+/* orgânico x pago, investimento e retorno por período (dia, semana, quinzena, mês) */
+const ehPagoOrig=o=>/facebook|instagram|meta|google ads|an[uú]ncio|tr[aá]fego/i.test(o||'');
+function chavePer(d,ag){if(ag==='dia')return d;if(ag==='semana'){const x=new Date(d+'T12:00');const w=(x.getDay()+6)%7;return addDays(-w,d);}if(ag==='quinzena')return d.slice(0,8)+(+d.slice(8)<=15?'01':'16');return d.slice(0,7);}
+function rotPer(k,ag){if(ag==='mes')return MESES_L[+k.slice(5)-1]+'/'+k.slice(2,4);if(ag==='semana')return 'sem. '+fd(k).slice(0,5);if(ag==='quinzena')return (k.slice(8)==='01'?'1ª':'2ª')+' quinz. '+MESES[+k.slice(5,7)-1];return fd(k).slice(0,5);}
+function origemPorPeriodo(de,ate,ag){
+  const P={};const z=()=>({leads:0,pagos:0,org:0,inv:0,contas:{},ctr:0,ctrPagos:0,valor:0,valorPagos:0});const G=k=>P[k]||(P[k]=z());
+  db.leads.forEach(l=>{const d=l.primeiroContato||l.criado||'';if(d<de||d>ate)return;const x=G(chavePer(d,ag));x.leads++;ehPagoOrig(l.origem)?x.pagos++:x.org++;});
+  db.trafego.forEach(t=>{const n=diasEntre(t.inicio,t.fim)+1;for(let i=0;i<n;i++){const d=addDays(i,t.inicio);if(d<de||d>ate)continue;const x=G(chavePer(d,ag)),v=(+t.gasto||0)/n;x.inv+=v;const c=t.conta||'—';x.contas[c]=(x.contas[c]||0)+v;}});
+  db.contratos.forEach(k=>{if(k.data<de||k.data>ate)return;const c=cli(k.clienteId)||{};const l=c.leadId?db.leads.find(x=>x.id===c.leadId):null;const x=G(chavePer(k.data,ag));
+    x.ctr++;x.valor+=+k.valorTotal||0;if(ehPagoOrig(c.origem||l?.origem)){x.ctrPagos++;x.valorPagos+=+k.valorTotal||0;}});
+  return Object.entries(P).sort((a,b)=>a[0].localeCompare(b[0]));
+}
+function htmlOrigemPeriodo(f){
+  const ag=ui.trafAg||'semana';const ps=origemPorPeriodo(f.de,f.ate,ag);const T=ps.reduce((a,[,x])=>{['leads','pagos','org','inv','ctr','ctrPagos','valor','valorPagos'].forEach(k=>a[k]+=x[k]);Object.entries(x.contas).forEach(([c,v])=>a.contas[c]=(a.contas[c]||0)+v);return a;},{leads:0,pagos:0,org:0,inv:0,contas:{},ctr:0,ctrPagos:0,valor:0,valorPagos:0});
+  const pc=(a,b)=>b?Math.round(a/b*100)+'%':'—';const dias=diasEntre(f.de,f.ate)+1;const contas=Object.keys(T.contas);
+  const lin=(rot,x,cls)=>`<tr class="${cls||''}"><td class="strong">${rot}</td><td class="num">${x.leads}</td><td class="num">${x.pagos} <span class="small muted">${pc(x.pagos,x.leads)}</span></td><td class="num">${x.org} <span class="small muted">${pc(x.org,x.leads)}</span></td>
+    <td class="num">${brl(x.inv)}</td>${contas.length>1?contas.map(c=>`<td class="num small">${brl(x.contas[c]||0)}</td>`).join(''):''}<td class="num">${x.pagos&&x.inv?brl(x.inv/x.pagos):'—'}</td><td class="num">${x.ctrPagos}/${x.ctr}</td><td class="num">${brl(x.valorPagos)}</td>
+    <td class="num strong" style="color:${!x.inv?'inherit':x.valorPagos>=x.inv?'var(--green)':'var(--red)'}">${x.inv?num(x.valorPagos/x.inv,1)+'×':'—'}</td></tr>`;
+  return `<div class="card" style="margin-bottom:14px"><h3>Orgânico × anúncio e retorno <span class="tabs" style="margin:0;border:none">${[['dia','Diário'],['semana','Semanal'],['quinzena','Quinzenal'],['mes','Mensal']].map(([k,l])=>`<button class="tab ${ag===k?'active':''}" data-act="trafAg" data-id="${k}">${l}</button>`).join('')}</span></h3>
+    <div class="grid g-kpi" style="margin-bottom:10px">${kpi('Leads de anúncio',pc(T.pagos,T.leads),T.pagos+' de '+T.leads+' leads')}${kpi('Leads orgânicos',pc(T.org,T.leads),T.org+' leads')}${kpi('Investimento por dia',brl(T.inv/dias),brl(T.inv)+' no período'+(contas.length>1?' · '+contas.map(c=>esc(c)+': '+brl(T.contas[c])).join(' · '):''))}${kpi('Voltou em contratos (anúncio)',brl(T.valorPagos),T.inv?num(T.valorPagos/T.inv,1)+'× o investido · '+T.ctrPagos+' contrato(s)':'',T.inv?(T.valorPagos>=T.inv?'good':'bad'):'')}</div>
+    <div class="tbl"><table><thead><tr><th>Período</th><th class="num">Leads</th><th class="num">De anúncio</th><th class="num">Orgânicos</th><th class="num">Investido</th>${contas.length>1?contas.map(c=>`<th class="num small">${esc(c)}</th>`).join(''):''}<th class="num">Custo/lead</th><th class="num" title="contratos de anúncio / total">Contratos</th><th class="num">Valor (anúncio)</th><th class="num">Retorno</th></tr></thead>
+    <tbody>${ps.map(([k,x])=>lin(rotPer(k,ag),x)).join('')||'<tr><td colspan="9" class="empty">Sem dados no período</td></tr>'}${ps.length>1?lin('Total',T,'tot'):''}</tbody></table></div>
+    <div class="small muted" style="margin-top:6px">Lead "de anúncio": origem Facebook/Instagram/Google Ads (pelo código do anúncio, pelo WaSpeed ou quando o Claude informa que a conversa veio de anúncio). Contrato de anúncio: cliente com essa origem.</div></div>`;
+}
 V.trafego=()=>{
   if(!podeFin())return semPermissao();
   const f=filtroTrafego();if(f.de>f.ate)[f.de,f.ate]=[f.ate,f.de];
@@ -4300,13 +4432,13 @@ V.trafego=()=>{
     <div class="tabs" style="margin:0;border:none">${atalhos.map(([k,l])=>`<button class="tab" data-act="trafPer" data-id="${k}">${l}</button>`).join('')}</div>
     <select data-f="traf.status"><option value="">Todas as campanhas</option><option value="ativas"${f.status==='ativas'?' selected':''}>🟢 Só ativas</option><option value="inativas"${f.status==='inativas'?' selected':''}>⚪ Só inativas</option></select>
     <select data-f="traf.tipoCamp"><option value="">Teste e escala</option><option value="Teste"${f.tipoCamp==='Teste'?' selected':''}>🧪 Só testes</option><option value="Escala"${f.tipoCamp==='Escala'?' selected':''}>🚀 Só escala</option><option value="sem"${f.tipoCamp==='sem'?' selected':''}>Sem tipo</option></select>
-    <span class="grow"></span><button class="btn btn-ghost" data-act="trafIA">🤖 Análise para o Claude</button>${r.gasto&&mesInteiro?`<button class="btn btn-ghost" data-act="trafLancar">Lançar no financeiro</button>`:''}<button class="btn btn-gold" data-act="trafImportar">⇪ Importar do Meta Ads</button></div>`;
-  if(!db.trafego.length)return toolbar+`<div class="card"><h3>📣 Comece importando o relatório do Meta Ads</h3><ol class="small" style="line-height:1.8;margin:0;padding-left:18px">
+    <span class="grow"></span><button class="btn btn-ghost" data-act="trafIA">🤖 Análise para o Claude</button>${r.gasto&&mesInteiro?`<button class="btn btn-ghost" data-act="trafLancar">Lançar no financeiro</button>`:''}${INTEG?.meta?`<button class="btn btn-ghost" data-act="trafMetaAgora" title="${INTEG.metaEstado?.ultima?'Última busca: '+new Date(INTEG.metaEstado.ultima).toLocaleString('pt-BR'):''}">🔄 Buscar do Meta agora</button>`:`<a class="btn btn-ghost" style="text-decoration:none" href="#config" title="Configurações → Integrações: token do Meta Ads">🔌 Conectar Meta Ads</a>`}<button class="btn btn-gold" data-act="trafImportar">⇪ Importar planilha</button></div>`;
+  if(!db.trafego.length)return toolbar+htmlOrigemPeriodo(f)+`<div class="card"><h3>📣 Traga o investimento dos anúncios</h3><p class="small"><b>Automático (recomendado):</b> em <a href="#config">Configurações → Integrações</a>, cole o token do Meta Ads e os IDs das duas contas. O sistema busca o gasto de cada dia sozinho. <b>Pelo Claude:</b> peça "registre o investimento dos anúncios" mandando o print ou os números do Gerenciador. <b>Ou pela planilha:</b></p><ol class="small" style="line-height:1.8;margin:0;padding-left:18px">
     <li>Abra o <b>Gerenciador de Anúncios</b> (adsmanager.facebook.com) na aba <b>Campanhas</b>.</li><li>Escolha o período e, em <b>Detalhamento → Por tempo</b>, marque <b>Dia</b> (para o cálculo dia a dia).</li>
-    <li>Clique em <b>Relatórios → Exportar dados da tabela</b> (.csv ou .xlsx).</li><li>Aqui, clique em <b>⇪ Importar do Meta Ads</b>.</li></ol>
+    <li>Clique em <b>Relatórios → Exportar dados da tabela</b> (.csv ou .xlsx).</li><li>Aqui, clique em <b>⇪ Importar planilha</b>.</li></ol>
     <p class="small muted" style="margin-top:10px">Os fechamentos vêm do <b>CRM</b>: atendimentos com origem <b>Facebook / Instagram Ads</b> que você marcar como <b>Fechado</b>, na data de fechamento, com o valor dos honorários.</p></div>`;
   const filtrando=f.status||f.tipoCamp;
-  return toolbar+`${filtrando?`<div class="hint">Filtro aplicado: no CRM entram só os atendimentos com a <b>campanha</b> marcada (${r.chegaram.length} no período).</div>`:''}
+  return toolbar+htmlOrigemPeriodo(f)+`${filtrando?`<div class="hint">Filtro aplicado: no CRM entram só os atendimentos com a <b>campanha</b> marcada (${r.chegaram.length} no período).</div>`:''}
   <div class="grid g-kpi">${kpi('Investimento',brl(r.gasto)+var_(r.gasto,ant.gasto),`${fd(f.de)} a ${fd(f.ate)} · ${dur} dia(s)`)}
     ${kpi('Conversas / resultados (Meta)',num(r.res,0)+var_(r.res,ant.res),r.cpr!=null?brl(r.cpr)+' por resultado':'—')}
     ${kpi('Leads qualificados',num(r.qual,0)+var_(r.qual,ant.qual),r.cpq!=null?brl(r.cpq)+' por qualificado':'informe nos lançamentos (✏️)')}
@@ -4367,6 +4499,10 @@ function editTrafego(id){
     id&&(()=>{db.trafego=db.trafego.filter(x=>x.id!==id);}));
 }
 const TRAF_ACOES={
+  trafAg:k=>{ui.trafAg=k;render();},
+  trafMetaAgora:async()=>{if(precisaServidor())return;toast('Buscando no Meta Ads…');const f=filtroTrafego();
+    try{const r=await api('metaAds',{desde:f.de<addDays(-89)?addDays(-89):f.de,ate:today()});await puxar(false);await carregarIntegracoes();render();toast('Meta Ads: '+r.contas.map(c=>c.conta+' '+brl(c.investido)).join(' · ')+' ✓');}
+    catch(e){toast(e.msg||e.message||'Falha ao buscar no Meta',1);}},
   trafEditar:id=>editTrafego(id),trafNovo:()=>editTrafego(),
   trafImportar:()=>$('#file-trafego').click(),
   trafPer:k=>{const f=filtroTrafego(),h=today();
@@ -4754,6 +4890,8 @@ function cardIntegracoes(){
       <label class="chk small full"><input type="checkbox" id="sg_asaasSandbox"${I.asaasSandbox?' checked':''}> Asaas em modo de teste (sandbox)</label>
       ${campo('escavadorToken','⚖️ Escavador — token da API',`api.escavador.com → Tokens de acesso (serviço pago por consulta). ${I.escavador?'✅ ativo':''}`)}
       ${campo('anthropicKey','🤖 IA (Claude) — chave da API',`console.anthropic.com → API Keys (cobrança por uso). ${I.ia?'✅ ativa':''}`)}
+      ${campo('metaToken','📣 Meta Ads — token de acesso (Gerenciador de Anúncios)',`business.facebook.com → Configurações do negócio → Usuários do sistema → Gerar token (permissão <b>ads_read</b>). O sistema busca o investimento por dia sozinho, a cada 6 horas. ${I.meta?'✅ ativo':''}${I.metaEstado?.ultima?' · última busca '+new Date(I.metaEstado.ultima).toLocaleString('pt-BR'):''}${I.metaEstado?.erro?' · <b style="color:var(--red)">'+esc(I.metaEstado.erro)+'</b>':''}`)}
+      <label class="full">Meta Ads — IDs das contas de anúncio (as duas, separadas por vírgula)<input id="sg_metaContas" value="${esc(m.metaContas||'')}" placeholder="ex.: 1234567890123456, 9876543210987654"><span class="small muted" style="font-weight:400">Gerenciador de Anúncios → menu de contas: o número "ID da conta" de cada uma.</span></label>
     </div>
     ${I.webhooks?`<div class="small" style="margin-top:10px;line-height:1.7"><b>Endereços para colar nos serviços (webhooks):</b><br>Asaas: <code style="word-break:break-all">${esc(I.webhooks.asaas)}</code><br>ZapSign: <code style="word-break:break-all">${esc(I.webhooks.zapsign)}</code></div>`:''}
     <div class="mfoot"><button class="btn btn-brand" data-act="sgSalvar">Salvar integrações</button></div></div>`;
@@ -4858,7 +4996,7 @@ async function gerarPecaIA(){
 }
 
 const INTEG_ACOES={
-  sgSalvar:async()=>{const b={};['zapsignToken','asaasToken','asaasWebhookToken','escavadorToken','anthropicKey'].forEach(k=>b[k]=$('#sg_'+k).value.trim());
+  sgSalvar:async()=>{const b={};['zapsignToken','asaasToken','asaasWebhookToken','escavadorToken','anthropicKey','metaToken','metaContas'].forEach(k=>b[k]=$('#sg_'+k).value.trim());
     b.zapsignSandbox=$('#sg_zapsignSandbox').checked;b.asaasSandbox=$('#sg_asaasSandbox').checked;
     if(precisaServidor())return;
     try{await api('segredos',b);await carregarIntegracoes();render();toast('Integrações salvas ✓');}catch(e){toast(e.msg||'Não foi possível salvar',1);}},
@@ -5030,8 +5168,10 @@ function sincronizarAgendaPeticao(pt){
   if(dados.feito&&!(e&&e.feito)){dados.feitoEm=today();dados.feitoPor=db.usuarioAtual;}
   if(e)Object.assign(e,dados);else{e={id:uid(),...dados};db.eventos.push(e);pt.eventoId=e.id;}
 }
+/* quem confere: a outra advogada/sócia (Joyce ↔ Vitória); ela recebe o aviso no celular quando a petição vai para "A conferir" */
+function conferentePadrao(autor){const c=db.escritorio.conferentes?.[autor];if(c)return c;return (db.usuarios.find(u=>u.id!==autor&&/s[oó]ci|advog/i.test(u.papel||''))||{}).id||'';}
 function editPeticao(id,pre){
-  const pt=id?db.peticoes.find(x=>x.id===id):{status:'A conferir',tipo:'Manifestação',autorId:db.usuarioAtual,prazo:addDays(2),...pre};
+  const pt=id?db.peticoes.find(x=>x.id===id):{status:'A conferir',tipo:'Manifestação',autorId:db.usuarioAtual,conferenteId:conferentePadrao(db.usuarioAtual),prazo:addDays(2),...pre};
   form(id?'Editar petição':'Nova petição para conferir',[
     {k:'titulo',l:'Petição / peça',req:1,full:1,ph:'Ex.: Réplica — Maria Souza x Banco X'},{k:'tipo',l:'Tipo',t:'select',o:PET_TIPOS},{k:'status',l:'Situação',t:'select',o:PET_STATUS,req:1},
     {k:'clienteId',l:'Cliente',t:'select',o:O.clientes},{k:'processoId',l:'Processo',t:'select',o:O.processos},
@@ -5736,7 +5876,7 @@ const FUNIL_API_ACOES={
     try{toast('Aplicando… (backup + migração)');const r=await api('integracaoApi',{op:'aplicar'});toast('Migração aplicada ✓ '+r.leads_convertidos+' lead(s) no funil novo');INTAPI=null;await puxar(false);render();}catch(e){toast(e.msg||'A migração falhou (nada foi alterado)',1);}},
   migReverter:async()=>{if(!await confirmar('Reverter a migração? Os leads voltam para as etapas antigas e a API, o webhook e o conector param de funcionar. Um backup é feito antes.','Reverter'))return;
     try{const r=await api('integracaoApi',{op:'reverter'});toast('Migração revertida ✓ ('+r.leads_revertidos+' leads)');INTAPI=null;await puxar(false);render();}catch(e){toast(e.msg||'Não foi possível reverter',1);}},
-  chaveNova:()=>{const nomes={'clientes:ler':'Ler clientes','clientes:gravar':'Cadastrar/editar clientes','leads:ler':'Ler leads','leads:gravar':'Registrar/mover leads','anuncios:ler':'Ler anúncios','anuncios:gravar':'Cadastrar anúncios','relatorios:ler':'Relatórios'};
+  chaveNova:()=>{const nomes={'clientes:ler':'Ler clientes','clientes:gravar':'Cadastrar/editar clientes','leads:ler':'Ler leads','leads:gravar':'Registrar/mover leads','anuncios:ler':'Ler anúncios','anuncios:gravar':'Cadastrar anúncios','relatorios:ler':'Relatórios','financeiro:ler':'Ler contas a receber/pagar','financeiro:gravar':'Lançar receitas, despesas e tráfego'};
     modal('Nova chave de API',`<label class="small">Nome (para quem é a chave)<input id="ck-nome" placeholder="ex.: Automação de leads" style="width:100%"></label><div class="multi" style="margin-top:10px">${INTAPI.escopos.map(e=>`<label class="chk"><input type="checkbox" value="${e}" checked> ${esc(nomes[e]||e)}</label>`).join('')}</div>`,
       [{l:'Cancelar',c:'btn-ghost',fn:closeModal},{l:'Criar',c:'btn-brand',fn:async()=>{const nome=$('#ck-nome').value.trim();const esc_=[...document.querySelectorAll('#mbg .multi input:checked')].map(i=>i.value);
         if(!nome)return toast('Dê um nome à chave',1);try{const r=await api('integracaoApi',{op:'criarChave',nome,escopos:esc_});INTAPI=null;
@@ -5826,7 +5966,7 @@ const A={
   novoLead:()=>editLead(),editLead:id=>editLead(id),
   converter:id=>{const l=db.leads.find(x=>x.id===id);const nid=uid();
     db.clientes.push({id:nid,tipo:'PF',nome:l.nome,doc:'',tel:l.tel,email:l.email||'',cidade:l.cidade||'',uf:l.uf||'',origem:l.origem,produto:l.produto||'',status:'Ativo',criado:today(),
-      primeiroContato:l.primeiroContato||l.criado,ultimoContato:today(),idade:l.idade||null,nascimento:l.nascimento||'',sexo:l.sexo||'',profissao:l.profissao||'',renda:l.renda||0,obs:l.obs||'',leadId:l.id});
+      primeiroContato:l.primeiroContato||l.criado,ultimoContato:today(),idade:l.idade||null,nascimento:l.nascimento||'',sexo:l.sexo||'',profissao:l.profissao||'',renda:l.renda||0,obs:l.obs||'',leadId:l.id,canal:l.canal||''});
     l.convertido=true;l.clienteId=nid;if(!leadGanho(l)){registrarEtapaLead(l,l.etapa,etapaDoTipo('ganho')||l.etapa,'');l.etapa=etapaDoTipo('ganho')||l.etapa;}if(!l.dataFechamento)l.dataFechamento=today();db.notas.push({id:uid(),clienteId:nid,data:today(),autor:db.usuarioAtual,texto:'Cliente convertido a partir do atendimento.'+(l.proposta?' Proposta: '+l.proposta:'')});
     const smNovo=/maternidade/i.test(l.produto||'')?criarCasoSmDoLead(l,nid):null;
     save();location.hash=smNovo?'sm/'+smNovo:'cliente/'+nid;
@@ -5841,8 +5981,8 @@ const A={
   pagarReal:id=>pagarReal(id),
   novaFixa:()=>editFixa(),editFixa:id=>editFixa(id),
   lancarFixa:id=>{lancarFixas(ui.f.fixas.mes,[id]);},lancarFixas:()=>lancarFixas(ui.f.fixas.mes),
-  editMetas:()=>editMetas(),
-  finTodos:()=>{ui.f.fin.mes='';render();},
+  editMetas:()=>editMetas(),pendTodos:()=>{ui.pendTodos=!ui.pendTodos;render();},
+  finTodos:()=>{ui.f.fin.mes='';render();},finAba:k=>{ui.f.fin.tipo=k;render();},prevDet:m=>{ui.f.prev.det=m;render();},
   mesNav:k=>{const[g,d]=k.split(':');const f=ui.f[g];f.mes=ymAdd(f.mes||today().slice(0,7),+d);render();},
   xlsFin:()=>exportarExcel('lancamentos'+(ui.f.fin.mes?'-'+ui.f.fin.mes:''),[['Lançamentos',filtroFin().sort((a,b)=>a.venc.localeCompare(b.venc)).map(l=>{const c=cli(l.clienteId);return {Tipo:l.tipo==='receita'?'Entrada':'Saída',Vencimento:fd(l.venc),Descrição:l.descricao,Categoria:l.categoria,Cliente:c?.nome||'',Fone:c?.tel||'','E-mail':c?.email||'',Processo:proc(l.processoId)?.numero||'',Valor:l.valor,Status:lancStatus(l),'Pago em':l.pagoEm?fd(l.pagoEm):'',Forma:l.forma||'',Observação:l.obs||''};})]]),
   xlsReg:()=>exportarExcel('registro-historico',[['Registro histórico',linhasRegistro().map(r=>{const o={Tipo:r._t==='lead'?'Atendimento':'Cliente'};COLS_REG.forEach(([k,l,t])=>{const v=r[k];o[l]=v==null||v===''?'':t==='d'?fd(v):v;});return o;})]]),

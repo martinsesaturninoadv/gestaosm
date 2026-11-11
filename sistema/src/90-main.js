@@ -65,7 +65,7 @@ const A={
   novoLead:()=>editLead(),editLead:id=>editLead(id),
   converter:id=>{const l=db.leads.find(x=>x.id===id);const nid=uid();
     db.clientes.push({id:nid,tipo:'PF',nome:l.nome,doc:'',tel:l.tel,email:l.email||'',cidade:l.cidade||'',uf:l.uf||'',origem:l.origem,produto:l.produto||'',status:'Ativo',criado:today(),
-      primeiroContato:l.primeiroContato||l.criado,ultimoContato:today(),idade:l.idade||null,nascimento:l.nascimento||'',sexo:l.sexo||'',profissao:l.profissao||'',renda:l.renda||0,obs:l.obs||'',leadId:l.id});
+      primeiroContato:l.primeiroContato||l.criado,ultimoContato:today(),idade:l.idade||null,nascimento:l.nascimento||'',sexo:l.sexo||'',profissao:l.profissao||'',renda:l.renda||0,obs:l.obs||'',leadId:l.id,canal:l.canal||''});
     l.convertido=true;l.clienteId=nid;if(!leadGanho(l)){registrarEtapaLead(l,l.etapa,etapaDoTipo('ganho')||l.etapa,'');l.etapa=etapaDoTipo('ganho')||l.etapa;}if(!l.dataFechamento)l.dataFechamento=today();db.notas.push({id:uid(),clienteId:nid,data:today(),autor:db.usuarioAtual,texto:'Cliente convertido a partir do atendimento.'+(l.proposta?' Proposta: '+l.proposta:'')});
     const smNovo=/maternidade/i.test(l.produto||'')?criarCasoSmDoLead(l,nid):null;
     save();location.hash=smNovo?'sm/'+smNovo:'cliente/'+nid;
@@ -80,8 +80,8 @@ const A={
   pagarReal:id=>pagarReal(id),
   novaFixa:()=>editFixa(),editFixa:id=>editFixa(id),
   lancarFixa:id=>{lancarFixas(ui.f.fixas.mes,[id]);},lancarFixas:()=>lancarFixas(ui.f.fixas.mes),
-  editMetas:()=>editMetas(),
-  finTodos:()=>{ui.f.fin.mes='';render();},
+  editMetas:()=>editMetas(),pendTodos:()=>{ui.pendTodos=!ui.pendTodos;render();},
+  finTodos:()=>{ui.f.fin.mes='';render();},finAba:k=>{ui.f.fin.tipo=k;render();},prevDet:m=>{ui.f.prev.det=m;render();},
   mesNav:k=>{const[g,d]=k.split(':');const f=ui.f[g];f.mes=ymAdd(f.mes||today().slice(0,7),+d);render();},
   xlsFin:()=>exportarExcel('lancamentos'+(ui.f.fin.mes?'-'+ui.f.fin.mes:''),[['Lançamentos',filtroFin().sort((a,b)=>a.venc.localeCompare(b.venc)).map(l=>{const c=cli(l.clienteId);return {Tipo:l.tipo==='receita'?'Entrada':'Saída',Vencimento:fd(l.venc),Descrição:l.descricao,Categoria:l.categoria,Cliente:c?.nome||'',Fone:c?.tel||'','E-mail':c?.email||'',Processo:proc(l.processoId)?.numero||'',Valor:l.valor,Status:lancStatus(l),'Pago em':l.pagoEm?fd(l.pagoEm):'',Forma:l.forma||'',Observação:l.obs||''};})]]),
   xlsReg:()=>exportarExcel('registro-historico',[['Registro histórico',linhasRegistro().map(r=>{const o={Tipo:r._t==='lead'?'Atendimento':'Cliente'};COLS_REG.forEach(([k,l,t])=>{const v=r[k];o[l]=v==null||v===''?'':t==='d'?fd(v):v;});return o;})]]),

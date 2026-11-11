@@ -160,17 +160,44 @@ function editLanc(id,pre){
     {k:'produto',l:'Produto / nicho (opcional)',t:'select',o:O.produtos},
     {k:'pago',l:l.tipo==='despesa'?'Pago':'Recebido',t:'check'},{k:'pagoEm',l:'Data do pagamento',t:'date'},
     {k:'obs',l:'Observação',t:'textarea',full:1,rows:2}],
-    l,v=>{if(!v.valor){toast('Informe o valor',1);return false;}if(v.pago&&!v.pagoEm)v.pagoEm=today();if(!v.pago)v.pagoEm='';if(v.processoId&&!v.clienteId)v.clienteId=proc(v.processoId)?.clienteId||'';upsert('lancamentos',id,v,{tipo:l.tipo,criado:today()});},
-    id&&(()=>{db.lancamentos=db.lancamentos.filter(x=>x.id!==id);}));
+    l,v=>{if(!v.valor){toast('Informe o valor',1);return false;}if(v.pago&&!v.pagoEm)v.pagoEm=today();if(!v.pago)v.pagoEm='';if(v.processoId&&!v.clienteId)v.clienteId=proc(v.processoId)?.clienteId||'';if(id&&l.smId&&l.auto&&(+v.valor!==+l.valor||v.descricao!==l.descricao))v.auto=false; // valor ajustado à mão: o sistema não recalcula mais
+      upsert('lancamentos',id,v,{tipo:l.tipo,criado:today()});},
+    id&&(()=>{if(l.smId){const c=db.sm.find(x=>x.id===l.smId);if(c&&!(c.lancExcluidos||[]).includes(id))(c.lancExcluidos=c.lancExcluidos||[]).push(id);} // não volta sozinho
+      db.lancamentos=db.lancamentos.filter(x=>x.id!==id);}),
+    l.smId?'Lançamento do salário-maternidade: o sistema calcula sozinho. Se você mudar o valor, ele passa a valer como digitado. Excluir não volta a gerar (dá para restaurar na ficha do caso).':'');
+}
+function editContratoSm(id,pre){
+  const k=id?ctr(id):{data:today(),ambito:'Administrativo',forma:'PIX',responsavelId:db.usuarioAtual,produto:'Salário-maternidade',canal:cli(pre?.clienteId)?.canal||CANAIS[1],...pre};
+  const caso=db.sm.filter(x=>x.clienteId===k.clienteId).sort((a,b)=>smAtivo(b)-smAtivo(a))[0];
+  const v0={...k,exitoPct:+(caso?.honorariosPct??'')||+k.exitoPct||25,parcelasSm:Math.min(3,+(caso?.parcelasHonorarios||k.parcelasSm||1)),beneficio:+caso?.valorConcedido||+caso?.beneficioEstimado||beneficioPadraoSm(caso)};
+  form(id?'Editar contrato — salário-maternidade':'Contrato de honorários — salário-maternidade',[
+    {k:'clienteId',l:'Cliente (segurada)',t:'select',o:O.clientes,req:1,full:1},{k:'data',l:'Data do contrato',t:'date',req:1},
+    {k:'responsavelId',l:'Quem fechou o contrato',t:'select',o:O.usuarios},{k:'canal',l:'WhatsApp de origem',t:'select',o:canaisWhats(),dica:'Em qual número a cliente fechou.'},
+    {t:'sec',l:'Honorários: só no final, depois que a cliente recebe o benefício (sem entrada)'},
+    {k:'exitoPct',l:'Percentual do benefício',t:'select',o:SM_PCTS.map(x=>[x,x+'%']),req:1},{k:'parcelasSm',l:'Pagamento',t:'select',o:SM_PARC_OPC,req:1},
+    {k:'beneficio',l:'Benefício estimado (R$)',t:'number',dica:'Padrão: 4 salários mínimos. Depois do deferimento vale o valor concedido.'},{k:'forma',l:'Forma de pagamento',t:'select',o:FORMAS},
+    {k:'obs',l:'Observações',t:'textarea',full:1,rows:2}],v0,v=>{
+      const pct=+v.exitoPct,n=+v.parcelasSm,ben=+v.beneficio||beneficioPadraoSm(caso);
+      const dados={...v,produto:'Salário-maternidade',ambito:'Administrativo',exitoPct:pct,parcelasSm:n,valorTotal:Math.round(ben*pct)/100,entrada:0,parcelas:0,valorParcela:0};delete dados.beneficio;
+      const nid=upsert('contratos',id,dados);
+      let c=db.sm.find(x=>x.clienteId===v.clienteId&&smAtivo(x));
+      if(!c){const cl=cli(v.clienteId);db.sm.push(c={id:uid(),clienteId:v.clienteId,status:'Documentos',categoria:'A definir (triagem)',estrategia:'',responsavelId:v.responsavelId||db.usuarioAtual,guias:[],guiasRevisadas:1,honFinalMigrado:1,
+        historico:[{de:'',para:'Documentos',em:Date.now(),por:nomeUsr(db.usuarioAtual)}]});garantirDocsSm(c);if(cl&&!cl.produto)cl.produto='Salário-maternidade';}
+      c.honorariosPct=pct;c.parcelasHonorarios=n;if(!+c.valorConcedido)c.beneficioEstimado=ben;
+      const cl=cli(v.clienteId);if(cl)cl.status='Ativo';
+      if(!id)setTimeout(()=>celebrarEvento('contrato','Contrato fechado!',nomeCli(v.clienteId)),250);
+      setTimeout(()=>toast(`Honorários: ${pct}% de ${brl(ben)} = ${brl(dados.valorTotal)} ${n===1?'à vista':'em '+n+'x'}, cobrados depois que a cliente receber (ficam "aguardando benefício" no financeiro).`),300);},
+    id&&(()=>{db.contratos=db.contratos.filter(x=>x.id!==id);}));
 }
 function editContrato(id,pre){
-  const k=id?ctr(id):{data:today(),ambito:'Judicial',forma:'PIX',diaVenc:10,parcelas:0,entrada:0,gerar:true,responsavelId:db.usuarioAtual,...pre};
+  if(/maternidade/i.test((id?ctr(id)?.produto:pre?.produto||cli(pre?.clienteId)?.produto)||''))return editContratoSm(id,pre);
+  const k=id?ctr(id):{data:today(),ambito:'Judicial',forma:'PIX',diaVenc:10,parcelas:0,entrada:0,gerar:true,responsavelId:db.usuarioAtual,canal:cli(pre?.clienteId)?.canal||'',...pre};
   if(!id&&k.clienteId&&!k.produto)k.produto=cli(k.clienteId)?.produto||'';
   const campos=[
     {k:'clienteId',l:'Cliente (contratante)',t:'select',o:O.clientes,req:1,full:1},{k:'titular',l:'Titular da ação (se diferente)'},
     {k:'processoId',l:'Processo',t:'select',o:O.processos},{k:'produto',l:'Produto / nicho',t:'select',o:O.produtos},{k:'ambito',l:'Âmbito',t:'select',o:AMBITOS},
     {k:'data',l:'Data do contrato',t:'date',req:1},{k:'forma',l:'Forma de pagamento',t:'select',o:FORMAS},
-    {k:'responsavelId',l:'Quem fechou o contrato',t:'select',o:O.usuarios,dica:'Conta pontos no ranking da equipe.'},{k:'parceriaPct',l:'% do parceiro (se for caso de parceria)',t:'number'},
+    {k:'responsavelId',l:'Quem fechou o contrato',t:'select',o:O.usuarios,dica:'Conta pontos no ranking da equipe.'},{k:'canal',l:'WhatsApp de origem',t:'select',o:canaisWhats()},{k:'parceriaPct',l:'% do parceiro (se for caso de parceria)',t:'number'},
     {t:'sec',l:'Honorários'},
     {k:'valorTotal',l:'H.O. inicial — valor do contrato (R$)',t:'number',req:1},{k:'entrada',l:'Valor de entrada (R$)',t:'number'},
     {k:'parcelas',l:'Quantidade de parcelas',t:'number'},{k:'valorParcela',l:'Valor da parcela (vazio = calcular)',t:'number',vazio:0},
@@ -182,6 +209,7 @@ function editContrato(id,pre){
     {k:'proposta',l:'Texto da proposta',t:'textarea',full:1,rows:2},{k:'obs',l:'Observações',t:'textarea',full:1,rows:2}];
   if(!id)campos.push({k:'gerar',l:'Gerar entrada e parcelas no financeiro (contas a receber)',t:'check',full:1});
   form(id?'Editar contrato':'Novo contrato de honorários',campos,k,v=>{
+    if(/maternidade/i.test(v.produto||'')){setTimeout(()=>editContratoSm(id,v),50);return;} // produto trocado para salário-maternidade
     if(!v.valorTotal){toast('Informe o valor do contrato',1);return false;}
     if(+v.entrada>+v.valorTotal){toast('A entrada não pode ser maior que o valor do contrato',1);return false;}
     if(!v.valorParcela&&+v.parcelas>0)v.valorParcela=Math.round((v.valorTotal-(v.entrada||0))/v.parcelas*100)/100;
@@ -223,7 +251,9 @@ function editMetas(){
     {k:'entradas',l:'Valor total de entradas (R$)',t:'number'},{k:'ticket',l:'Valor médio do contrato (R$)',t:'number'},
     {k:'entradaMedia',l:'Valor médio das entradas (R$)',t:'number'},{k:'parcelasMedia',l:'Quantidade média de parcelas (máximo)',t:'number'},
     {k:'parcelaMedia',l:'Valor médio das parcelas (R$)',t:'number'},{k:'atendimentos',l:'Novos atendimentos / mês',t:'number'},
-    {k:'premio',l:'Gratificação / prêmio ao bater a meta',t:'textarea',full:1,rows:2,dica:'Aparece no painel para motivar a equipe.'}],db.metas,v=>{db.metas={...db.metas,...v};});
+    {k:'premio',l:'Gratificação / prêmio ao bater a meta',t:'textarea',full:1,rows:2,dica:'Aparece no painel para motivar a equipe.'},
+    {t:'sec',l:'Meta de contratos por pessoa (por mês)'},...db.usuarios.filter(u=>!/parceir|editor/i.test(u.papel||'')).map(u=>({k:'pp_'+u.id,l:u.nome,t:'number'}))],
+    {...db.metas,...Object.fromEntries(Object.entries(db.metas.porPessoa||{}).map(([k,v])=>['pp_'+k,v]))},v=>{const pp={};Object.keys(v).filter(k=>k.startsWith('pp_')).forEach(k=>{if(+v[k])pp[k.slice(3)]=+v[k];delete v[k];});db.metas={...db.metas,...v,porPessoa:pp};});
 }
 function pagarReal(id){
   const l=db.lancamentos.find(x=>x.id===id);
@@ -267,6 +297,9 @@ function editScript(id){
 function editModelo(id){
   const m=id?db.modelos.find(x=>x.id===id):{categoria:MODELO_CATS[0],texto:''};
   form(id?'Editar modelo':'Novo modelo de documento',[{k:'nome',l:'Nome do modelo',req:1,full:1},{k:'categoria',l:'Tipo',t:'select',o:MODELO_CATS,req:1},{k:'area',l:'Área / nicho',list:O.produtos},
-    {k:'texto',l:'Texto do modelo',t:'textarea',req:1,full:1,rows:16,dica:'Campos automáticos: '+CAMPOS_MODELO.map(c=>'{{'+c+'}}').join(' ')}],
-    m,v=>{const nid=upsert('modelos',id,v);ui.f.doc=ui.f.doc||{};ui.f.doc.modelo=nid;},id&&(()=>{db.modelos=db.modelos.filter(x=>x.id!==id);}));
+    {k:'link',l:'Link do modelo pronto (Google Docs / Drive)',t:'url',full:1,ph:'https://docs.google.com/…'},
+    {t:'sec',html:id?`<div class="dgroup" style="margin:8px 0 4px">📎 Arquivo do modelo (Word/PDF)</div>${anexosBox('modelos',m)}`:'<div class="hint" style="margin:8px 0 0">📎 Depois de salvar, abra o modelo de novo para <b>enviar o arquivo</b> (Word ou PDF).</div>'},
+    {k:'texto',l:'Texto com campos automáticos (opcional)',t:'textarea',full:1,rows:12,dica:'Só se quiser preencher sozinho na aba "Gerar". Campos: '+CAMPOS_MODELO.map(c=>'{{'+c+'}}').join(' ')}],
+    m,v=>{if(!v.texto&&!v.link&&!(m.anexos||[]).length&&id){toast('Envie o arquivo, cole o link ou escreva o texto do modelo',1);return false;}const nid=upsert('modelos',id,v);ui.f.doc=ui.f.doc||{};ui.f.doc.modelo=nid;
+      if(!id&&!v.texto&&!v.link)setTimeout(()=>{editModelo(nid);toast('Modelo criado ✓ Agora envie o arquivo 📎');},350);},id&&(()=>{db.modelos=db.modelos.filter(x=>x.id!==id);}));
 }

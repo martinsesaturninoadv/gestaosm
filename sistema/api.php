@@ -49,7 +49,7 @@ function externo(array $u): bool { return in_array($u['papel'], ['parceiro', 'ed
 // Anexos guardados no próprio sistema (fora da pasta pública): extensões aceitas e coleções que podem ter anexos
 const ANEXO_EXT = ['pdf', 'doc', 'docx', 'odt', 'rtf', 'txt', 'xls', 'xlsx', 'csv', 'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'gif',
     'mp4', 'mov', 'm4v', 'webm', 'avi', 'mkv', '3gp', 'mp3', 'm4a', 'wav', 'ogg', 'aac', 'srt', 'zip', 'psd', 'prproj', 'aep', 'xml'];
-const ANEXO_COLECOES = ['peticoes', 'conteudos', 'processos', 'clientes', 'documentos', 'tarefas'];
+const ANEXO_COLECOES = ['peticoes', 'conteudos', 'processos', 'clientes', 'documentos', 'tarefas', 'modelos'];
 const ANEXO_MAX = 2147483648; // 2 GB por arquivo
 const ANEXO_PARTE = 2097152;  // o navegador envia em pedaços de 2 MB (passa pelo limite de upload da hospedagem)
 
@@ -535,6 +535,7 @@ switch ($acao) {
         $u = usuarioLogado($pdo);
         rotinaDiaria($pdo, $cfg);
         depois(fn() => nuc_avisos_periodicos($pdo, nuc_pasta($cfg, 'backups')));
+        depois(fn() => ma_auto($pdo)); // investimento do Meta Ads, no máximo a cada 6 horas
         responder(['ok' => true, 'usuario' => usuarioPublico($u), 'agora' => agoraMs()]);
 
     case 'login':
@@ -860,8 +861,8 @@ switch ($acao) {
         $s = segredos($pdo);
         $mask = fn($k) => !empty($s[$k]) ? '••••' . substr((string) $s[$k], -4) : '';
         $base = ($https ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? '') . rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/'), '/') . '/api.php?acao=webhook';
-        $r = ['ok' => true, 'zapsign' => !empty($s['zapsignToken']), 'asaas' => !empty($s['asaasToken']), 'escavador' => !empty($s['escavadorToken']), 'ia' => !empty($s['anthropicKey'])];
-        if ($u['papel'] === 'admin') $r += ['mascaras' => ['zapsignToken' => $mask('zapsignToken'), 'asaasToken' => $mask('asaasToken'), 'asaasWebhookToken' => $mask('asaasWebhookToken'), 'escavadorToken' => $mask('escavadorToken'), 'anthropicKey' => $mask('anthropicKey')],
+        $r = ['ok' => true, 'zapsign' => !empty($s['zapsignToken']), 'asaas' => !empty($s['asaasToken']), 'escavador' => !empty($s['escavadorToken']), 'ia' => !empty($s['anthropicKey']), 'meta' => !empty($s['metaToken']) && !empty($s['metaContas']), 'metaEstado' => nuc_config($pdo, 'metaAdsEstado')];
+        if ($u['papel'] === 'admin') $r += ['mascaras' => ['zapsignToken' => $mask('zapsignToken'), 'asaasToken' => $mask('asaasToken'), 'asaasWebhookToken' => $mask('asaasWebhookToken'), 'escavadorToken' => $mask('escavadorToken'), 'anthropicKey' => $mask('anthropicKey'), 'metaToken' => $mask('metaToken'), 'metaContas' => !empty($s['metaContas']) ? (string) $s['metaContas'] : ''],
             'zapsignSandbox' => !empty($s['zapsignSandbox']), 'asaasSandbox' => !empty($s['asaasSandbox']),
             'webhooks' => !empty($s['webhookChave']) ? ['asaas' => $base . '&s=asaas', 'zapsign' => $base . '&s=zapsign&k=' . $s['webhookChave']] : null];
         responder($r);
@@ -936,13 +937,24 @@ switch ($acao) {
         rotinaDiaria($pdo, $cfg);
         responder(['ok' => true] + nuc_avisos_periodicos($pdo, nuc_pasta($cfg, 'backups'), true));
 
+    case 'metaAds': // buscar agora o investimento das contas de anúncio
+        if ($metodo !== 'POST') erro('Método inválido.', 405);
+        $u = usuarioLogado($pdo);
+        if (!in_array($u['papel'], ['admin', 'financeiro'], true)) erro('Somente administração ou financeiro.', 403);
+        $b = corpo();
+        try {
+            $r = ma_sincronizar($pdo, (string) ($b['desde'] ?? date('Y-m-d', strtotime('-30 days'))), (string) ($b['ate'] ?? date('Y-m-d')), ['tipo' => 'sessao', 'nome' => $u['nome'], 'uid' => (int) $u['id']]);
+        } catch (SvErro $e) { erro($e->getMessage(), 400); }
+        registrar($pdo, (int) $u['id'], 'meta_ads', 'trafego', '');
+        responder(['ok' => true] + $r);
+
     case 'segredos':
         if ($metodo !== 'POST') erro('Método inválido.', 405);
         $u = usuarioLogado($pdo);
         if ($u['papel'] !== 'admin') erro('Somente administradores.', 403);
         $b = corpo();
         $s = segredos($pdo);
-        foreach (['zapsignToken', 'asaasToken', 'asaasWebhookToken', 'escavadorToken', 'anthropicKey'] as $k) {
+        foreach (['zapsignToken', 'asaasToken', 'asaasWebhookToken', 'escavadorToken', 'anthropicKey', 'metaToken', 'metaContas'] as $k) {
             $v = trim((string) ($b[$k] ?? ''));
             if ($v === '-') unset($s[$k]); elseif ($v !== '') $s[$k] = mb_substr($v, 0, 500);
         }

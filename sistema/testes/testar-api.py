@@ -402,8 +402,10 @@ def main():
         esperadas = ['buscar_cliente', 'cadastrar_cliente', 'atualizar_cliente', 'anexar_documento_cliente', 'buscar_leads', 'registrar_lead', 'mudar_etapa_lead',
                      'registrar_interacao', 'converter_lead_em_cliente', 'listar_etapas_funil', 'listar_anuncios', 'cadastrar_anuncio', 'relatorio_por_anuncio',
                      'sm_buscar_caso', 'sm_criar_caso', 'sm_atualizar_caso', 'sm_mover_etapa', 'sm_registrar_guia', 'sm_marcar_guia_paga', 'sm_registrar_requerimento',
-                     'sm_registrar_exigencia', 'sm_registrar_deferimento', 'sm_registrar_parcela_recebida', 'sm_a_receber']
-        ok(sorted(nomes) == sorted(esperadas), 'tools/list traz as 24 ferramentas')
+                     'sm_registrar_exigencia', 'sm_registrar_deferimento', 'sm_registrar_parcela_recebida', 'sm_a_receber',
+                     'registrar_peticao', 'mudar_status_peticao', 'buscar_peticoes', 'registrar_compromisso', 'buscar_agenda', 'registrar_lancamento', 'registrar_despesa_fixa',
+                     'contas_a_receber_e_pagar', 'registrar_investimento_anuncios', 'relatorio_trafego', 'sincronizar_meta_ads']
+        ok(sorted(nomes) == sorted(esperadas), 'tools/list traz as 35 ferramentas')
         ok(all(t['description'] and t['inputSchema']['type'] == 'object' for t in j['result']['tools']), 'todas com descrição e schema de entrada')
         r = ferramenta('listar_etapas_funil', {})
         ok(not r['isError'] and r['structuredContent']['etapas'][0]['nome'] == 'Novo lead', 'listar_etapas_funil')
@@ -482,6 +484,51 @@ def main():
         st, j = A.sistema('dados', None, '&desde=0')
         docs = [x['dados']['nome'] for x in j['registros'] if x['colecao'] == 'documentos' and x['dados'].get('clienteId') == c['cliente_id']]
         ok(len(docs) == 4, 'checklist básico criado com o caso')
+
+        print('\n== Petições, agenda, financeiro e tráfego pelo conector ==')
+        r = ferramenta('registrar_lead', {'telefone': '11 96666-0001', 'nome': 'Lead WhatsApp 2', 'canal_whatsapp': 'WhatsApp 2', 'veio_de_anuncio': True})
+        ld = r['structuredContent']['lead']
+        ok(ld['canal_whatsapp'] == 'WhatsApp — Salário-maternidade' and ld['area_interesse'] == 'Salário-maternidade' and ld['origem'] == 'Facebook / Instagram Ads' and ld['veio_de_anuncio'], 'lead do WhatsApp 2: canal SM, área SM e origem anúncio (sem código)')
+        r = ferramenta('registrar_lead', {'telefone': '11 96666-0002', 'nome': 'Lead orgânico'})
+        ok(r['structuredContent']['lead']['origem'].startswith('Org'), 'sem anúncio continua orgânico')
+        r = ferramenta('registrar_peticao', {'titulo': 'Réplica — teste', 'link': 'https://docs.google.com/document/d/x', 'prazo': '2026-12-01', 'cliente': 'Gestante do Claude'})
+        pt = r['structuredContent']['peticao']
+        ok(not r['isError'] and pt['status'] == 'A conferir' and pt['cliente_id'], 'registrar_peticao (A conferir, cliente pelo nome)')
+        r = ferramenta('registrar_peticao', {'titulo': 'X', 'link': 'http://inseguro'})
+        ok(r['isError'], 'link sem https é recusado')
+        r = ferramenta('mudar_status_peticao', {'titulo': 'réplica — teste', 'status': 'Em correção', 'apontamentos': 'Ajustar pedidos'})
+        ok(r['structuredContent']['peticao']['status'] == 'Em correção', 'mudar_status_peticao pelo título')
+        r = ferramenta('buscar_peticoes', {'status': 'Em correção'})
+        ok(r['structuredContent']['total'] == 1, 'buscar_peticoes')
+        st, j = A.sistema('dados', None, '&desde=0')
+        evs = [x['dados'] for x in j['registros'] if x['colecao'] == 'eventos' and x['dados'].get('peticaoId') == pt['id']]
+        ok(len(evs) == 1 and evs[0]['data'] == '2026-12-01', 'prazo da petição vira compromisso na agenda')
+        r = ferramenta('registrar_compromisso', {'tipo': 'Audiência', 'titulo': 'Audiência de instrução — teste', 'data': '2026-12-10', 'hora': '14:00', 'local': 'https://meet.example/abc'})
+        ok(not r['isError'] and not r['structuredContent']['ja_existia'], 'registrar_compromisso')
+        r = ferramenta('registrar_compromisso', {'tipo': 'Audiência', 'titulo': 'Audiência de instrução — teste', 'data': '2026-12-10', 'hora': '14:00'})
+        ok(r['structuredContent']['ja_existia'], 'compromisso repetido não duplica')
+        r = ferramenta('buscar_agenda', {'desde': '2026-12-01', 'ate': '2026-12-31'})
+        ok(r['structuredContent']['total'] >= 2, 'buscar_agenda')
+        r = ferramenta('registrar_lancamento', {'tipo': 'despesa', 'descricao': 'Notebook', 'valor': 3000, 'valor_e_total': True, 'parcelas': 3, 'vencimento': '2026-11-20', 'categoria': 'equipamentos'})
+        ok(len(r['structuredContent']['lancamentos']) == 3 and r['structuredContent']['categoria'] == 'Equipamentos', 'registrar_lancamento parcelado (3x de 1.000)')
+        r = ferramenta('registrar_despesa_fixa', {'descricao': 'Aluguel', 'valor_mensal': 2000, 'dia_vencimento': 5, 'categoria': 'Aluguel'})
+        ok(r['structuredContent']['criada'], 'registrar_despesa_fixa')
+        r = ferramenta('registrar_despesa_fixa', {'descricao': 'aluguel', 'valor_mensal': 2100})
+        ok(not r['structuredContent']['criada'] and r['structuredContent']['despesa_fixa']['valor_mensal'] == 2100, 'despesa fixa com o mesmo nome é atualizada')
+        r = ferramenta('contas_a_receber_e_pagar', {'desde': '2026-11-01', 'ate': '2026-11-30', 'tipo': 'despesa'})
+        ok(r['structuredContent']['totais']['a_pagar'] >= 1000 and all(i['tipo'] == 'A pagar' for i in r['structuredContent']['itens']), 'contas_a_receber_e_pagar')
+        r = ferramenta('registrar_investimento_anuncios', {'linhas': [{'data': '2026-11-10', 'conta': 'Conta 1', 'campanha': 'SM gestantes', 'valor_gasto': 100, 'conversas': 10},
+                                                                    {'data': '2026-11-11', 'conta': 'Conta 2', 'campanha': 'BPC', 'valor_gasto': 50}]})
+        ok(r['structuredContent']['gravadas'] == 2, 'registrar_investimento_anuncios')
+        r = ferramenta('registrar_investimento_anuncios', {'linhas': [{'data': '2026-11-10', 'conta': 'Conta 1', 'campanha': 'SM gestantes', 'valor_gasto': 120}]})
+        r = ferramenta('relatorio_trafego', {'agrupar_por': 'mes', 'desde': '2026-11-01', 'ate': '2026-11-30'})
+        tt = r['structuredContent']['total']
+        ok(tt['investido'] == 170 and tt['investido_por_conta'] == {'Conta 1': 120, 'Conta 2': 50}, 'relatório: mesmo dia reenviado substitui (170, não 270), separado por conta')
+        ok(tt['leads_pagos'] >= 1 and tt['leads_organicos'] >= 1 and abs(tt['percentual_pago'] + tt['percentual_organico'] - 100) < 0.2, 'relatório: % orgânico x pago')
+        r = ferramenta('relatorio_trafego', {'agrupar_por': 'quinzena', 'desde': '2026-11-01', 'ate': '2026-11-30'})
+        ok([l['periodo'] for l in r['structuredContent']['linhas']][:1] == ['2026-11-01'], 'relatório quinzenal')
+        r = ferramenta('sincronizar_meta_ads', {})
+        ok(r['isError'] and 'Configure' in r['content'][0]['text'], 'Meta Ads sem token: explica onde configurar')
         st, j = mcp('tools/call', {'name': 'apagar_tudo', 'arguments': {}})
         ok('error' in j, 'ferramenta inexistente: erro JSON-RPC')
         st, _, _, _ = A.req('GET', '/api/v1/mcp', cab=M)

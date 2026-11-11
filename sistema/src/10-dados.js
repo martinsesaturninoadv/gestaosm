@@ -7,7 +7,7 @@
    ========================================================= */
 let db;
 let modo='local',sessao=null;
-const ui={page:'painel',id:null,agendaView:'lista',agendaMes:today().slice(0,7),f:{},tabCli:'processos',tabProc:'Judicial',procView:'lista',tabSm:'casos',tabDoc:'gerador'};
+const ui={page:'painel',id:null,agendaView:'lista',agendaMes:today().slice(0,7),f:{},tabCli:'processos',tabProc:'Judicial',procView:'lista',tabSm:'casos',tabDoc:'checklist'};
 const COLS=['clientes','processos','eventos','tarefas','leads','lancamentos','documentos','notas','contratos','despesasFixas','usuarios','sm','scripts','modelos','trafego','requisitorios','nps','recados','peticoes','conteudos','anuncios'];
 const SINGLES=['escritorio','metas','produtos','tiposEvento','indAjustes','indExtras','salas','fluxos','funil','waspeed'];
 const COLS_FIN=['lancamentos','contratos','despesasFixas','trafego','requisitorios'];
@@ -149,7 +149,7 @@ function api(acao,corpo,params){
     if(!r.ok||!j||!j.ok){if(r.status===401&&!['login','sessao'].includes(acao))mostrarLogin('Sua sessão expirou. Entre novamente.');throw {status:r.status,msg:j&&j.erro,dados:j};}
     return j;});
 }
-function save(){processarFluxos();propagarParceiro();smReconciliar(db);agendarEnvio();}
+function save(){processarFluxos();propagarParceiro();smReconciliar(db);agendarEnvio();if(typeof gcalAuto==='function')gcalAuto();}
 /* registros ligados a um cliente de parceria herdam o parceiro (é o que permite ao parceiro vê-los) */
 function propagarParceiro(){
   if(!db)return;
@@ -193,7 +193,7 @@ function puxar(inicial){
       if(x.excluido)delete snap[k];else snap[k]=novo;
     });
     ultimoSync=r.agora;
-    if(mudou&&!inicial){migrar(db);renderSeguro();if(feitos.length)feedEquipe(feitos);}
+    if(mudou&&!inicial){migrar(db);renderSeguro();if(feitos.length)feedEquipe(feitos);if(typeof gcalAuto==='function')gcalAuto();}
   }).catch(()=>{});
 }
 function renderSeguro(){

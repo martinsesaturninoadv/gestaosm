@@ -61,18 +61,24 @@ function corpoGcal(tipo,o){
   else{b.start={date:data};b.end={date:addDays(1,data)};}
   return b;
 }
-async function sincronizarGoogleAgenda(todos){
+/* automático: com o Google conectado, cada compromisso novo ou alterado (inclusive os que o Claude registrar) vai para o Google Agenda */
+let tGcal=null,gcalRodando=false;
+function gcalAuto(){if(!G.token||Date.now()>G.exp||localStorage.getItem('gcal_auto')==='0'||gcalRodando)return;clearTimeout(tGcal);
+  tGcal=setTimeout(async()=>{gcalRodando=true;try{await sincronizarGoogleAgenda(false,true);}catch(e){}finally{gcalRodando=false;}},6000);}
+async function sincronizarGoogleAgenda(todos,silencioso){
   const cal=encodeURIComponent(localStorage.getItem('gcal_cal')||'primary');const base='https://www.googleapis.com/calendar/v3/calendars/'+cal+'/events';
   const em=meuEmail();let criados=0,atualizados=0,removidos=0;
-  setSync('sincronizando com o Google Agenda…');
+  if(!silencioso)setSync('sincronizando com o Google Agenda…');
   for(const [tipo,o] of itensAgenda(todos)){
-    o.gcal=o.gcal||{};const id=o.gcal[em];const fim=tipo==='evento'?o.feito:o.status==='done';
-    if(fim){if(id){try{await gFetch(base+'/'+encodeURIComponent(id),{method:'DELETE'});}catch(e){}delete o.gcal[em];removidos++;}continue;}
-    const body=JSON.stringify(corpoGcal(tipo,o));const H={'Content-Type':'application/json'};
-    if(id){try{await gFetch(base+'/'+encodeURIComponent(id),{method:'PATCH',headers:H,body});atualizados++;continue;}catch(e){if(!/ 404| 410/.test(e.message))throw e;}}
-    const r=await gFetch(base,{method:'POST',headers:H,body});o.gcal[em]=r.id;criados++;
+    o.gcal=o.gcal||{};o.gcalH=o.gcalH||{};const id=o.gcal[em];const fim=tipo==='evento'?o.feito:o.status==='done';
+    if(fim){if(id){try{await gFetch(base+'/'+encodeURIComponent(id),{method:'DELETE'});}catch(e){}delete o.gcal[em];delete o.gcalH[em];removidos++;}continue;}
+    const body=JSON.stringify(corpoGcal(tipo,o));const H={'Content-Type':'application/json'};const h=String(hashTxt(body));
+    if(id&&o.gcalH[em]===h)continue; // sem mudança desde a última vez
+    if(id){try{await gFetch(base+'/'+encodeURIComponent(id),{method:'PATCH',headers:H,body});o.gcalH[em]=h;atualizados++;continue;}catch(e){if(!/ 404| 410/.test(e.message))throw e;}}
+    const r=await gFetch(base,{method:'POST',headers:H,body});o.gcal[em]=r.id;o.gcalH[em]=h;criados++;
   }
-  save();render();toast(`Google Agenda: ${criados} criado(s), ${atualizados} atualizado(s), ${removidos} removido(s) ✓`);
+  if(criados||atualizados||removidos){save();render();}
+  if(!silencioso)toast(`Google Agenda: ${criados} criado(s), ${atualizados} atualizado(s), ${removidos} removido(s) ✓`);else setSync('✓ salvo','ok');
 }
 function exportarICS(todos){
   const L=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Gestao do Escritorio//PT-BR','CALSCALE:GREGORIAN'];

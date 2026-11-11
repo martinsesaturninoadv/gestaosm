@@ -10,7 +10,7 @@ declare(strict_types=1);
 if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === 'servico.php') { http_response_code(404); exit; }
 
 const SV_MIGRACAO = '2026-11-api-v1';
-const SV_ESCOPOS = ['clientes:ler', 'clientes:gravar', 'leads:ler', 'leads:gravar', 'anuncios:ler', 'anuncios:gravar', 'relatorios:ler'];
+const SV_ESCOPOS = ['clientes:ler', 'clientes:gravar', 'leads:ler', 'leads:gravar', 'anuncios:ler', 'anuncios:gravar', 'relatorios:ler', 'financeiro:ler', 'financeiro:gravar'];
 const SV_TIPOS_DOC = ['procuracao', 'declaracao_hipossuficiencia', 'contrato_honorarios', 'outro'];
 const SV_ORIGEM_ORGANICA = 'Orgânico / não identificado';
 // etapas antigas do Kanban → novas (e o caminho de volta, usado ao reverter a migração)
@@ -202,7 +202,7 @@ function sv_lead_api(PDO $pdo, array $l): array
         'email' => $l['email'] ?? '', 'etapa' => $l['etapa'] ?? '', 'tipo_etapa' => $tipo, 'motivo_perda' => $l['motivoPerda'] ?? '',
         'primeira_mensagem' => $l['primeiraMensagem'] ?? '', 'data_primeiro_contato' => $l['primeiroContato'] ?? ($l['criado'] ?? ''), 'ultimo_contato' => $l['ultimoContato'] ?? '',
         'origem' => $l['origem'] ?? '', 'plataforma' => $l['plataforma'] ?? '', 'codigo_anuncio' => $l['codigoAnuncio'] ?? '', 'campanha' => $l['campanha'] ?? '',
-        'conjunto' => $l['conjunto'] ?? '', 'anuncio' => $l['anuncio'] ?? '', 'area_interesse' => $l['produto'] ?? '', 'resumo_triagem' => $l['resumoTriagem'] ?? '',
+        'conjunto' => $l['conjunto'] ?? '', 'anuncio' => $l['anuncio'] ?? '', 'area_interesse' => $l['produto'] ?? '', 'resumo_triagem' => $l['resumoTriagem'] ?? '', 'canal_whatsapp' => $l['canal'] ?? '', 'veio_de_anuncio' => !empty($l['codigoAnuncio']) || !empty($l['anuncioSemCodigo']),
         'responsavel' => isset($eq[$l['responsavelId'] ?? '']) ? $eq[$l['responsavelId']]['nome'] : ($l['responsavelNome'] ?? ''), 'responsavel_id' => $l['responsavelId'] ?? '',
         'etiquetas' => $l['etiquetas'] ?? '', 'cliente_id' => $l['clienteId'] ?? '', 'convertido' => !empty($l['convertido']), 'data_fechamento' => $l['dataFechamento'] ?? '',
         'historico_etapas' => array_values((array) ($l['historicoEtapas'] ?? [])), 'interacoes' => array_values((array) ($l['interacoes'] ?? []))];
@@ -268,10 +268,23 @@ function sv_aplicar_origem(PDO $pdo, array &$l, array $in): void
         }
         $p = sv_norm((string) ($l['plataforma'] ?? 'meta'));
         $l['origem'] = strpos($p, 'google') !== false ? 'Google Ads' : 'Facebook / Instagram Ads';
+    } elseif (sv_bool($in['veio_de_anuncio'] ?? false) || sv_texto($in['campanha'] ?? '', 200) !== '' || sv_texto($in['anuncio'] ?? '', 200) !== '') {
+        // veio de anúncio (ex.: "Você respondeu a um anúncio" no WhatsApp), mas sem o código: conta como tráfego pago
+        $p = sv_norm((string) ($l['plataforma'] ?? 'meta'));
+        $l['origem'] = strpos($p, 'google') !== false ? 'Google Ads' : 'Facebook / Instagram Ads';
+        $l['anuncioSemCodigo'] = true;
     } elseif (empty($l['codigoAnuncio']) && (empty($l['origem']) || $l['origem'] === SV_ORIGEM_ORGANICA)) {
         $l['origem'] = SV_ORIGEM_ORGANICA;
     }
     foreach (['campanha', 'conjunto', 'anuncio'] as $k) if (isset($in[$k]) && sv_texto($in[$k], 200) !== '') $l[$k] = sv_texto($in[$k], 200);
+}
+/* os dois números do escritório: o WaSpeed está no Geral; o de salário-maternidade chega pelo Claude */
+const SV_CANAIS = ['WhatsApp — Geral', 'WhatsApp — Salário-maternidade'];
+function sv_canal_whats(string $txt, string $origem = ''): string
+{
+    $n = sv_norm($txt);
+    if ($n === '') return $origem === 'waspeed' ? SV_CANAIS[0] : '';
+    return preg_match('/matern|\bsm\b|2/', $n) ? SV_CANAIS[1] : SV_CANAIS[0];
 }
 function sv_registrar_lead(PDO $pdo, array $in, array $quem, string $canal = 'api'): array
 {
@@ -307,6 +320,8 @@ function sv_registrar_lead(PDO $pdo, array $in, array $quem, string $canal = 'ap
         if ($r !== '') $l['responsavelId'] = $r;
         else { $l['responsavelNome'] = sv_texto($in['responsavel'], 120); $avisos[] = 'Responsável "' . $l['responsavelNome'] . '" não encontrado na equipe: guardado só como texto.'; }
     }
+    if (isset($in['canal_whatsapp']) || $canal === 'waspeed') $l['canal'] = sv_canal_whats((string) ($in['canal_whatsapp'] ?? ''), $canal);
+    if (empty($l['produto']) && preg_match('/matern/i', (string) ($l['canal'] ?? ''))) $l['produto'] = 'Salário-maternidade';
     sv_aplicar_origem($pdo, $l, $in);
     if (!empty($l['codigoAnuncio']) && !sv_anuncio_por_codigo($pdo, (string) $l['codigoAnuncio'])) $avisos[] = 'Código de anúncio ' . $l['codigoAnuncio'] . ' não está cadastrado em /anuncios: campanha e anúncio não foram preenchidos.';
     if (isset($in['etapa']) && sv_texto($in['etapa'], 80) !== '') {
@@ -454,6 +469,7 @@ function sv_cliente_honorarios(PDO $pdo, array $c, array $in, array $quem): ?str
     if ($exito !== null) $k['exitoPct'] = $exito;
     if (empty($k['produto']) && !empty($c['produto'])) $k['produto'] = $c['produto'];
     if (!empty($c['parceiro'])) $k['parceiro'] = $c['parceiro'];
+    if (!empty($c['canal']) && empty($k['canal'])) $k['canal'] = $c['canal'];
     sv_gravar($pdo, 'contratos', $k['id'], $k, $quem);
     return $k['id'];
 }
@@ -475,7 +491,7 @@ function sv_cadastrar_cliente(PDO $pdo, array $in, array $quem): array
         $lead = sv_lead($pdo, sv_texto($in['lead_id'], 60));
         if (!empty($lead['clienteId']) && nuc_ler($pdo, 'clientes', (string) $lead['clienteId'])) throw new SvErro('Este lead já foi convertido em cliente.', 409, ['cliente_id' => $lead['clienteId']]);
         $c['leadId'] = $lead['id'];
-        foreach (['origem' => 'origem', 'produto' => 'produto', 'email' => 'email'] as $de => $para) if (empty($c[$para]) && !empty($lead[$de])) $c[$para] = $lead[$de];
+        foreach (['origem' => 'origem', 'produto' => 'produto', 'email' => 'email', 'canal' => 'canal'] as $de => $para) if (empty($c[$para]) && !empty($lead[$de])) $c[$para] = $lead[$de];
         if (empty($c['tel']) && !empty($lead['telE164'])) { $c['telE164'] = $lead['telE164']; $c['tel'] = sv_telefone_exibir($lead['telE164']); }
         if (!empty($lead['primeiroContato'])) $c['primeiroContato'] = $lead['primeiroContato'];
     }
@@ -1237,4 +1253,436 @@ function sv_sm_a_receber(PDO $pdo, array $f): array
     if ($sit !== '') $itens = array_values(array_filter($itens, fn($i) => sv_norm($i['situacao']) === sv_norm($sit) || ($sit === 'cobrar_agora' && in_array($i['situacao'], ['A cobrar', 'Vencido'], true))));
     usort($itens, fn($a, $b) => strcmp($a['vencimento'] ?: '9999', $b['vencimento'] ?: '9999'));
     return ['totais' => array_map(fn($v) => round($v, 2), $tot), 'total' => count($itens), 'itens' => array_slice($itens, 0, 200)];
+}
+
+/* =========================================================
+   PETIÇÕES, AGENDA, FINANCEIRO e TRÁFEGO pelo conector (Claude)
+   ========================================================= */
+const SV_PET_STATUS = ['A conferir', 'Em correção', 'Conferida', 'Pronta para protocolar', 'Protocolada'];
+const SV_CAT_REC = ['H.O. iniciais', 'H.O. finais — acordo', 'H.O. finais — êxito', 'Sucumbência', 'TMP', 'Honorários mensais (partido)', 'Consulta', 'Parceria (execução delegada)', 'Reembolso de custas', 'Outras receitas'];
+const SV_CAT_DESP = ['Aluguel', 'Energia elétrica', 'Telefonia / internet', 'Sistemas', 'Tráfego — Google', 'Tráfego — Facebook/Instagram', 'Agência / marketing', 'Indicações pagas', 'Contador', 'Folha de pagamento', 'Pró-labore', 'Impostos',
+    'Taxa de cartão', 'Taxa de boleto', 'Tarifas bancárias', 'Empresa de TI', 'Copa', 'Correios', 'Material de expediente', 'Manutenção / extraordinárias', 'Equipamentos', 'Capacitação', 'Custas processuais', 'Repasse a parceiro', 'Distribuição de lucros', 'Outras despesas'];
+
+function sv_excluir(PDO $pdo, string $col, string $id, ?int $uid = null): void
+{
+    $pdo->prepare('UPDATE registros SET excluido = 1, atualizado_em = ?, atualizado_por = ? WHERE colecao = ? AND id = ?')->execute([nuc_ms(), $uid, $col, $id]);
+}
+function sv_achar_cliente(PDO $pdo, array $in): string
+{
+    if (!empty($in['cliente_id'])) return (string) sv_cliente($pdo, sv_texto($in['cliente_id'], 60))['id'];
+    $nome = sv_norm(sv_texto($in['cliente'] ?? '', 160));
+    if ($nome === '') return '';
+    $achados = array_values(array_filter(nuc_listar($pdo, 'clientes'), fn($c) => strpos(sv_norm((string) ($c['nome'] ?? '')), $nome) !== false));
+    if (count($achados) === 1) return (string) $achados[0]['id'];
+    if (!$achados) throw new SvErro('Cliente "' . ($in['cliente'] ?? '') . '" não encontrado. Use buscar_cliente.', 404);
+    throw new SvErro('Mais de um cliente com esse nome: informe cliente_id.', 409, ['opcoes' => array_map(fn($c) => ['id' => $c['id'], 'nome' => $c['nome'] ?? ''], array_slice($achados, 0, 10))]);
+}
+function sv_achar_processo(PDO $pdo, array $in): string
+{
+    $id = sv_texto($in['processo_id'] ?? '', 60);
+    if ($id !== '') { if (!nuc_ler($pdo, 'processos', $id)) throw new SvErro('Processo não encontrado.', 404); return $id; }
+    $num = sv_digitos(sv_texto($in['numero_processo'] ?? '', 40));
+    if ($num === '') return '';
+    foreach (nuc_listar($pdo, 'processos') as $p) if (sv_digitos((string) ($p['numero'] ?? '')) === $num) return (string) $p['id'];
+    return '';
+}
+/* push para pessoas da equipe (ids u1…), sem quem fez a ação */
+function sv_avisar(PDO $pdo, array $ids, array $quem, string $tipo, string $titulo, string $texto, string $url, string $chave): void
+{
+    $em = nuc_emails_por_id($pdo);
+    $para = array_values(array_filter(array_map(fn($i) => $em[$i] ?? null, array_diff(array_unique(array_filter($ids)), [(string) ($quem['membro'] ?? '')]))));
+    if ($para) try { nuc_push($pdo, $para, $tipo, $titulo, $texto, $url, $chave, 'high'); } catch (Throwable $e) { /* aviso nunca impede a gravação */ }
+}
+
+/* ---------- petições (conferência entre as advogadas) ---------- */
+function sv_pet_api(PDO $pdo, array $p): array
+{
+    $eq = sv_equipe($pdo);
+    $nm = fn($id) => $eq[$id]['nome'] ?? '';
+    return ['id' => $p['id'], 'titulo' => $p['titulo'] ?? '', 'tipo' => $p['tipo'] ?? '', 'status' => $p['status'] ?? '', 'cliente_id' => $p['clienteId'] ?? '', 'processo_id' => $p['processoId'] ?? '',
+        'autor' => $nm($p['autorId'] ?? ''), 'conferente' => $nm($p['conferenteId'] ?? ''), 'prazo' => $p['prazo'] ?? '', 'hora' => $p['hora'] ?? '', 'link' => $p['link'] ?? '',
+        'apontamentos' => $p['apontamentos'] ?? '', 'criada_em' => $p['criado'] ?? ''];
+}
+/* quem confere: o informado; senão a outra advogada/sócia da equipe */
+function sv_conferente_padrao(PDO $pdo, string $autor): string
+{
+    $esc = nuc_config($pdo, 'escritorio');
+    if (!empty($esc['conferentes'][$autor])) return (string) $esc['conferentes'][$autor];
+    foreach (nuc_listar($pdo, 'usuarios') as $u) if (($u['id'] ?? '') !== $autor && preg_match('/s[oó]ci|advog/i', (string) ($u['papel'] ?? ''))) return (string) $u['id'];
+    return '';
+}
+function sv_pet_registrar(PDO $pdo, array $in, array $quem): array
+{
+    $tit = sv_texto($in['titulo'] ?? '', 200);
+    if ($tit === '') throw new SvErro('Informe o título da petição.', 422, ['campo' => 'titulo']);
+    $autor = sv_texto($in['autor'] ?? '', 160) !== '' ? sv_resolver_responsavel($pdo, sv_texto($in['autor'], 160)) : (string) ($quem['membro'] ?? '');
+    $conf = sv_texto($in['conferente'] ?? '', 160) !== '' ? sv_resolver_responsavel($pdo, sv_texto($in['conferente'], 160)) : sv_conferente_padrao($pdo, $autor);
+    $st = sv_opcao($in['status'] ?? 'A conferir', SV_PET_STATUS, 'status') ?: 'A conferir';
+    $link = sv_texto($in['link'] ?? '', 1000);
+    if ($link !== '' && !preg_match('#^https://#', $link)) throw new SvErro('O link precisa começar com https:// (ex.: Google Drive ou Docs).', 422, ['campo' => 'link']);
+    $p = ['id' => 'pt' . nuc_uid(), 'titulo' => $tit, 'tipo' => sv_texto($in['tipo'] ?? 'Manifestação', 60) ?: 'Manifestação', 'status' => $st, 'clienteId' => sv_achar_cliente($pdo, $in),
+        'processoId' => sv_achar_processo($pdo, $in), 'autorId' => $autor, 'conferenteId' => $conf, 'prazo' => sv_data($in['prazo'] ?? '', 'prazo'), 'hora' => sv_texto($in['hora'] ?? '', 5),
+        'link' => $link, 'apontamentos' => sv_texto($in['apontamentos'] ?? '', 4000), 'obs' => sv_texto($in['obs'] ?? '', 2000), 'criado' => sv_hoje(), 'criadoPor' => $autor,
+        'historico' => [['em' => nuc_ms(), 'por' => $quem['membro'] ?? '', 'status' => $st]], 'viaClaude' => true];
+    if ($p['processoId'] !== '' && $p['clienteId'] === '') $p['clienteId'] = (string) ((nuc_ler($pdo, 'processos', $p['processoId']) ?? [])['clienteId'] ?? '');
+    sv_pet_agenda($pdo, $p, $quem);
+    sv_gravar($pdo, 'peticoes', $p['id'], $p, $quem);
+    sv_pet_aviso($pdo, $p, null, $quem);
+    return ['peticao' => sv_pet_api($pdo, $p), 'avisado' => sv_pet_api($pdo, $p)['conferente']];
+}
+function sv_pet_achar(PDO $pdo, array $in): array
+{
+    $id = sv_texto($in['peticao_id'] ?? '', 60);
+    if ($id !== '') { $p = nuc_ler($pdo, 'peticoes', $id); if (!$p) throw new SvErro('Petição não encontrada.', 404); return $p; }
+    $t = sv_norm(sv_texto($in['titulo'] ?? '', 200));
+    $xs = array_values(array_filter(nuc_listar($pdo, 'peticoes'), fn($p) => $t !== '' && strpos(sv_norm((string) ($p['titulo'] ?? '')), $t) !== false && ($p['status'] ?? '') !== 'Protocolada'));
+    if (count($xs) === 1) return $xs[0];
+    throw new SvErro($xs ? 'Mais de uma petição com esse título: informe peticao_id.' : 'Petição não encontrada: informe peticao_id ou parte do título.', $xs ? 409 : 404);
+}
+function sv_pet_status(PDO $pdo, array $in, array $quem): array
+{
+    $p = sv_pet_achar($pdo, $in);
+    $ant = $p;
+    if (sv_texto($in['status'] ?? '', 60) !== '') $p['status'] = sv_opcao($in['status'], SV_PET_STATUS, 'status');
+    foreach (['apontamentos' => 4000, 'obs' => 2000] as $k => $max) if (array_key_exists($k, $in)) $p[$k] = sv_texto($in[$k], $max);
+    if (array_key_exists('link', $in)) $p['link'] = sv_texto($in['link'], 1000);
+    if (array_key_exists('prazo', $in)) $p['prazo'] = sv_data($in['prazo'], 'prazo');
+    if (sv_texto($in['conferente'] ?? '', 160) !== '') $p['conferenteId'] = sv_resolver_responsavel($pdo, sv_texto($in['conferente'], 160));
+    if ($p['status'] !== $ant['status']) $p['historico'] = array_merge((array) ($p['historico'] ?? []), [['em' => nuc_ms(), 'por' => $quem['membro'] ?? '', 'status' => $p['status']]]);
+    if ($p['status'] === 'Conferida' && empty($p['conferidaEm'])) $p['conferidaEm'] = sv_hoje();
+    if ($p['status'] === 'Protocolada' && empty($p['protocoladaEm'])) $p['protocoladaEm'] = sv_hoje();
+    sv_pet_agenda($pdo, $p, $quem);
+    sv_gravar($pdo, 'peticoes', (string) $p['id'], $p, $quem);
+    sv_pet_aviso($pdo, $p, $ant, $quem);
+    return ['peticao' => sv_pet_api($pdo, $p)];
+}
+function sv_pet_aviso(PDO $pdo, array $p, ?array $ant, array $quem): void
+{
+    $st = (string) $p['status']; $stAnt = (string) ($ant['status'] ?? '');
+    $tit = (string) ($p['titulo'] ?? '');
+    if ($st === 'A conferir' && ($stAnt !== 'A conferir' || ($ant['conferenteId'] ?? '') !== ($p['conferenteId'] ?? '')))
+        sv_avisar($pdo, [$p['conferenteId'] ?? ''], $quem, 'tarefa', '🔎 Petição para você conferir', $tit . (!empty($p['prazo']) ? ' — protocolar até ' . nuc_data((string) $p['prazo']) : ''), '#peticoes', 'petconf:' . $p['id'] . ':' . nuc_ms());
+    elseif ($st !== $stAnt && in_array($st, ['Em correção', 'Conferida', 'Pronta para protocolar'], true))
+        sv_avisar($pdo, [$p['autorId'] ?? ''], $quem, 'tarefa', $st === 'Em correção' ? '✏️ Petição voltou para correção' : '✅ Petição conferida', $tit . (!empty($p['apontamentos']) && $st === 'Em correção' ? ' — ' . mb_substr((string) $p['apontamentos'], 0, 120) : ''), '#peticoes', 'petst:' . $p['id'] . ':' . $st . ':' . nuc_ms());
+    elseif ($st === 'Protocolada' && $stAnt !== 'Protocolada')
+        sv_avisar($pdo, [$p['autorId'] ?? '', $p['conferenteId'] ?? ''], $quem, 'conquista', '📨 Petição protocolada', $tit, '#peticoes', 'petprot:' . $p['id']);
+}
+/* o prazo da petição vira compromisso na agenda (igual à tela) */
+function sv_pet_agenda(PDO $pdo, array &$p, array $quem): void
+{
+    $eid = (string) ($p['eventoId'] ?? '');
+    if (empty($p['prazo'])) { if ($eid !== '') sv_excluir($pdo, 'eventos', $eid, $quem['uid'] ?? null); $p['eventoId'] = ''; return; }
+    $resp = array_values(array_unique(array_filter([(string) ($p['autorId'] ?? ''), (string) ($p['conferenteId'] ?? '')])));
+    $e = $eid !== '' ? (nuc_ler($pdo, 'eventos', $eid) ?? []) : [];
+    if ($eid === '' || !$e) $eid = 'e' . nuc_uid();
+    $e = array_merge($e, ['id' => $eid, 'tipo' => 'Prazo', 'titulo' => 'Protocolar: ' . $p['titulo'], 'data' => $p['prazo'], 'hora' => $p['hora'] ?? '', 'clienteId' => $p['clienteId'] ?? '', 'processoId' => $p['processoId'] ?? '',
+        'responsavelId' => $resp[0] ?? ($quem['membro'] ?? ''), 'responsaveis' => $resp ?: [($quem['membro'] ?? '')], 'feito' => $p['status'] === 'Protocolada', 'obs' => 'Ligado à conferência de petições (' . $p['status'] . ').', 'peticaoId' => $p['id']]);
+    sv_gravar($pdo, 'eventos', $eid, $e, $quem);
+    $p['eventoId'] = $eid;
+}
+function sv_pet_buscar(PDO $pdo, array $f): array
+{
+    $st = sv_texto($f['status'] ?? '', 60) !== '' ? sv_opcao($f['status'], SV_PET_STATUS, 'status') : '';
+    $out = [];
+    foreach (nuc_listar($pdo, 'peticoes') as $p) {
+        if ($st !== '' && ($p['status'] ?? '') !== $st) continue;
+        if ($st === '' && ($p['status'] ?? '') === 'Protocolada' && empty($f['incluir_protocoladas'])) continue;
+        $out[] = sv_pet_api($pdo, $p);
+    }
+    usort($out, fn($a, $b) => strcmp($a['prazo'] ?: '9999', $b['prazo'] ?: '9999'));
+    return ['total' => count($out), 'itens' => array_slice($out, 0, 100)];
+}
+
+/* ---------- agenda (audiências, reuniões, prazos) ---------- */
+function sv_evento_registrar(PDO $pdo, array $in, array $quem): array
+{
+    $tit = sv_texto($in['titulo'] ?? '', 200);
+    $data = sv_data($in['data'] ?? '', 'data');
+    if ($tit === '' || $data === '') throw new SvErro('Informe título e data do compromisso.', 422, ['campo' => $tit === '' ? 'titulo' : 'data']);
+    $hora = sv_texto($in['hora'] ?? '', 5);
+    if ($hora !== '' && !preg_match('/^\d{2}:\d{2}$/', $hora)) throw new SvErro('Hora no formato HH:MM.', 422, ['campo' => 'hora']);
+    $resp = [];
+    foreach ((array) ($in['responsaveis'] ?? []) as $r) { $x = sv_resolver_responsavel($pdo, sv_texto($r, 160)); if ($x !== '') $resp[] = $x; }
+    if (!$resp && !empty($quem['membro'])) $resp = [(string) $quem['membro']];
+    $cid = sv_achar_cliente($pdo, $in); $pid = sv_achar_processo($pdo, $in);
+    if ($pid !== '' && $cid === '') $cid = (string) ((nuc_ler($pdo, 'processos', $pid) ?? [])['clienteId'] ?? '');
+    // não duplica: mesmo título, data e hora
+    foreach (nuc_listar($pdo, 'eventos') as $e) if (($e['data'] ?? '') === $data && ($e['hora'] ?? '') === $hora && sv_norm((string) ($e['titulo'] ?? '')) === sv_norm($tit))
+        return ['evento' => ['id' => $e['id'], 'titulo' => $e['titulo'], 'data' => $data, 'hora' => $hora], 'ja_existia' => true];
+    $e = ['id' => 'e' . nuc_uid(), 'tipo' => sv_texto($in['tipo'] ?? 'Reunião', 60) ?: 'Reunião', 'titulo' => $tit, 'data' => $data, 'hora' => $hora, 'clienteId' => $cid, 'processoId' => $pid,
+        'responsavelId' => $resp[0] ?? '', 'responsaveis' => array_values(array_unique($resp)), 'feito' => false,
+        'obs' => trim(sv_texto($in['local'] ?? '', 300) !== '' ? 'Local/link: ' . sv_texto($in['local'], 300) . "\n" . sv_texto($in['obs'] ?? '', 2000) : sv_texto($in['obs'] ?? '', 2000)), 'viaClaude' => true];
+    sv_gravar($pdo, 'eventos', $e['id'], $e, $quem);
+    sv_avisar($pdo, $e['responsaveis'], $quem, 'tarefa', (preg_match('/audi/i', $e['tipo']) ? '⚖️ Nova audiência' : '📅 Novo compromisso') . ' para você', $tit . ' — ' . nuc_data($data) . ($hora ? ' às ' . $hora : ''), '#agenda', 'evnovo:' . $e['id']);
+    return ['evento' => ['id' => $e['id'], 'tipo' => $e['tipo'], 'titulo' => $tit, 'data' => $data, 'hora' => $hora, 'cliente_id' => $cid, 'processo_id' => $pid], 'ja_existia' => false];
+}
+function sv_agenda(PDO $pdo, array $f): array
+{
+    $de = sv_data($f['desde'] ?? '', 'desde') ?: sv_hoje();
+    $ate = sv_data($f['ate'] ?? '', 'ate') ?: sv_mais_dias($de, 30);
+    $cli = [];
+    foreach (nuc_listar($pdo, 'clientes') as $c) $cli[(string) $c['id']] = $c['nome'] ?? '';
+    $eq = sv_equipe($pdo);
+    $out = [];
+    foreach (nuc_listar($pdo, 'eventos') as $e) {
+        if (!empty($e['feito']) || ($e['data'] ?? '') < $de || ($e['data'] ?? '') > $ate) continue;
+        $out[] = ['id' => $e['id'], 'tipo' => $e['tipo'] ?? '', 'titulo' => $e['titulo'] ?? '', 'data' => $e['data'], 'hora' => $e['hora'] ?? '', 'cliente' => $cli[(string) ($e['clienteId'] ?? '')] ?? '',
+            'responsaveis' => array_map(fn($i) => $eq[$i]['nome'] ?? $i, nuc_resp($e))];
+    }
+    usort($out, fn($a, $b) => strcmp($a['data'] . $a['hora'], $b['data'] . $b['hora']));
+    return ['total' => count($out), 'itens' => array_slice($out, 0, 200)];
+}
+
+/* ---------- financeiro ---------- */
+function sv_lanc_registrar(PDO $pdo, array $in, array $quem): array
+{
+    $tipo = sv_norm(sv_texto($in['tipo'] ?? '', 20)) === 'despesa' ? 'despesa' : 'receita';
+    $desc = sv_texto($in['descricao'] ?? '', 200);
+    $valor = sv_valor($in['valor'] ?? null, 'valor');
+    $venc = sv_data($in['vencimento'] ?? '', 'vencimento') ?: sv_hoje();
+    if ($desc === '' || !$valor) throw new SvErro('Informe descrição e valor.', 422, ['campo' => $desc === '' ? 'descricao' : 'valor']);
+    $cats = $tipo === 'despesa' ? SV_CAT_DESP : SV_CAT_REC;
+    $cat = sv_texto($in['categoria'] ?? '', 80) !== '' ? sv_opcao($in['categoria'], $cats, 'categoria') : ($tipo === 'despesa' ? 'Outras despesas' : 'Outras receitas');
+    $pago = sv_bool($in['pago'] ?? false);
+    $cid = sv_achar_cliente($pdo, $in); $pid = sv_achar_processo($pdo, $in);
+    $n = max(1, min(60, (int) ($in['parcelas'] ?? 1)));
+    $ids = [];
+    for ($i = 0; $i < $n; $i++) {
+        $v = $i ? date('Y-m-d', strtotime("$venc 12:00 +$i month")) : $venc;
+        $l = ['id' => 'l' . nuc_uid(), 'tipo' => $tipo, 'descricao' => $desc . ($n > 1 ? ' — parcela ' . ($i + 1) . "/$n" : ''), 'categoria' => $cat, 'clienteId' => $cid, 'processoId' => $pid, 'contratoId' => '',
+            'valor' => round($valor / (sv_bool($in['valor_e_total'] ?? false) ? $n : 1), 2), 'venc' => $v, 'pago' => $pago && !$i, 'pagoEm' => $pago && !$i ? (sv_data($in['pago_em'] ?? '', 'pago_em') ?: $v) : '',
+            'forma' => sv_texto($in['forma'] ?? 'PIX', 30) ?: 'PIX', 'produto' => '', 'obs' => sv_texto($in['obs'] ?? '', 2000), 'criado' => sv_hoje(), 'viaClaude' => true];
+        sv_gravar($pdo, 'lancamentos', $l['id'], $l, $quem);
+        $ids[] = $l['id'];
+    }
+    return ['lancamentos' => $ids, 'tipo' => $tipo, 'categoria' => $cat];
+}
+function sv_fixa_registrar(PDO $pdo, array $in, array $quem): array
+{
+    $desc = sv_texto($in['descricao'] ?? '', 200);
+    $valor = sv_valor($in['valor_mensal'] ?? null, 'valor_mensal');
+    if ($desc === '' || !$valor) throw new SvErro('Informe descrição e valor mensal.', 422);
+    $cat = sv_texto($in['categoria'] ?? '', 80) !== '' ? sv_opcao($in['categoria'], SV_CAT_DESP, 'categoria') : 'Outras despesas';
+    $f = null;
+    foreach (nuc_listar($pdo, 'despesasFixas') as $x) if (sv_norm((string) ($x['descricao'] ?? '')) === sv_norm($desc)) $f = $x;
+    $novo = $f === null;
+    $f = array_merge($f ?? ['id' => 'f' . nuc_uid()], ['descricao' => $desc, 'categoria' => $cat, 'previsto' => $valor, 'dia' => max(1, min(31, (int) ($in['dia_vencimento'] ?? 10))), 'ativo' => !array_key_exists('ativa', $in) || sv_bool($in['ativa']), 'produto' => '']);
+    sv_gravar($pdo, 'despesasFixas', (string) $f['id'], $f, $quem);
+    return ['despesa_fixa' => ['id' => $f['id'], 'descricao' => $desc, 'categoria' => $cat, 'valor_mensal' => $valor, 'dia' => $f['dia']], 'criada' => $novo,
+        'obs' => 'Entra em "Despesas fixas" e é lançada no mês pelo botão "Lançar despesas do mês".'];
+}
+function sv_contas(PDO $pdo, array $f): array
+{
+    $de = sv_data($f['desde'] ?? '', 'desde') ?: date('Y-m-01');
+    $ate = sv_data($f['ate'] ?? '', 'ate') ?: date('Y-m-t', strtotime($de . ' 12:00'));
+    $tipo = sv_norm(sv_texto($f['tipo'] ?? '', 20));
+    $cli = []; $proc = [];
+    foreach (nuc_listar($pdo, 'clientes') as $c) $cli[(string) $c['id']] = $c['nome'] ?? '';
+    foreach (nuc_listar($pdo, 'processos') as $p) $proc[(string) $p['id']] = $p['numero'] ?? '';
+    $itens = []; $tot = ['a_receber' => 0.0, 'a_pagar' => 0.0, 'recebido' => 0.0, 'pago' => 0.0, 'aguardando_beneficio' => 0.0];
+    foreach (nuc_listar($pdo, 'lancamentos') as $l) {
+        $d = !empty($l['pago']) ? (string) ($l['pagoEm'] ?: $l['venc']) : (string) ($l['venc'] ?? '');
+        if ($d < $de || $d > $ate) continue;
+        $rec = ($l['tipo'] ?? '') === 'receita';
+        if ($tipo === 'receita' && !$rec || $tipo === 'despesa' && $rec) continue;
+        $ag = !empty($l['aguardandoBeneficio']) && empty($l['pago']);
+        $k = !empty($l['pago']) ? ($rec ? 'recebido' : 'pago') : ($ag ? 'aguardando_beneficio' : ($rec ? 'a_receber' : 'a_pagar'));
+        $tot[$k] += (float) ($l['valor'] ?? 0);
+        if (!empty($f['so_em_aberto']) && !empty($l['pago'])) continue;
+        $itens[] = ['tipo' => $rec ? 'A receber' : 'A pagar', 'data' => $d, 'descricao' => $l['descricao'] ?? '', 'categoria' => $l['categoria'] ?? '', 'valor' => (float) ($l['valor'] ?? 0),
+            'de_quem' => $cli[(string) ($l['clienteId'] ?? '')] ?? '', 'processo' => $proc[(string) ($l['processoId'] ?? '')] ?? '',
+            'situacao' => !empty($l['pago']) ? ($rec ? 'Recebido' : 'Pago') : ($ag ? 'Aguardando benefício' : ($d < sv_hoje() ? 'Vencido' : 'Em aberto'))];
+    }
+    usort($itens, fn($a, $b) => strcmp($a['data'], $b['data']));
+    return ['periodo' => [$de, $ate], 'totais' => array_map(fn($v) => round($v, 2), $tot), 'total' => count($itens), 'itens' => array_slice($itens, 0, 300)];
+}
+
+/* ---------- tráfego pago: investimento por dia (Meta Ads pela API ou informado pelo Claude) e retorno ---------- */
+function tr_nicho(array $existentes, string $campanha): string
+{
+    foreach ($existentes as $t) if (($t['campanha'] ?? '') === $campanha && !empty($t['nicho'])) return (string) $t['nicho'];
+    $n = sv_norm($campanha);
+    if (preg_match('/\bsm\b|matern|gestant/', $n)) return 'Salário-maternidade';
+    if (preg_match('/bpc|loas/', $n)) return 'BPC/LOAS';
+    return '';
+}
+/* grava linhas diárias (por anúncio) e tira as linhas antigas que cobrem os mesmos dias da mesma conta (não soma duas vezes) */
+function tr_gravar_linhas(PDO $pdo, array $linhas, string $fonte, array $quem): array
+{
+    if (!$linhas) return ['gravadas' => 0, 'substituidas' => 0];
+    $existentes = nuc_listar($pdo, 'trafego');
+    $porConta = [];
+    $chave = fn($l) => (string) ($l['conta'] ?? '') . ($fonte === 'claude' ? '|' . ($l['campanha'] ?? '') : '');
+    foreach ($linhas as $l) { $c = $chave($l); $porConta[$c][0] = min($porConta[$c][0] ?? '9999', $l['inicio']); $porConta[$c][1] = max($porConta[$c][1] ?? '', $l['inicio']); }
+    $novosIds = array_flip(array_map(fn($l) => $l['id'], $linhas));
+    $subst = 0;
+    foreach ($existentes as $t) {
+        $c = $chave($t);
+        if (isset($novosIds[$t['id']]) || !isset($porConta[$c])) continue;
+        if (($t['inicio'] ?? '') <= $porConta[$c][1] && ($t['fim'] ?? '') >= $porConta[$c][0] && empty($t['manual'])) { sv_excluir($pdo, 'trafego', (string) $t['id'], $quem['uid'] ?? null); $subst++; }
+    }
+    foreach ($linhas as $l) {
+        $l += ['nicho' => tr_nicho($existentes, (string) $l['campanha']), 'tipoCamp' => '', 'importado' => sv_hoje(), 'fonte' => $fonte, 'alcance' => 0, 'tipo' => '', 'resultados' => 0, 'ativa' => null];
+        nuc_gravar($pdo, 'trafego', $l['id'], $l, $quem['uid'] ?? null);
+    }
+    $pdo->prepare('INSERT INTO historico (quando, usuario_id, acao, colecao, registro_id, ip) VALUES (?,?,?,?,?,?)')
+        ->execute([nuc_ms(), $quem['uid'] ?? null, mb_substr('api:trafego:' . $fonte, 0, 20), 'trafego', count($linhas) . ' linhas', $_SERVER['REMOTE_ADDR'] ?? null]);
+    return ['gravadas' => count($linhas), 'substituidas' => $subst];
+}
+function tr_registrar(PDO $pdo, array $in, array $quem): array
+{
+    $ls = [];
+    foreach ((array) ($in['linhas'] ?? []) as $i => $r) {
+        if (!is_array($r)) continue;
+        $dia = sv_data($r['data'] ?? '', "linhas[$i].data");
+        $gasto = sv_valor($r['valor_gasto'] ?? null, "linhas[$i].valor_gasto");
+        if ($dia === '' || $gasto === null) throw new SvErro("Linha $i: informe data e valor_gasto.", 422);
+        $conta = sv_texto($r['conta'] ?? 'Conta de anúncios', 120) ?: 'Conta de anúncios';
+        $camp = sv_texto($r['campanha'] ?? '(sem nome)', 200) ?: '(sem nome)'; $conj = sv_texto($r['conjunto'] ?? '', 200); $an = sv_texto($r['anuncio'] ?? '', 200);
+        $ls[] = ['id' => 'tc' . substr(md5("$conta|$camp|$conj|$an|$dia"), 0, 16), 'conta' => $conta, 'campanha' => $camp, 'conjunto' => $conj, 'anuncio' => $an, 'inicio' => $dia, 'fim' => $dia,
+            'gasto' => round($gasto, 2), 'impressoes' => (int) ($r['impressoes'] ?? 0), 'cliques' => (int) ($r['cliques'] ?? 0), 'conversas' => (int) ($r['conversas'] ?? 0), 'leads' => (int) ($r['leads'] ?? 0), 'resultados' => (int) ($r['conversas'] ?? 0) ?: (int) ($r['leads'] ?? 0)];
+    }
+    if (!$ls) throw new SvErro('Envie pelo menos uma linha em "linhas".', 422, ['campo' => 'linhas']);
+    return tr_gravar_linhas($pdo, $ls, 'claude', $quem);
+}
+/* ----- Meta Ads (Graph API). Token e contas ficam em "segredos" (nunca vão para o navegador) ----- */
+function ma_cfg(PDO $pdo): array
+{
+    $s = nuc_config($pdo, 'segredos');
+    $contas = [];
+    foreach (preg_split('/[\s,;]+/', (string) ($s['metaContas'] ?? '')) as $x) { $d = preg_replace('/\D/', '', $x); if ($d !== '') $contas[] = $d; }
+    return ['token' => (string) ($s['metaToken'] ?? ''), 'contas' => array_values(array_unique($contas))];
+}
+function ma_get(string $url): array
+{
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 40, CURLOPT_CONNECTTIMEOUT => 10]);
+    $r = curl_exec($ch); $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE); $err = curl_error($ch); curl_close($ch);
+    if ($r === false) throw new SvErro('Sem conexão com a Meta: ' . $err, 502);
+    $j = json_decode((string) $r, true);
+    if (!is_array($j)) throw new SvErro('Resposta inválida da Meta (HTTP ' . $code . ').', 502);
+    if (isset($j['error'])) throw new SvErro('Meta: ' . ($j['error']['message'] ?? 'erro') . (($j['error']['code'] ?? 0) == 190 ? ' — gere um novo token no Gerenciador de Negócios.' : ''), 502);
+    return $j;
+}
+function ma_acao(array $acoes, array $tipos): int
+{
+    $n = 0;
+    foreach ($acoes as $a) if (in_array($a['action_type'] ?? '', $tipos, true)) $n += (int) round((float) ($a['value'] ?? 0));
+    return $n;
+}
+function ma_sincronizar(PDO $pdo, string $desde, string $ate, array $quem): array
+{
+    $c = ma_cfg($pdo);
+    if ($c['token'] === '' || !$c['contas']) throw new SvErro('Configure o token e as contas de anúncio em Configurações → Integrações.', 409);
+    if ($desde > $ate) [$desde, $ate] = [$ate, $desde];
+    $res = [];
+    foreach ($c['contas'] as $act) {
+        $q = http_build_query(['level' => 'ad', 'time_increment' => 1, 'limit' => 500, 'access_token' => $c['token'],
+            'fields' => 'account_name,campaign_name,adset_name,ad_name,ad_id,spend,impressions,reach,inline_link_clicks,actions',
+            'time_range' => json_encode(['since' => $desde, 'until' => $ate])]);
+        $url = "https://graph.facebook.com/v21.0/act_$act/insights?$q";
+        $ls = []; $paginas = 0; $conta = '';
+        while ($url && $paginas++ < 40) {
+            $j = ma_get($url);
+            foreach ((array) ($j['data'] ?? []) as $r) {
+                $dia = (string) ($r['date_start'] ?? ''); $conta = (string) ($r['account_name'] ?? ('Conta ' . $act));
+                $ac = (array) ($r['actions'] ?? []);
+                $ls[] = ['id' => 'ma' . substr(md5($act . '|' . ($r['ad_id'] ?? $r['ad_name'] ?? '') . '|' . $dia), 0, 16), 'conta' => $conta, 'contaId' => $act,
+                    'campanha' => (string) ($r['campaign_name'] ?? '(sem nome)'), 'conjunto' => (string) ($r['adset_name'] ?? ''), 'anuncio' => (string) ($r['ad_name'] ?? ''), 'inicio' => $dia, 'fim' => $dia,
+                    'gasto' => round((float) ($r['spend'] ?? 0), 2), 'impressoes' => (int) ($r['impressions'] ?? 0), 'alcance' => (int) ($r['reach'] ?? 0), 'cliques' => (int) ($r['inline_link_clicks'] ?? 0),
+                    'conversas' => ma_acao($ac, ['onsite_conversion.messaging_conversation_started_7d']), 'leads' => ma_acao($ac, ['lead', 'onsite_conversion.lead_grouped', 'offsite_conversion.fb_pixel_lead'])];
+                $ls[count($ls) - 1]['resultados'] = $ls[count($ls) - 1]['conversas'] ?: $ls[count($ls) - 1]['leads'];
+                $ls[count($ls) - 1]['tipo'] = 'Conversas por mensagem iniciadas';
+            }
+            $url = (string) ($j['paging']['next'] ?? '');
+        }
+        $g = tr_gravar_linhas($pdo, $ls, 'meta', $quem);
+        $res[] = ['conta' => $conta ?: $act, 'linhas' => $g['gravadas'], 'investido' => round(array_sum(array_column($ls, 'gasto')), 2)];
+    }
+    $est = nuc_config($pdo, 'metaAdsEstado');
+    $est = ['ultima' => nuc_ms(), 'ate' => $ate, 'resultado' => $res, 'erro' => ''] + $est;
+    nuc_gravar($pdo, 'config', 'metaAdsEstado', $est);
+    return ['periodo' => [$desde, $ate], 'contas' => $res];
+}
+/* automático: no máximo a cada 6 horas, quando alguém abre o sistema (busca desde o último dia sincronizado, até 90 dias) */
+function ma_auto(PDO $pdo): void
+{
+    $c = ma_cfg($pdo);
+    if ($c['token'] === '' || !$c['contas']) return;
+    $est = nuc_config($pdo, 'metaAdsEstado');
+    if (nuc_ms() - (int) ($est['ultima'] ?? 0) < 6 * 3600000) return;
+    $desde = max(date('Y-m-d', strtotime('-90 days')), date('Y-m-d', strtotime(((string) ($est['ate'] ?? date('Y-m-d', strtotime('-30 days')))) . ' -2 days')));
+    try { ma_sincronizar($pdo, $desde, date('Y-m-d'), ['tipo' => 'meta', 'nome' => 'Meta Ads (automático)', 'uid' => null]); }
+    catch (Throwable $e) { nuc_gravar($pdo, 'config', 'metaAdsEstado', ['ultima' => nuc_ms(), 'erro' => $e->getMessage()] + $est); }
+}
+/* relatório: orgânico x pago, investimento e retorno em contratos, por dia / semana / quinzena / mês */
+function tr_periodo(string $d, string $agrup): string
+{
+    $t = strtotime("$d 12:00");
+    if ($agrup === 'dia') return $d;
+    if ($agrup === 'semana') return date('Y-m-d', strtotime('monday this week', $t));
+    if ($agrup === 'quinzena') return substr($d, 0, 8) . ((int) substr($d, 8) <= 15 ? '01' : '16');
+    return substr($d, 0, 7);
+}
+function tr_relatorio(PDO $pdo, array $f): array
+{
+    $ag = sv_norm(sv_texto($f['agrupar_por'] ?? 'mes', 12));
+    $ag = in_array($ag, ['dia', 'semana', 'quinzena'], true) ? $ag : 'mes';
+    $ate = sv_data($f['ate'] ?? '', 'ate') ?: sv_hoje();
+    $de = sv_data($f['desde'] ?? '', 'desde') ?: date('Y-m-d', strtotime("$ate -" . ['dia' => 14, 'semana' => 56, 'quinzena' => 90, 'mes' => 180][$ag] . ' days'));
+    $pago = fn($o) => preg_match('/facebook|instagram|meta|google ads|anúncio|anuncio|tráfego|trafego/iu', (string) $o);
+    $P = [];
+    $z = fn() => ['leads' => 0, 'leads_pagos' => 0, 'leads_organicos' => 0, 'investido' => 0.0, 'conversas' => 0, 'contratos' => 0, 'contratos_pagos' => 0, 'valor_contratos' => 0.0, 'valor_contratos_pagos' => 0.0, 'por_conta' => []];
+    foreach (nuc_listar($pdo, 'leads') as $l) {
+        $d = (string) ($l['primeiroContato'] ?? ($l['criado'] ?? ''));
+        if ($d < $de || $d > $ate) continue;
+        $k = tr_periodo($d, $ag); $P[$k] = $P[$k] ?? $z();
+        $P[$k]['leads']++; $P[$k][$pago($l['origem'] ?? '') ? 'leads_pagos' : 'leads_organicos']++;
+    }
+    foreach (nuc_listar($pdo, 'trafego') as $t) {
+        $ini = (string) ($t['inicio'] ?? ''); $fim = (string) ($t['fim'] ?? $ini);
+        if ($ini === '' || $fim < $de || $ini > $ate) continue;
+        // linha de vários dias (planilha): divide o valor igualmente pelos dias
+        $dias = max(1, (int) round((strtotime("$fim 12:00") - strtotime("$ini 12:00")) / 86400) + 1);
+        for ($i = 0; $i < $dias; $i++) {
+            $d = date('Y-m-d', strtotime("$ini 12:00 +$i day"));
+            if ($d < $de || $d > $ate) continue;
+            $k = tr_periodo($d, $ag); $P[$k] = $P[$k] ?? $z();
+            $v = (float) ($t['gasto'] ?? 0) / $dias;
+            $P[$k]['investido'] += $v; $P[$k]['conversas'] += (int) ($t['conversas'] ?? 0) / $dias;
+            $cn = (string) ($t['conta'] ?? '—'); $P[$k]['por_conta'][$cn] = ($P[$k]['por_conta'][$cn] ?? 0) + $v;
+        }
+    }
+    $clientes = []; $leads = [];
+    foreach (nuc_listar($pdo, 'clientes') as $c) $clientes[(string) $c['id']] = $c;
+    foreach (nuc_listar($pdo, 'leads') as $l) $leads[(string) $l['id']] = $l;
+    foreach (nuc_listar($pdo, 'contratos') as $k0) {
+        $d = (string) ($k0['data'] ?? '');
+        if ($d < $de || $d > $ate) continue;
+        $c = $clientes[(string) ($k0['clienteId'] ?? '')] ?? [];
+        $orig = (string) ($c['origem'] ?? ($leads[(string) ($c['leadId'] ?? '')]['origem'] ?? ''));
+        $k = tr_periodo($d, $ag); $P[$k] = $P[$k] ?? $z();
+        $v = (float) ($k0['valorTotal'] ?? 0);
+        $P[$k]['contratos']++; $P[$k]['valor_contratos'] += $v;
+        if ($pago($orig)) { $P[$k]['contratos_pagos']++; $P[$k]['valor_contratos_pagos'] += $v; }
+    }
+    ksort($P);
+    $tot = $z(); $linhas = [];
+    foreach ($P as $k => $x) {
+        foreach ($x as $c => $v) if ($c !== 'por_conta') $tot[$c] += $v;
+        foreach ($x['por_conta'] as $cn => $v) $tot['por_conta'][$cn] = ($tot['por_conta'][$cn] ?? 0) + $v;
+        $linhas[] = tr_linha($k, $x);
+    }
+    $nd = max(1, (int) round((strtotime("$ate 12:00") - strtotime("$de 12:00")) / 86400) + 1);
+    return ['agrupado_por' => $ag, 'periodo' => [$de, $ate], 'linhas' => $linhas, 'total' => tr_linha('total', $tot) + ['investimento_medio_por_dia' => round($tot['investido'] / $nd, 2)],
+        'obs' => 'Lead pago = origem de anúncio (código do anúncio, "veio de anúncio" ou plataforma). Contrato pago = cliente cuja origem é anúncio. Retorno = valor dos contratos pagos ÷ investimento.'];
+}
+function tr_linha(string $k, array $x): array
+{
+    $pc = fn($a, $b) => $b ? round($a / $b * 100, 1) : 0;
+    return ['periodo' => $k, 'leads' => $x['leads'], 'leads_pagos' => $x['leads_pagos'], 'leads_organicos' => $x['leads_organicos'], 'percentual_pago' => $pc($x['leads_pagos'], $x['leads']),
+        'percentual_organico' => $pc($x['leads_organicos'], $x['leads']), 'investido' => round($x['investido'], 2), 'investido_por_conta' => array_map(fn($v) => round($v, 2), $x['por_conta']),
+        'custo_por_lead_pago' => $x['leads_pagos'] ? round($x['investido'] / $x['leads_pagos'], 2) : null, 'contratos' => $x['contratos'], 'contratos_de_anuncio' => $x['contratos_pagos'],
+        'valor_contratos' => round($x['valor_contratos'], 2), 'valor_contratos_de_anuncio' => round($x['valor_contratos_pagos'], 2),
+        'cac' => $x['contratos_pagos'] ? round($x['investido'] / $x['contratos_pagos'], 2) : null, 'retorno_por_real' => $x['investido'] > 0 ? round($x['valor_contratos_pagos'] / $x['investido'], 2) : null];
 }

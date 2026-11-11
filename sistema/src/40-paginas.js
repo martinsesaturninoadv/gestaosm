@@ -44,13 +44,21 @@ V.clientes=()=>{
   </tbody></table></div>`;
 };
 
+/* referência do lançamento: processo, caso de salário-maternidade ou contrato */
+function refLanc(l){
+  const p=proc(l.processoId);if(p)return 'Processo '+p.numero+(p.parteContraria?' x '+p.parteContraria:'');
+  if(l.smId)return 'Salário-maternidade'+(l.smTipo==='reembolso'?' — reembolso de guia':'');
+  const k=l.contratoId&&ctr(l.contratoId);if(k)return 'Contrato '+(k.produto||'')+' de '+fd(k.data);
+  if(l.fixaId)return 'Despesa fixa';return l.produto||'';
+}
 function lancTable(list,showCli=true){
   if(!list.length)return '<div class="empty">Nenhum lançamento</div>';
-  return `<div class="tbl"><table><thead><tr><th>Vencimento</th><th>Descrição</th>${showCli?'<th class="hide-m">Cliente</th>':''}<th class="hide-m">Categoria</th><th class="num">Valor</th><th>Status</th><th></th></tr></thead><tbody>
-  ${list.map(l=>{const st=lancStatus(l);return `<tr data-act="editLanc" data-id="${l.id}"><td>${fd(l.venc)}</td><td><div class="strong">${esc(l.descricao)}</div>${l.processoId&&proc(l.processoId)?`<div class="small muted">${esc(proc(l.processoId).numero)}</div>`:''}${l.obs?`<div class="small muted">${esc(l.obs)}</div>`:''}</td>
-    ${showCli?`<td class="hide-m">${esc(l.clienteId?nomeCli(l.clienteId):'—')}</td>`:''}<td class="hide-m small">${esc(l.categoria)}</td>
+  return `<div class="tbl"><table><thead><tr><th>Quando</th>${showCli?'<th>De quem / para quem</th>':''}<th>O quê</th><th class="hide-m">Referente a</th><th class="num">Valor</th><th>Situação</th><th></th></tr></thead><tbody>
+  ${list.map(l=>{const st=lancStatus(l);const ag=st==='Aguardando benefício';return `<tr data-act="editLanc" data-id="${l.id}"><td>${ag?'<span class="small muted">quando a cliente receber</span>':fd(l.venc)}${!l.pago&&!ag?`<div class="small muted">${prazoTxt(l.venc)}</div>`:''}</td>
+    ${showCli?`<td class="strong">${l.clienteId?`<a href="#cliente/${l.clienteId}">${esc(nomeCli(l.clienteId))}</a>`:'<span class="muted">—</span>'}</td>`:''}
+    <td><div class="strong">${esc(l.descricao)}</div><div class="small muted">${esc(l.categoria)}${l.obs?' · '+esc(l.obs):''}</div></td><td class="hide-m small">${esc(refLanc(l))||'—'}</td>
     <td class="num" style="color:${l.tipo==='despesa'?'var(--red)':'var(--green)'};font-weight:600">${l.tipo==='despesa'?'− ':''}${brl(l.valor)}</td><td>${pStatusLanc(st)}${l.pago&&l.pagoEm&&l.pagoEm!==l.venc?`<div class="small muted">em ${fd(l.pagoEm)}</div>`:''}</td>
-    <td class="num">${l.pago?'':`${l.tipo==='receita'&&l.clienteId?`<button class="btn btn-ghost btn-sm" data-act="asaasCobrar" data-id="${l.id}" title="${l.cobranca?'Ver o link de pagamento':'Gerar cobrança PIX/boleto (Asaas)'}">${l.cobranca?'💳 Link':'💳 Cobrar'}</button>`:''}<button class="btn btn-ghost btn-sm" data-act="baixar" data-id="${l.id}">${l.tipo==='despesa'?'Pagar':'Receber'}</button>`}</td></tr>`;}).join('')}</tbody></table></div>`;
+    <td class="num">${l.pago||ag?'':`${l.tipo==='receita'&&l.clienteId?`<button class="btn btn-ghost btn-sm" data-act="asaasCobrar" data-id="${l.id}" title="${l.cobranca?'Ver o link de pagamento':'Gerar cobrança PIX/boleto (Asaas)'}">${l.cobranca?'💳 Link':'💳 Cobrar'}</button>`:''}<button class="btn btn-ghost btn-sm" data-act="baixar" data-id="${l.id}">${l.tipo==='despesa'?'Pagar':'Receber'}</button>`}</td></tr>`;}).join('')}</tbody></table></div>`;
 }
 function contratosTable(list,showCli=true){
   if(!list.length)return '<div class="empty">Nenhum contrato</div>';
@@ -82,7 +90,10 @@ V.cliente=()=>{
     <button class="btn btn-ghost btn-sm" data-act="novaRecCli" data-id="${c.id}">+ Receita avulsa</button><button class="btn btn-gold btn-sm" data-act="ctrCli" data-id="${c.id}">Novo contrato</button></div>${lancTable(ls,false)}`;
   if(tab==='documentos')body=`<div class="toolbar">${c.driveLink?`<a class="btn btn-ghost btn-sm" href="${esc(c.driveLink)}" target="_blank" rel="noopener" style="text-decoration:none">📁 Pasta no Google Drive</a>`:`<button class="btn btn-ghost btn-sm" data-act="vincularDrive" data-id="${c.id}">📁 Vincular pasta do Drive</button>`}<span class="grow"></span><button class="btn btn-ghost btn-sm" data-act="docsPadraoSm" data-id="${c.id}">+ Documentos padrão do salário-maternidade</button><button class="btn btn-ghost btn-sm" data-act="modeloCli" data-id="${c.id}">Gerar contrato / proposta / procuração</button><button class="btn btn-gold btn-sm" data-act="novoDocCli" data-id="${c.id}">+ Documento</button></div>`+docList(docs);
   if(tab==='documentos')body=htmlDocsGerados(c)+body;
-  if(tab==='sm')body=`<div class="toolbar"><span class="grow"></span><button class="btn btn-gold btn-sm" data-act="novoSmCli" data-id="${c.id}">+ Caso de salário-maternidade</button></div>`+(sms.length?sms.map(x=>{const pg=x.guias.filter(g=>g.pagaEm).length;return `<div class="ev"><div class="body" data-go="sm/${x.id}"><div class="t">${esc(x.categoria)} · ${esc(x.estrategia||'')}</div><div class="small muted">DPP/parto ${fd(x.dataParto||x.dpp)} · guias pagas ${pg}/${x.guias.length}</div></div>${pill(x.status,smCor(x.status))}</div>`;}).join(''):'<div class="empty">Nenhum caso cadastrado</div>');
+  if(tab==='sm')body=`<div class="toolbar"><span class="grow"></span><button class="btn btn-gold btn-sm" data-act="novoSmCli" data-id="${c.id}">+ Caso de salário-maternidade</button></div>`+(sms.length?sms.map(x=>{const pg=x.guias.filter(g=>g.pagaEm).length,pa=proximaAcaoSm(x),fs=podeFin()?financeiroSm(x):null;return `<div class="ev"><div class="body" data-go="sm/${x.id}" style="cursor:pointer"><div class="t">${esc(x.categoria)}${x.estrategia?' · '+esc(x.estrategia):''}</div>
+    <div class="small muted">${x.dataParto?'Parto '+fd(x.dataParto):x.dpp?'DPP '+fd(x.dpp):'Sem DPP'} · guias pagas ${pg}/${x.guias.length}${x.nb?' · NB '+esc(x.nb):''}</div>
+    ${pa.txt?`<div class="prox-acao sev-${pa.sev||'n'}">➜ ${esc(pa.txt)}</div>`:''}${fs&&fs.total?`<div class="small">💰 ${brl(fs.total)} em aberto${fs.aCobrar?` · <b style="color:var(--red)">${brl(fs.aCobrar)} já pode cobrar</b>`:' (aguardando benefício)'}</div>`:''}</div>
+    <div style="text-align:right">${pill(x.status,smCor(x.status))}<div><button class="btn btn-sm lnk" data-act="editSm" data-id="${x.id}">editar</button></div></div></div>`;}).join(''):'<div class="empty">Nenhum caso cadastrado</div>');
   if(tab==='agenda')body=`<div class="toolbar"><span class="grow"></span><button class="btn btn-gold btn-sm" data-act="novoEvCli" data-id="${c.id}">+ Compromisso</button></div>`+(evs.length?evs.map(e=>evItem(e)).join(''):'<div class="empty">Nenhum compromisso pendente</div>');
   if(tab==='portal'){body=htmlRecados(c);if(recadosNaoLidos(c.id)){db.recados.forEach(r=>{if(r.clienteId===c.id&&r.origem==='cliente')r.lidoEscritorio=true;});setTimeout(save,50);}}
   if(tab==='historico')body=`<div style="display:flex;gap:8px;margin-bottom:14px"><textarea id="nota-txt" rows="2" style="flex:1" placeholder="Registrar atendimento, ligação, reunião…"></textarea><button class="btn btn-brand" data-act="addNota" data-id="${c.id}">Registrar</button></div>
@@ -160,30 +171,35 @@ V.atendimentos=()=>{
 /* ---------- FINANCEIRO ---------- */
 V.financeiro=()=>{
   if(!podeFin())return semPermissao();
-  const f=ui.f.fin||(ui.f.fin={tipo:'',status:'',mes:today().slice(0,7),q:''});
-  const L=db.lancamentos;
-  const rec=L.filter(l=>l.tipo==='receita'&&!l.pago),desp=L.filter(l=>l.tipo==='despesa'&&!l.pago);
-  const atras=rec.filter(l=>diff(l.venc)<0);
+  const f=ui.f.fin||(ui.f.fin={tipo:'receita',status:'',mes:today().slice(0,7),q:''});
+  const L=db.lancamentos;const ab=l=>!l.pago&&lancStatus(l)!=='Aguardando benefício';
+  const rec=L.filter(l=>l.tipo==='receita'&&ab(l)),desp=L.filter(l=>l.tipo==='despesa'&&ab(l)),agu=L.filter(l=>l.tipo==='receita'&&!l.pago&&lancStatus(l)==='Aguardando benefício');
+  const atrR=rec.filter(l=>diff(l.venc)<0),atrD=desp.filter(l=>diff(l.venc)<0);
   const prox30=d=>diff(d)>=0&&diff(d)<=30;
-  const q=norm(f.q);
-  const list=filtroFin().sort((a,b)=>a.venc.localeCompare(b.venc));
+  const list=filtroFin().sort((a,b)=>(lancStatus(b)==='Atrasado')-(lancStatus(a)==='Atrasado')||a.venc.localeCompare(b.venc));
   const tR=sumBy(list.filter(l=>l.tipo==='receita'),l=>l.valor),tD=sumBy(list.filter(l=>l.tipo==='despesa'),l=>l.valor);
+  const aba=(k,l,n)=>`<button class="tab ${f.tipo===k?'active':''}" data-act="finAba" data-id="${k}">${l}${n?` <span class="nb" style="position:static">${n}</span>`:''}</button>`;
+  const titulo=f.tipo==='receita'?'A receber':f.tipo==='despesa'?'A pagar':'Todos os lançamentos';
   return `<div class="grid g-kpi">
-    ${kpi('A receber (crédito em carteira)',brl(sumBy(rec,l=>l.valor)),brl(sumBy(rec.filter(l=>prox30(l.venc)),l=>l.valor))+' nos próximos 30 dias')}
-    ${kpi('Em atraso',brl(sumBy(atras,l=>l.valor)),atras.length+' lançamento(s)',atras.length?'bad':'good')}
+    ${kpi('A receber',brl(sumBy(rec,l=>l.valor)),brl(sumBy(rec.filter(l=>prox30(l.venc)),l=>l.valor))+' nos próximos 30 dias')}
+    ${kpi('Recebimentos atrasados',brl(sumBy(atrR,l=>l.valor)),atrR.length+' a cobrar',atrR.length?'bad':'good')}
+    ${kpi('Aguardando benefício (salário-maternidade)',brl(sumBy(agu,l=>l.valor)),'vence 5 dias úteis depois que a cliente recebe')}
     ${kpi('A pagar',brl(sumBy(desp,l=>l.valor)),brl(sumBy(desp.filter(l=>prox30(l.venc)),l=>l.valor))+' nos próximos 30 dias')}
+    ${kpi('Contas atrasadas',brl(sumBy(atrD,l=>l.valor)),atrD.length+' conta(s)',atrD.length?'bad':'good')}
   </div>
+  <div class="tabs">${aba('receita','💰 A receber',atrR.length)}${aba('despesa','💸 A pagar',atrD.length)}${aba('','Tudo')}</div>
   <div class="toolbar">
-    <input data-f="fin.q" value="${esc(f.q)}" placeholder="Buscar descrição, cliente…" style="min-width:200px">
-    <select data-f="fin.tipo"><option value="">Receitas e despesas</option><option value="receita"${f.tipo==='receita'?' selected':''}>Receitas (entradas)</option><option value="despesa"${f.tipo==='despesa'?' selected':''}>Despesas (saídas)</option></select>
-    <select data-f="fin.status"><option value="">Todos os status</option>${['Em aberto','Atrasado','Pago'].map(s=>`<option${f.status===s?' selected':''}>${s}</option>`).join('')}</select>
+    <input data-f="fin.q" value="${esc(f.q)}" placeholder="Buscar: cliente, descrição, processo…" style="min-width:200px">
+    <select data-f="fin.status"><option value="">Todas as situações</option>${['Em aberto','Atrasado','Aguardando benefício','Pago'].map(s=>`<option${f.status===s?' selected':''}>${s}</option>`).join('')}</select>
     ${mesSel('fin',f.mes)}<button class="btn btn-ghost btn-sm" data-act="finTodos">Todos os meses</button>
     <span class="grow"></span>
     <button class="btn btn-ghost" data-act="xlsFin">Exportar Excel</button>
-    <button class="btn btn-ghost" data-act="novaDesp">+ Despesa</button><button class="btn btn-ghost" data-act="novaRec">+ Receita</button><button class="btn btn-gold" data-act="novoCtr">Novo contrato</button></div>
-  <div class="card"><h3>Lançamentos ${f.mes?'— '+mLong(f.mes):'— todos os meses'}<small>Receitas ${brl(tR)} · Despesas ${brl(tD)} · Saldo <b style="color:${tR-tD>=0?'var(--green)':'var(--red)'}">${brl(tR-tD)}</b></small></h3>${lancTable(list)}</div>`;
+    <button class="btn btn-ghost" data-act="novaDesp">+ Conta a pagar</button><button class="btn btn-ghost" data-act="novaRec">+ Conta a receber</button><button class="btn btn-gold" data-act="novoCtr">Novo contrato</button></div>
+  <div class="card"><h3>${titulo} ${f.mes?'— '+mLong(f.mes):'— todos os meses'}<small>${f.tipo!=='despesa'?'Entradas '+brl(tR):''}${!f.tipo?' · ':''}${f.tipo!=='receita'?'Saídas '+brl(tD):''}${!f.tipo?` · Saldo <b style="color:${tR-tD>=0?'var(--green)':'var(--red)'}">${brl(tR-tD)}</b>`:''}</small></h3>${lancTable(list)}
+  <div class="small muted" style="margin-top:8px">Os atrasados aparecem primeiro. "Aguardando benefício" são honorários e reembolsos de salário-maternidade: o vencimento é definido quando a cliente recebe a parcela do INSS.</div></div>`;
 };
-function filtroFin(){const f=ui.f.fin;const q=norm(f.q);return db.lancamentos.filter(l=>(!f.tipo||l.tipo===f.tipo)&&(!f.status||lancStatus(l)===f.status)&&(!f.mes||l.venc.startsWith(f.mes))&&(!q||norm(l.descricao+' '+nomeCli(l.clienteId)+' '+l.categoria+' '+(l.obs||'')).includes(q)));}
+function filtroFin(){const f=ui.f.fin;const q=norm(f.q);return db.lancamentos.filter(l=>{const st=lancStatus(l);
+  return (!f.tipo||l.tipo===f.tipo)&&(!f.status||st===f.status)&&(!f.mes||l.venc.startsWith(f.mes)||(f.status!=='Pago'&&!l.pago&&(st==='Atrasado'&&f.mes===today().slice(0,7)||st==='Aguardando benefício')))&&(!q||norm(l.descricao+' '+nomeCli(l.clienteId)+' '+l.categoria+' '+(l.obs||'')+' '+refLanc(l)).includes(q));});}
 
 V.fixas=()=>{
   if(!podeFin())return semPermissao();
@@ -200,7 +216,7 @@ V.fixas=()=>{
   const faltam=fixas.filter(x=>x.ativo&&!db.lancamentos.some(l=>l.fixaId===x.id&&l.venc>=ini&&l.venc<=fim)).length;
   return `<div class="toolbar">${mesSel('fixas',ym)}<span class="grow"></span>${faltam?`<button class="btn btn-brand" data-act="lancarFixas">Lançar ${faltam} despesa(s) fixa(s) de ${mLabel(ym)}</button>`:''}<button class="btn btn-gold" data-act="novaFixa">+ Despesa fixa</button></div>
   <div class="grid g-kpi">${kpi('Previsto no mês',brl(tPrev))}${kpi('Real (pago)',brl(tReal),tPrev?num(tReal/tPrev*100,0)+'% do previsto':'')}${kpi('Despesas variáveis',brl(sumBy(variaveis,l=>l.valor)),variaveis.length+' lançamento(s)')}</div>
-  <div class="hint">Igual à aba <b>Despesas fixas</b> da planilha: valor previsto × valor real. Cadastre cada despesa uma vez; todo mês clique em <b>Lançar</b> e, ao pagar, informe o valor real.</div>
+  <div class="hint">Valor previsto × valor real. Cadastre cada despesa uma vez; todo mês clique em <b>Lançar</b> e, ao pagar, informe o valor real. Dica: mande ao Claude o boleto, a fatura ou uma lista ("aluguel R$ 2.000 dia 5, contador R$ 600 dia 10…") e peça para <b>registrar as despesas fixas</b> — elas aparecem aqui.</div>
   <div class="card tbl"><table><thead><tr><th>Descrição</th><th class="num">Dia</th><th class="num">Valor previsto</th><th class="num">Valor real</th><th class="num">Diferença</th><th>Status</th><th></th></tr></thead><tbody>
     ${linhas||'<tr><td colspan="7" class="empty">Nenhuma despesa fixa cadastrada</td></tr>'}
     <tr class="tot"><td>Total</td><td></td><td class="num">${brl(tPrev)}</td><td class="num">${brl(tReal)}</td><td class="num">${brl(tReal-tPrev)}</td><td></td><td></td></tr></tbody></table></div>
@@ -214,8 +230,9 @@ V.fluxo=()=>{
   const sai=despesasPagas(ini,fim,l=>l.categoria!==LUCROS).sort((a,b)=>dataCaixa(a).localeCompare(dataCaixa(b)));
   const luc=despesasPagas(ini,fim,l=>l.categoria===LUCROS);
   const tE=sumBy(ent,l=>l.valor),tS=sumBy(sai,l=>l.valor),tL=sumBy(luc,l=>l.valor),ant=saldoAntes(ini),saldo=ant+tE-tS;
-  const origem=l=>{const p=proc(l.processoId);return [l.clienteId?nomeCli(l.clienteId):'',p?(p.numero+(p.parteContraria?' x '+p.parteContraria:'')):''].filter(Boolean).join(' · ')||'—';};
-  const tab=(arr,isE)=>arr.length?`<div class="tbl"><table><thead><tr><th>Data</th><th class="num">Valor</th><th>Descrição</th>${isE?'<th class="hide-m">Origem</th>':''}</tr></thead><tbody>${arr.map(l=>`<tr data-act="editLanc" data-id="${l.id}"><td>${fd(dataCaixa(l))}</td><td class="num strong" style="color:${isE?'var(--green)':'var(--red)'}">${brl(l.valor)}</td><td>${esc(l.categoria)}<div class="small muted">${esc(l.descricao)}</div></td>${isE?`<td class="hide-m small">${esc(origem(l))}</td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="empty">Nenhum lançamento pago</div>';
+  const origem=l=>[l.clienteId?nomeCli(l.clienteId):'',refLanc(l)].filter(Boolean).join(' · ')||'—';
+  const tab=(arr,isE)=>arr.length?`<div class="tbl"><table><thead><tr><th>Data</th><th>O quê</th><th class="hide-m">${isE?'De quem / referente a':'Para quem / referente a'}</th><th class="num">Valor</th></tr></thead><tbody>${arr.map(l=>`<tr data-act="editLanc" data-id="${l.id}"><td>${fd(dataCaixa(l))}</td><td>${esc(l.descricao)}<div class="small muted">${esc(l.categoria)}</div></td><td class="hide-m small">${esc(origem(l))}</td><td class="num strong" style="color:${isE?'var(--green)':'var(--red)'}">${brl(l.valor)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">Nenhum lançamento pago</div>';
+  const porCat=arr=>{const m={};arr.forEach(l=>m[l.categoria||'—']=(m[l.categoria||'—']||0)+l.valor);return Object.entries(m).sort((a,b)=>b[1]-a[1]);};
   const semIni=!db.escritorio.saldoInicialData&&!+db.escritorio.saldoInicial;
   return `<div class="toolbar">${mesSel('fluxo',ym)}<span class="grow"></span><button class="btn btn-ghost" data-act="xlsFluxo">Exportar Excel</button><button class="btn btn-ghost" data-act="novaLucro">+ Distribuição de lucros</button><button class="btn btn-ghost" data-act="novaDesp">+ Saída</button><button class="btn btn-gold" data-act="novaRec">+ Entrada</button></div>
   ${semIni?'<div class="nota">Informe o <b>saldo inicial do caixa</b> em <a href="#config">Configurações</a> para o saldo anterior ("herança") ficar correto.</div>':''}
@@ -223,6 +240,7 @@ V.fluxo=()=>{
     ${kpi('Saldo do mês anterior',brl(ant),'"herança" recebida')}${kpi('Total de entradas',brl(tE),ent.length+' recebimento(s)','good')}${kpi('Total de saídas',brl(tS),sai.length+' pagamento(s)','bad')}
     ${kpi('Saldo do mês',brl(saldo),'anterior + entradas − saídas',saldo>=0?'good':'bad')}${kpi('Distribuição de lucros',brl(tL))}${kpi('Saldo transportado',brl(saldo-tL),'"herança" para o próximo mês',saldo-tL>=0?'good':'bad')}
   </div>
+  <div class="grid g-2" style="margin-bottom:14px"><div class="card"><h3>De onde veio o dinheiro <small>por categoria</small></h3>${hbars(porCat(ent),brlK)}</div><div class="card"><h3>Para onde foi <small>por categoria</small></h3>${hbars(porCat(sai),brlK)}</div></div>
   <div class="grid g-2"><div class="card"><h3>Entradas — ${mLong(ym)} <small>${brl(tE)}</small></h3>${tab(ent,true)}</div><div class="card"><h3>Saídas — ${mLong(ym)} <small>${brl(tS)}</small></h3>${tab(sai,false)}</div></div>
   <div class="card"><h3>Evolução — últimos 6 meses</h3>${fluxo6()}</div>`;
 };
@@ -232,6 +250,14 @@ function avaliarMetas(list){
   return [['Quantidade de contratos no mês',m.qtd,n,'int',1],['Valor total de contratos',m.valorTotal,sumBy(list,k=>k.valorTotal),'brl',1],['Valor total de entradas',m.entradas,sumBy(list,k=>k.entrada),'brl',1],
     ['Valor médio do contrato',m.ticket,avg(k=>k.valorTotal),'brl',1],['Valor médio das entradas',m.entradaMedia,avg(k=>k.entrada),'brl',1],
     ['Quantidade média de parcelas',m.parcelasMedia,avg(k=>k.parcelas),'dec',-1],['Valor médio das parcelas',m.parcelaMedia,avg(valorParcela),'brl',1]];
+}
+const canalCtr=k=>{const c=cli(k.clienteId)||{};const l=c.leadId?db.leads.find(x=>x.id===c.leadId):null;const v=k.canal||c.canal||l?.canal||'';return v?(ehCanalSm(v)?'WhatsApp 2 — Salário-maternidade':'WhatsApp 1 — Geral'):'Não informado';};
+function resumoCtrPor(list){
+  const grupo=(fn)=>{const m={};list.forEach(k=>{const g=fn(k);(m[g]=m[g]||[]).push(k);});return Object.entries(m).sort((a,b)=>b[1].length-a[1].length);};
+  const tab=(tit,gs,metaDe)=>`<h3 style="margin-top:6px">${tit}</h3><div class="tbl"><table><thead><tr><th></th><th class="num">Contratos</th><th class="num">Valor</th>${metaDe?'<th class="num">Meta</th>':''}</tr></thead><tbody>${gs.map(([g,ks])=>{const mt=metaDe?metaDe(g):0;
+    return `<tr><td>${esc(g)}</td><td class="num strong">${ks.length}</td><td class="num">${brl(sumBy(ks,k=>k.valorTotal))}</td>${metaDe?`<td class="num">${mt?`${ks.length}/${mt} ${ks.length>=mt?'✅':''}`:'—'}</td>`:''}</tr>`;}).join('')||'<tr><td colspan="4" class="empty">—</td></tr>'}</tbody></table></div>`;
+  const metaP=nome=>{const u=db.usuarios.find(x=>x.nome===nome);return u?+(db.metas.porPessoa||{})[u.id]||0:0;};
+  return tab('Por WhatsApp de origem',grupo(canalCtr))+tab('Por quem fechou',grupo(k=>nomeUsr(k.responsavelId)||'Não informado'),metaP);
 }
 V.contratos=()=>{
   if(!podeFin())return semPermissao();
@@ -243,13 +269,13 @@ V.contratos=()=>{
   return `<div class="toolbar">${mesSel('ctr',ym)}<span class="grow"></span><button class="btn btn-ghost" data-act="editMetas">Editar metas</button><button class="btn btn-ghost" data-act="xlsCtr">Exportar Excel</button><button class="btn btn-gold" data-act="novoCtr">+ Contrato</button></div>
   <div class="grid g-2">
     <div class="card"><h3>Contratos de ${mLong(ym)} <small>${n} contrato(s)</small></h3>
-      ${n?`<div class="tbl"><table><thead><tr><th>#</th><th>Cliente</th><th class="num">Valor do contrato</th><th class="num">Entrada</th><th class="num">Parcelas</th><th class="num">Valor da parcela</th></tr></thead><tbody>
-      ${list.map((k,i)=>`<tr data-act="editCtr" data-id="${k.id}"><td>${i+1}</td><td class="strong">${esc(nomeCli(k.clienteId))}<div class="small muted">${esc(k.produto)} · ${fd(k.data)}</div></td><td class="num">${brl(k.valorTotal)}</td><td class="num">${brl(k.entrada)}</td><td class="num">${num(k.parcelas,0)}</td><td class="num">${brl(valorParcela(k))}</td></tr>`).join('')}
-      <tr class="tot"><td></td><td>Total</td><td class="num">${brl(sumBy(list,k=>k.valorTotal))}</td><td class="num">${brl(sumBy(list,k=>k.entrada))}</td><td class="num">${num(sumBy(list,k=>k.parcelas),0)}</td><td class="num">${brl(sumBy(list,valorParcela))}</td></tr>
-      <tr><td></td><td class="muted">Média</td><td class="num">${brl(sumBy(list,k=>k.valorTotal)/n)}</td><td class="num">${brl(sumBy(list,k=>k.entrada)/n)}</td><td class="num">${num(sumBy(list,k=>k.parcelas)/n)}</td><td class="num">${brl(sumBy(list,valorParcela)/n)}</td></tr></tbody></table></div>`:'<div class="empty">Nenhum contrato neste mês</div>'}</div>
+      ${n?`<div class="tbl"><table><thead><tr><th>#</th><th>Cliente</th><th>Fechado por / WhatsApp</th><th class="num">Valor do contrato</th><th class="num">Entrada</th><th class="num">Parcelas</th><th class="num">Valor da parcela</th></tr></thead><tbody>
+      ${list.map((k,i)=>`<tr data-act="editCtr" data-id="${k.id}"><td>${i+1}</td><td class="strong">${esc(nomeCli(k.clienteId))}<div class="small muted">${esc(k.produto)} · ${fd(k.data)}</div></td><td class="small">${esc(nomeUsr(k.responsavelId)||'—')}<div class="muted">${esc(canalCtr(k))}</div></td><td class="num">${brl(k.valorTotal)}</td><td class="num">${brl(k.entrada)}</td><td class="num">${num(k.parcelas,0)}</td><td class="num">${brl(valorParcela(k))}</td></tr>`).join('')}
+      <tr class="tot"><td></td><td>Total</td><td></td><td class="num">${brl(sumBy(list,k=>k.valorTotal))}</td><td class="num">${brl(sumBy(list,k=>k.entrada))}</td><td class="num">${num(sumBy(list,k=>k.parcelas),0)}</td><td class="num">${brl(sumBy(list,valorParcela))}</td></tr>
+      <tr><td></td><td class="muted">Média</td><td></td><td class="num">${brl(sumBy(list,k=>k.valorTotal)/n)}</td><td class="num">${brl(sumBy(list,k=>k.entrada)/n)}</td><td class="num">${num(sumBy(list,k=>k.parcelas)/n)}</td><td class="num">${brl(sumBy(list,valorParcela)/n)}</td></tr></tbody></table></div>`:'<div class="empty">Nenhum contrato neste mês</div>'}</div>
     <div class="card"><h3>Metas do mês</h3><div class="tbl"><table><thead><tr><th></th><th class="num">Meta</th><th class="num">Resultado</th><th>Status</th></tr></thead><tbody>
       ${metas.map(([l,meta,res,t,dir])=>{const ok=n?(dir>0?res>=meta:res<=meta):null;return `<tr><td>${l}</td><td class="num">${fmt(meta,t)}</td><td class="num strong">${n?fmt(res,t):'—'}</td><td>${ok==null?pill('Sem contratos','p-gray'):ok?pill('Batida','p-green'):pill('Não batida','p-red')}</td></tr>`;}).join('')}</tbody></table></div>
-      <div class="small muted" style="margin-top:8px">Em "quantidade média de parcelas", a meta é um teto: quanto menos parcelas, melhor.</div></div>
+      <div class="small muted" style="margin-top:8px">Em "quantidade média de parcelas", a meta é um teto: quanto menos parcelas, melhor.</div>${resumoCtrPor(list)}</div>
   </div>
   <div class="card"><h3>Resumo de ${ano}</h3><div class="tbl"><table class="wide"><thead><tr><th>Mês</th><th class="num">Contratos</th><th class="num">Valor total</th><th class="num">Entradas</th><th class="num">Ticket médio</th><th>Meta de quantidade</th><th>Meta de valor</th></tr></thead><tbody>
     ${mesesAno.map(m=>{const ks=db.contratos.filter(k=>k.data.startsWith(m));const v=sumBy(ks,k=>k.valorTotal);const fut=m>today().slice(0,7);

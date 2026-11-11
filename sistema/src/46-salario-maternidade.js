@@ -40,6 +40,10 @@ function migrarSm(d){
       if(ant==='Em exigência'&&!c.exigencia)c.exigencia={aberta:true,descricao:'Exigência em aberto (anotada antes da mudança do quadro)',prazo:'',abertaEm:hoje};
       if(ant==='Indeferido'&&!c.desfecho)c.desfecho='Indeferido';
       (c.historico=c.historico||[]).push({de:ant,para:novo,em:Date.now(),por:'mudança do quadro (6 colunas)'});mudou=true;}
+    if(!c.honFinalMigrado){const k=(d.contratos||[]).filter(k=>k.clienteId===c.clienteId&&/maternidade/i.test(k.produto||'')).sort((a,b)=>String(b.data).localeCompare(String(a.data)))[0];
+      if(k&&c.desfecho!=='Recurso / judicial'){d.lancamentos=d.lancamentos.filter(l=>!(l.contratoId===k.id&&!l.smId&&!l.pago&&l.tipo==='receita'));
+        if((c.honorariosPct===undefined||c.honorariosPct==='')&&+k.exitoPct)c.honorariosPct=+k.exitoPct;}
+      if(+c.parcelasHonorarios>3)c.parcelasHonorarios=3;c.honFinalMigrado=1;mudou=true;}
     // data do parto no futuro é DPP
     if(c.dataParto&&c.dataParto>hoje){if(!c.dpp)c.dpp=c.dataParto;c.dataParto='';mudou=true;}
     // guias: vencimento pela regra e código da lista (uma vez)
@@ -51,15 +55,19 @@ function migrarSm(d){
 
 /* ---------- financeiro do caso (reconciliado sozinho; ids fixos: nunca duplica) ---------- */
 const smContrato=c=>db.contratos.filter(k=>k.clienteId===c.clienteId&&/maternidade/i.test(k.produto||'')).sort((a,b)=>String(b.data).localeCompare(String(a.data)))[0];
+const SM_PCTS=[20,25];
+const SM_PARC_OPC=[[1,'À vista'],[2,'2 vezes'],[3,'3 vezes']];
+const beneficioPadraoSm=c=>Math.round(salarioMinimoDe((c&&(c.dataParto||c.dpp))||today())*4); // 4 salários mínimos
+/* honorários do salário-maternidade: não há honorário inicial; só o final = % do benefício (concedido ou estimado), à vista ou em 2/3 vezes */
 function honorariosSm(c){
   if(c.desfecho==='Indeferido'||(smEncerrado(c)&&c.desfecho!=='Concluído'))return null;
   const k=smContrato(c);
-  if(k&&db.lancamentos.some(l=>l.contratoId===k.id&&!l.smId))return null; // o contrato já gerou as parcelas no financeiro
-  let n,val,pct;
-  if(k&&+k.parcelas>0&&valorParcela(k)>0){n=Math.round(+k.parcelas);val=valorParcela(k);pct=+k.exitoPct||0;}
-  else{pct=c.honorariosPct!==undefined&&c.honorariosPct!==''?+c.honorariosPct:(+db.escritorio.smHonorariosPct||25);const base=+c.valorConcedido||+c.beneficioEstimado||0;
-    n=Math.max(1,Math.round(+c.parcelasHonorarios||2));if(!base||!pct)return null;val=Math.round(base*pct/100/n*100)/100;}
-  return {n,val,pct,contratoId:k?.id||'',total:Math.round(n*val*100)/100,doContrato:!!k&&+k.parcelas>0};
+  const pct=c.honorariosPct!==undefined&&c.honorariosPct!==''?+c.honorariosPct:(+k?.exitoPct||+db.escritorio.smHonorariosPct||25);
+  const n=Math.max(1,Math.min(12,Math.round(+c.parcelasHonorarios||1)));
+  const base=+c.valorConcedido||+c.beneficioEstimado||beneficioPadraoSm(c);
+  const jaPago=k?sumBy(db.lancamentos.filter(l=>l.contratoId===k.id&&!l.smId&&l.pago&&l.tipo==='receita'),l=>l.valor):0;
+  const total=Math.max(0,Math.round(base*pct)/100-jaPago);if(!pct||!total)return null;
+  return {n,val:Math.round(total/n*100)/100,pct,base,contratoId:k?.id||'',total:Math.round(total*100)/100,jaPago,estimado:!+c.valorConcedido};
 }
 const vencAguardando=c=>c.previsaoPagamento&&c.previsaoPagamento>addDays(1)?c.previsaoPagamento:addDays(30);
 function smReconciliar(d){
@@ -67,20 +75,22 @@ function smReconciliar(d){
   let mudou=false;const L=d.lancamentos;const porId=new Map(L.map(l=>[l.id,l]));
   const garantir=(id,dados)=>{const l=porId.get(id);
     if(!l){const n={id,tipo:'receita',forma:'PIX',produto:'Salário-maternidade',obs:'',pagoEm:'',pago:false,auto:true,criado:today(),...dados};L.push(n);porId.set(id,n);mudou=true;return n;}
-    if(l.pago||!l.auto)return l;
+    if(l.pago)return l;
+    if(!l.auto){if(dados.aguardandoBeneficio===false&&l.aguardandoBeneficio){l.aguardandoBeneficio=false;l.venc=dados.venc;mudou=true;}return l;} // editado à mão: só libera a cobrança
     for(const k in dados)if(JSON.stringify(l[k])!==JSON.stringify(dados[k])){l[k]=dados[k];mudou=true;}
     return l;};
   const remover=id=>{const l=porId.get(id);if(l&&!l.pago&&l.auto){d.lancamentos.splice(d.lancamentos.indexOf(l),1);porId.delete(id);mudou=true;}};
   d.sm.forEach(c=>{
-    const h=honorariosSm(c),parc=c.parcelasInss||[];
+    const h=honorariosSm(c),parc=c.parcelasInss||[],exc=new Set(c.lancExcluidos||[]);
     const liberar=i=>{const p=parc[i-1];return p&&p.recebidaEm?calcularPrazo(p.recebidaEm,5,{recesso:false}):'';};
     for(let i=1;i<=12;i++){const id='sm'+c.id+'h'+i;
+      if(exc.has(id)){remover(id);continue;}
       if(h&&i<=h.n){const lib=liberar(i);garantir(id,{categoria:'H.O. finais — êxito',descricao:`Honorários salário-maternidade — parcela ${i}/${h.n}`,clienteId:c.clienteId,contratoId:h.contratoId,
         valor:h.val,venc:lib||vencAguardando(c),aguardandoBeneficio:!lib,smId:c.id,smTipo:'honorarios',smParcela:i});}
       else remover(id);}
     const libReemb=liberar(1);
     c.guias.forEach(g=>{const id='sm'+c.id+'g'+g.id;
-      if(g.pagaEm&&/escrit/i.test(g.quemPaga||'')&&c.desfecho!=='Indeferido')garantir(id,{categoria:'Reembolso de custas',descricao:`Reembolso guia comp. ${mLabel(g.competencia)}`,clienteId:c.clienteId,contratoId:'',
+      if(g.pagaEm&&/escrit/i.test(g.quemPaga||'')&&c.desfecho!=='Indeferido'&&!exc.has(id))garantir(id,{categoria:'Reembolso de custas',descricao:`Reembolso guia comp. ${mLabel(g.competencia)}`,clienteId:c.clienteId,contratoId:'',
         valor:+g.valor||0,venc:libReemb||vencAguardando(c),aguardandoBeneficio:!libReemb,smId:c.id,smTipo:'reembolso',guiaId:g.id});
       else remover(id);});
   });
@@ -88,12 +98,12 @@ function smReconciliar(d){
   d.lancamentos.filter(l=>l.auto&&l.smId&&!l.pago).forEach(l=>{const c=d.sm.find(x=>x.id===l.smId);if(!c||(l.smTipo==='reembolso'&&!c.guias.some(g=>g.id===l.guiaId)))remover(l.id);});
   return mudou;
 }
-const lancSm=c=>db.lancamentos.filter(l=>l.smId===c.id);
+const lancSm=c=>{const k=smContrato(c);return db.lancamentos.filter(l=>l.smId===c.id||(k&&l.contratoId===k.id&&!l.smId&&l.tipo==='receita'&&l.pago));};
 function financeiroSm(c){
-  const ls=lancSm(c),hon=ls.filter(l=>l.smTipo==='honorarios'),ree=ls.filter(l=>l.smTipo==='reembolso');
+  const ls=lancSm(c),hon=ls.filter(l=>l.smTipo!=='reembolso'),ree=ls.filter(l=>l.smTipo==='reembolso');
   const aberto=x=>x.filter(l=>!l.pago);const cobravel=x=>aberto(x).filter(l=>!l.aguardandoBeneficio);
   return {ls,hon,ree,contratado:sumBy(hon,l=>l.valor),recebido:sumBy(ls.filter(l=>l.pago),l=>l.valor),honAberto:sumBy(aberto(hon),l=>l.valor),reeAberto:sumBy(aberto(ree),l=>l.valor),
-    aCobrar:sumBy(cobravel(ls),l=>l.valor),cobravel:cobravel(ls),total:sumBy(aberto(ls),l=>l.valor),semHonorarios:!hon.length&&!honorariosSm(c)&&!smContrato(c)};
+    aCobrar:sumBy(cobravel(ls),l=>l.valor),cobravel:cobravel(ls),total:sumBy(aberto(ls),l=>l.valor),semHonorarios:!hon.length&&!honorariosSm(c)};
 }
 
 /* ---------- próxima ação e alertas do caso ---------- */
@@ -108,7 +118,6 @@ function proximaAcaoSm(c){
   if(c.status==='Aguardando parto')return c.dataParto?{txt:'Parto informado: protocolar no INSS',data:today(),sev:'a'}:{txt:'Pedir certidão — parto previsto '+fd(c.dpp),data:c.dpp||'',sev:c.dpp&&diff(c.dpp)<0?'a':''};
   if(c.status==='No INSS')return !(c.nb||c.der)?{txt:'Protocolar no Meu INSS',data:today(),sev:'a'}:{txt:`Acompanhar análise (DER ${fd(c.der)}${c.der?', '+(-diff(c.der))+' dias':''})`,data:'',sev:c.der&&diff(c.der)<-45?'a':''};
   if(c.status==='Deferido — a receber'){const f=financeiroSm(c);
-    if(!f.hon.length&&!f.semHonorarios&&!honorariosSm(c))return {txt:'Cadastrar contrato de honorários',data:today(),sev:'a'};
     if(!f.hon.length)return {txt:'Informar valor do benefício e % de honorários',data:today(),sev:'a'};
     const cob=f.cobravel.sort((a,b)=>a.venc.localeCompare(b.venc))[0];
     if(cob)return {txt:`Cobrar ${cob.smTipo==='reembolso'?'reembolso':'parcela '+cob.smParcela} ${brl(cob.valor)}`,data:cob.venc,sev:diff(cob.venc)<0?'r':'a'};
@@ -148,7 +157,8 @@ function docsInaplicaveis(c){const cat=norm(c.categoria||'');if(/definir/.test(c
 
 /* ---------- formulários ---------- */
 function editSm(id,pre){
-  const c=id?db.sm.find(x=>x.id===id):{status:'Documentos',categoria:SM_CATEG[0],responsavelId:db.usuarioAtual,guias:[],beneficioEstimado:Math.round(salarioMinimoDe(today())*4),honorariosPct:+db.escritorio.smHonorariosPct||25,parcelasHonorarios:2,...pre};
+  const c=id?db.sm.find(x=>x.id===id):{status:'Documentos',categoria:SM_CATEG[0],responsavelId:db.usuarioAtual,guias:[],beneficioEstimado:beneficioPadraoSm(pre),honorariosPct:+db.escritorio.smHonorariosPct||25,parcelasHonorarios:1,...pre};
+  if(id){c.honorariosPct=+(c.honorariosPct??'')||+smContrato(c)?.exitoPct||25;c.parcelasHonorarios=Math.min(3,+c.parcelasHonorarios||1);}
   form(id?'Editar caso de salário-maternidade':'Novo caso de salário-maternidade',[
     {k:'clienteId',l:'Segurada (cliente)',t:'select',o:O.clientes,req:1,full:1},
     {k:'categoria',l:'Categoria da segurada',t:'select',o:SM_CATEG,req:1},{k:'estrategia',l:'Estratégia',t:'select',o:SM_ESTRAT},
@@ -160,9 +170,9 @@ function editSm(id,pre){
     {k:'qualidadeAte',l:'Qualidade de segurada até',t:'date'},{k:'nb',l:'NB / protocolo'},{k:'der',l:'DER — data do requerimento',t:'date'},
     {t:'sec',l:'✅ Deferimento'},{k:'dataDeferimento',l:'Data do deferimento',t:'date'},{k:'dib',l:'DIB — início do benefício',t:'date'},
     {k:'valorConcedido',l:'Valor total concedido (R$)',t:'number'},{k:'previsaoPagamento',l:'Previsão da 1ª parcela do INSS',t:'date'},
-    {t:'sec',l:'💰 Honorários deste caso'},{k:'beneficioEstimado',l:'Valor total estimado do benefício (R$)',t:'number'},
-    {k:'honorariosPct',l:'Honorários (% do benefício)',t:'number',dica:'Contratos atuais: 25%. Contratos antigos podem ser 20%. Se houver contrato de salário-maternidade com parcelas, ele vale.'},
-    {k:'parcelasHonorarios',l:'Honorários em quantas parcelas',t:'number'},
+    {t:'sec',l:'💰 Honorários (só no final, depois que a cliente recebe)'},{k:'beneficioEstimado',l:'Valor total estimado do benefício (R$)',t:'number',dica:'Padrão: 4 salários mínimos. Depois do deferimento vale o valor concedido.'},
+    {k:'honorariosPct',l:'Honorários (% do benefício)',t:'select',o:SM_PCTS.map(x=>[x,x+'%'])},
+    {k:'parcelasHonorarios',l:'Pagamento dos honorários',t:'select',o:SM_PARC_OPC},
     {k:'obs',l:'Observações',t:'textarea',full:1,rows:2}],
     c,v=>{if(v.dataParto&&v.dataParto>today()){toast('A data do parto não pode ser no futuro: use a DPP.',1);$('#f_dataParto')?.classList.add('err');return false;}
       if(v.status==='Encerrado'&&!v.desfecho){toast('Escolha o desfecho do caso encerrado',1);return false;}
@@ -170,8 +180,10 @@ function editSm(id,pre){
       if(v.status==='Deferido — a receber'&&!v.dataDeferimento)v.dataDeferimento=today();
       if(v.status==='Deferido — a receber'&&c.status!=='Deferido — a receber')setTimeout(()=>celebrarEvento('deferido','Benefício deferido!',nomeCli(v.clienteId||c.clienteId)),200);
       if(id&&v.status!==c.status)(c.historico=c.historico||[]).push({de:c.status,para:v.status,em:Date.now(),por:nomeUsr(db.usuarioAtual)});
+      v.honorariosPct=+v.honorariosPct;v.parcelasHonorarios=+v.parcelasHonorarios;
+      const k0=smContrato({...c,...v});if(k0){k0.exitoPct=v.honorariosPct;k0.parcelasSm=v.parcelasHonorarios;}
       const nid=upsert('sm',id,v,{guias:[],historico:[{de:'',para:v.status,em:Date.now(),por:nomeUsr(db.usuarioAtual)}],guiasRevisadas:1});
-      if(!id){garantirDocsSm(db.sm.find(x=>x.id===nid));location.hash='sm/'+nid;}
+      if(!id){garantirDocsSm(db.sm.find(x=>x.id===nid));const cl=cli(v.clienteId);if(cl&&!cl.produto)cl.produto='Salário-maternidade';location.hash='sm/'+nid;}
       setTimeout(()=>smSugerir(db.sm.find(x=>x.id===nid)),400);},
     id&&(()=>{db.sm=db.sm.filter(x=>x.id!==id);if(ui.page==='sm'&&ui.id)location.hash='sm';}));
 }
@@ -257,21 +269,23 @@ function guiaBotoes(c,g,st){
 }
 const codGuia=g=>g.codigo==='Outro'?'Outro: '+(g.codigoDesc||'?'):g.codigo;
 /* indicadores do topo: todos clicáveis, com a regra no "title" */
+const SM_KPIS=[['acao','Ação hoje'],['guias','Guias a pagar'],['partos','Partos próximos'],['inss','No INSS'],['receber','A receber'],['recebido','Recebido no mês']];
+const smKpiCfg=()=>({ocultos:[],nomes:{},diasGuia:7,diasParto:30,...(db.escritorio.smKpis||{})});
 function kpisSm(){
-  const ativos=db.sm.filter(smAtivo);const hoje=today();
+  const ativos=db.sm.filter(smAtivo);const hoje=today();const cfg=smKpiCfg();
   const acaoHoje=ativos.filter(c=>{const p=proximaAcaoSm(c);return p.data&&p.data<=hoje;});
-  const g7=guiasPendentes(7),venc=g7.filter(x=>x.st==='Vencida');
-  const partos=ativos.filter(c=>!c.dataParto&&c.dpp&&diff(c.dpp)>=0&&diff(c.dpp)<=30);
+  const g7=guiasPendentes(cfg.diasGuia),venc=g7.filter(x=>x.st==='Vencida');
+  const partos=ativos.filter(c=>!c.dataParto&&c.dpp&&diff(c.dpp)>=0&&diff(c.dpp)<=cfg.diasParto);
   const inss=ativos.filter(c=>c.status==='No INSS'),exig=inss.filter(c=>c.exigencia?.aberta);
   const fin=podeFin();const fs=db.sm.map(financeiroSm);const ym=hoje.slice(0,7);
-  const aRec=sumBy(fs,f=>f.aCobrar),recMes=sumBy(db.lancamentos.filter(l=>l.smId&&l.pago&&String(l.pagoEm||'').startsWith(ym)),l=>l.valor);
-  const k=(id,l,v,s,cls,regra)=>`<div class="card kpi kpi-clic${ui.f.sm?.filtro===id?' ativo':''}" data-act="smFiltro" data-id="${id}" title="${esc(regra)}" role="button" tabindex="0"><div class="l">${l}</div><div class="v">${v}</div><div class="s ${cls||''}">${s||'&nbsp;'}</div></div>`;
+  const aRec=sumBy(fs,f=>f.aCobrar),aPrev=sumBy(fs,f=>f.total),recMes=sumBy(db.lancamentos.filter(l=>l.smId&&l.pago&&String(l.pagoEm||'').startsWith(ym)),l=>l.valor);
+  const k=(id,l,v,s,cls,regra)=>cfg.ocultos.includes(id)?'':`<div class="card kpi kpi-clic${ui.f.sm?.filtro===id?' ativo':''}" data-act="smFiltro" data-id="${id}" title="${esc(regra)}" role="button" tabindex="0"><div class="l">${esc(cfg.nomes[id]||l)}</div><div class="v">${v}</div><div class="s ${cls||''}">${s||'&nbsp;'}</div></div>`;
   return {ativos,acaoHoje,g7,partos,inss,exig,
     html:k('acao','Ação hoje',acaoHoje.length,'próxima ação vencida ou para hoje',acaoHoje.length?'bad':'good','Casos (não encerrados) cuja próxima ação tem data até hoje.')
-      +k('guias','Guias a pagar (7 dias)',g7.length,venc.length?venc.length+' vencida(s)!':'nenhuma vencida',venc.length?'bad':'good','Guias não pagas com vencimento em até 7 dias (inclui as vencidas), de casos não encerrados.')
-      +k('partos','Partos em 30 dias',partos.length,'DPP sem data de parto','','Casos com DPP entre hoje e daqui a 30 dias e sem data do parto.')
+      +k('guias',`Guias a pagar (${cfg.diasGuia} dias)`,g7.length,venc.length?venc.length+' vencida(s)!':'nenhuma vencida',venc.length?'bad':'good','Guias não pagas com vencimento nos próximos '+cfg.diasGuia+' dias (inclui as vencidas), de casos não encerrados.')
+      +k('partos',`Partos em ${cfg.diasParto} dias`,partos.length,'DPP sem data de parto','','Casos com DPP entre hoje e daqui a '+cfg.diasParto+' dias e sem data do parto.')
       +k('inss','No INSS',inss.length,exig.length+' com exigência',exig.length?'bad':'','Casos na coluna "No INSS". O subtítulo conta os que têm exigência em aberto.')
-      +(fin?k('receber','A receber',brlK(aRec),'liberado para cobrar',aRec?'bad':'good','Honorários e reembolsos de guia já liberados (a cliente recebeu a parcela do INSS) e ainda não pagos.')
+      +(fin?k('receber','A receber',brlK(aRec),'liberado · '+brlK(aPrev)+' previsto',aRec?'bad':'good','Honorários e reembolsos de guia já liberados (a cliente recebeu a parcela do INSS) e ainda não pagos.')
         +k('recebido','Recebido no mês',brlK(recMes),MESES_L[+ym.slice(5)-1],'good','Honorários e reembolsos de salário-maternidade pagos neste mês.'):'')};
 }
 V.sm=()=>{
@@ -295,12 +309,13 @@ V.sm=()=>{
       <td class="num">${guiaBotoes(c,g,st)}</td></tr>`;}).join('')||'<tr><td colspan="8" class="empty">Nenhuma guia</td></tr>'}</tbody></table></div>`;}
   if(t==='receber')corpo=htmlAReceberSm();
   if(t==='lembretes')corpo=htmlLembretes();
+  if(t==='notas')corpo=htmlBlocoNotas(22);
   if(t==='partos'){const ls=db.sm.filter(c=>c.dpp||c.dataParto);const prox=ls.filter(c=>!c.dataParto).sort((a,b)=>String(a.dpp).localeCompare(String(b.dpp))),nasc=ls.filter(c=>c.dataParto).sort((a,b)=>b.dataParto.localeCompare(a.dataParto));
     const it=c=>`<div class="ev" data-go="sm/${c.id}"><div class="av" style="background:#FDE8EF;color:#C84B6E">👶</div><div class="body"><div class="t">${esc(nomeCli(c.clienteId))} ${c.crianca?'· '+esc(c.crianca):''}</div><div class="small muted">${c.dataParto?'Nasceu em '+fd(c.dataParto):'Previsto para '+fd(c.dpp)+' ('+prazoTxt(c.dpp)+')'}</div></div>${pill(c.status,smCor(c.status))}</div>`;
     corpo=`<div class="grid g-2"><div class="card"><h3>Próximos partos</h3>${prox.map(it).join('')||'<div class="empty">Nenhum</div>'}</div><div class="card"><h3>Já nasceram</h3>${nasc.map(it).join('')||'<div class="empty">Nenhum</div>'}</div></div>`;}
   const nRec=db.sm.filter(c=>financeiroSm(c).aCobrar>0).length,nLem=lembretesPendentes().filter(x=>!x.feito).length;
-  return `<div class="grid g-kpi kpi-6">${K.html}</div>
-  <div class="toolbar"><div class="tabs" style="margin:0;border:none">${[['casos','Quadro de casos'],['guias','Guias de recolhimento'],...(podeFin()?[['receber','💰 A receber'+(nRec?' ('+nRec+')':'')]]:[]),['partos','Partos e nascimentos'],['lembretes','📲 Lembretes'+(nLem?' ('+nLem+')':'')]].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabSm" data-id="${k}">${l}</button>`).join('')}</div>
+  return `<div style="text-align:right;margin:-6px 0 2px"><button class="btn btn-sm lnk" data-act="smKpiCfg" title="Escolher, renomear e ajustar os prazos dos indicadores">⚙ editar indicadores</button></div><div class="grid g-kpi kpi-6">${K.html}</div>
+  <div class="toolbar"><div class="tabs" style="margin:0;border:none">${[['casos','Quadro de casos'],['guias','Guias de recolhimento'],...(podeFin()?[['receber','💰 A receber'+(nRec?' ('+nRec+')':'')]]:[]),['partos','Partos e nascimentos'],['lembretes','📲 Lembretes'+(nLem?' ('+nLem+')':'')],['notas','📝 Meu bloco de notas']].map(([k,l])=>`<button class="tab ${t===k?'active':''}" data-act="tabSm" data-id="${k}">${l}</button>`).join('')}</div>
     <span class="grow"></span><a class="btn btn-ghost" href="#scripts" style="text-decoration:none">Scripts</a><button class="btn btn-gold" data-act="novoSm">+ Caso</button></div>${corpo}`;
 };
 function cardSm(c){
@@ -330,8 +345,8 @@ function smCaso(id){
   const parc=c.parcelasInss||[];
   return `<div class="toolbar"><a class="btn btn-ghost" href="#sm" style="text-decoration:none">← Salário-maternidade</a><span class="grow"></span>
     ${cl.tel?`<a class="btn btn-ghost" style="color:#1F9D55;border-color:#1F9D55;text-decoration:none" target="_blank" rel="noopener" href="${waLink(cl.tel,scrG?personalizar(scrG.texto,cl):'')}">WhatsApp (guia)</a>`:''}
-    <button class="btn btn-ghost" data-act="smContrato" data-id="${c.id}">Gerar contrato</button><button class="btn btn-ghost" data-act="editSm" data-id="${c.id}">Editar caso</button></div>
-  <div class="card" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><div class="small muted">Salário-maternidade · ${esc(c.categoria)} <span class="sigla-sm">${esc(SM_SIGLA(c.categoria))}</span></div><div style="font-size:18px;font-weight:800"><a href="#cliente/${c.clienteId}">${esc(cl.nome||'—')}</a></div><div class="small">${esc(c.estrategia||'')}</div></div>
+    <button class="btn btn-ghost" data-act="editCli" data-id="${c.clienteId}" title="Nome, CPF, telefone e endereço ficam no cadastro da cliente (valem em todas as telas)">Dados da cliente</button>${fin?`<button class="btn btn-ghost" data-act="smHonorarios" data-id="${c.id}">Contrato de honorários</button>`:''}<button class="btn btn-ghost" data-act="smContrato" data-id="${c.id}">Gerar documento</button><button class="btn btn-ghost" data-act="editSm" data-id="${c.id}">Editar caso</button></div>
+  <div class="card" style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><div class="small muted">Salário-maternidade · ${esc(c.categoria)} <span class="sigla-sm">${esc(SM_SIGLA(c.categoria))}</span></div><div style="font-size:18px;font-weight:800"><a href="#cliente/${c.clienteId}">${esc(cl.nome||'—')}</a></div><div class="small">${esc(c.estrategia||'')}</div><div class="small muted">${[cl.doc?'CPF '+esc(cl.doc):'',cl.tel?'📱 '+esc(cl.tel):'',cl.canal?esc(cl.canal):''].filter(Boolean).join(' · ')}</div></div>
     <div style="text-align:right">${pill(c.status,smCor(c.status))}${c.desfecho?' '+pill(c.desfecho,c.desfecho==='Concluído'?'p-green':'p-red'):''}${p.txt?`<div class="prox-acao sev-${p.sev||'n'}" style="margin-top:6px">➜ ${esc(p.txt)}</div>`:''}</div></div>
     <div class="fases">${SM_STATUS.map((s,i)=>`<div class="fase ${s===c.status?'atual':i<SM_STATUS.indexOf(c.status)?'feita':''}" data-act="setSmStatus" data-id="${c.id}|${esc(s)}"><i></i><span>${esc(s)}</span></div>`).join('')}</div></div>
   ${al.length?`<div class="card alertas-sm" style="margin-bottom:14px">${al.map(([s,t])=>`<div class="small" style="color:var(--${s==='r'?'red':'amber'})">⚠ ${esc(t)}</div>`).join('')}</div>`:''}
@@ -345,9 +360,10 @@ function smCaso(id){
       ${c.guias.length?`<div class="tbl"><table><thead><tr><th>Comp.</th><th>Código</th><th class="num">Valor</th><th>Vencimento</th><th title="Quem paga">Paga</th><th>Status</th><th></th></tr></thead><tbody>${c.guias.map(g=>{const st=guiaStatus(g),a=alertasGuia(c,g);return `<tr><td class="strong">${mLabel(g.competencia)}</td><td>${esc(codGuia(g))}</td><td class="num">${brl(g.valor)}</td><td>${fd(g.venc)}${g.pagaEm?`<div class="small muted">paga ${fd(g.pagaEm)}</div>`:''}</td><td class="small" title="${/escrit/i.test(g.quemPaga||'')?'Paga pelo escritório (reembolsável)':'Paga pela cliente'}">${/escrit/i.test(g.quemPaga||'')?'🏢':'👤'}</td><td>${pill(st,guiaCor(st))}${a.length?` <span title="${esc(a.map(x=>x[1]).join('\n'))}" style="cursor:help">⚠</span>`:''}</td><td class="num">${guiaBotoes(c,g,st)}</td></tr>`;}).join('')}</tbody></table></div>
       <div class="small muted" style="margin-top:8px">Total: ${brl(sumBy(c.guias,g=>g.valor))} · pagas ${pagas} · em aberto ${c.guias.length-pagas}</div>`:'<div class="empty">Nenhuma guia. Use "Gerar em lote" para criar as competências da carência.</div>'}</div>
     ${fin?`<div class="card" style="margin-bottom:14px"><h3>💰 Financeiro deste caso</h3>
-      ${f.hon.length||f.ree.length?`<dl class="dl"><dt>Honorários contratados</dt><dd>${brl(f.contratado)}${h?` <span class="small muted">(${h.n}x ${brl(h.val)}${h.doContrato?', do contrato':', '+num(h.pct,0)+'% do benefício'})</span>`:''}</dd><dt>Reembolso de guias</dt><dd>${brl(sumBy(f.ree,l=>l.valor))}</dd><dt>Recebido</dt><dd style="color:var(--green)">${brl(f.recebido)}</dd><dt>Saldo</dt><dd class="strong">${brl(f.total)}${f.aCobrar?` <span style="color:var(--red)">(${brl(f.aCobrar)} já pode cobrar)</span>`:''}</dd></dl>
+      ${f.hon.length||f.ree.length?`<dl class="dl"><dt>Honorários contratados</dt><dd>${brl(f.contratado)}${h?` <span class="small muted">(${h.n===1?'à vista':h.n+'x de '+brl(h.val)} · ${num(h.pct,0)}% de ${brl(h.base)}${h.estimado?' estimado':''})</span>`:''}</dd><dt>Reembolso de guias</dt><dd>${brl(sumBy(f.ree,l=>l.valor))}</dd><dt>Recebido</dt><dd style="color:var(--green)">${brl(f.recebido)}</dd><dt>Saldo</dt><dd class="strong">${brl(f.total)}${f.aCobrar?` <span style="color:var(--red)">(${brl(f.aCobrar)} já pode cobrar)</span>`:''}</dd></dl>
         <div class="tbl" style="margin-top:8px"><table><tbody>${f.ls.sort((a,b)=>a.descricao.localeCompare(b.descricao)).map(l=>`<tr data-act="editLanc" data-id="${l.id}"><td class="small">${esc(l.descricao)}</td><td class="num">${brl(l.valor)}</td><td>${pStatusLanc(lancStatus(l))}${!l.aguardandoBeneficio&&!l.pago?`<div class="small muted">vence ${fd(l.venc)}</div>`:''}</td></tr>`).join('')}</tbody></table></div>`
-        :`<div class="empty">${f.semHonorarios?'Sem contrato nem valores de honorários.':'Informe o valor do benefício e o % de honorários.'} <button class="btn btn-sm lnk" data-act="editSm" data-id="${c.id}">Editar caso</button></div>`}
+        :`<div class="empty">Informe o valor do benefício e o % de honorários. <button class="btn btn-sm lnk" data-act="editSm" data-id="${c.id}">Editar caso</button></div>`}
+      ${(c.lancExcluidos||[]).length?`<button class="btn btn-sm lnk" data-act="smRestaurarLanc" data-id="${c.id}">Restaurar ${c.lancExcluidos.length} cobrança(s) excluída(s)</button>`:''}
       ${parc.length?`<h3 style="margin-top:14px">Parcelas do INSS recebidas pela cliente</h3>${parc.map((x,i)=>`<div class="ev"><div class="body small"><b>Parcela ${i+1}</b>${x.previsao?' · previsão '+fd(x.previsao):''}${x.recebidaEm?` · <span style="color:var(--green)">recebida em ${fd(x.recebidaEm)}</span>`:''}</div>${x.recebidaEm?`<button class="btn btn-sm lnk" data-act="smParcela" data-id="${c.id}|${i}">alterar</button>`:`<button class="btn btn-ghost btn-sm" data-act="smParcela" data-id="${c.id}|${i}">Registrar recebimento</button>`}</div>`).join('')}`
         :c.status==='Deferido — a receber'?`<button class="btn btn-ghost btn-sm" style="margin-top:8px" data-act="setSmStatus" data-id="${c.id}|Deferido — a receber">Informar as parcelas do INSS</button>`:''}</div>`:''}
     </div>
@@ -362,7 +378,23 @@ function smCaso(id){
     </div>
   </div>`;
 }
+/* bloco de notas de cada login (aparece só para quem escreveu; salva sozinho) */
+function htmlBlocoNotas(alt){const u=usr(db.usuarioAtual);if(!u)return '';
+  return `<div class="card bloco-notas"><h3>📝 Meu bloco de notas <small id="bloco-st">${u.blocoEm?'salvo '+new Date(u.blocoEm).toLocaleString('pt-BR'):'só você vê · salva sozinho'}</small></h3>
+    <textarea id="bloco-txt" rows="${alt||10}" style="width:100%;font-family:inherit;line-height:1.5" placeholder="Anotações rápidas: ligações, lembretes, quem pediu o quê…">${esc(u.blocoNotas||'')}</textarea></div>`;}
+let tBloco=null;
+document.addEventListener('input',ev=>{if(ev.target.id!=='bloco-txt')return;const v=ev.target.value;clearTimeout(tBloco);const st=$('#bloco-st');if(st)st.textContent='digitando…';
+  tBloco=setTimeout(()=>{const u=usr(db.usuarioAtual);if(!u)return;u.blocoNotas=v;u.blocoEm=Date.now();agendarEnvio();const s2=$('#bloco-st');if(s2)s2.textContent='salvo ✓';},700);});
 const SM_ACOES={
+  smHonorarios:id=>{const c=db.sm.find(x=>x.id===id);const k=smContrato(c);editContrato(k?.id||null,k?null:{clienteId:c.clienteId,produto:'Salário-maternidade'});},
+  smRestaurarLanc:id=>{const c=db.sm.find(x=>x.id===id);c.lancExcluidos=[];save();render();toast('Cobranças restauradas');},
+  smKpiCfg:()=>{const cfg=smKpiCfg();form('Indicadores do salário-maternidade',[
+      ...SM_KPIS.map(([k,l])=>({k:'v_'+k,l:'Mostrar "'+(cfg.nomes[k]||l)+'"',t:'check'})),{t:'sec',l:'Nomes e prazos'},
+      ...SM_KPIS.map(([k,l])=>({k:'n_'+k,l:'Nome do indicador: '+l})),
+      {k:'diasGuia',l:'Guias a pagar: considerar os próximos (dias)',t:'number'},{k:'diasParto',l:'Partos: considerar os próximos (dias)',t:'number'}],
+    {...Object.fromEntries(SM_KPIS.map(([k])=>['v_'+k,!cfg.ocultos.includes(k)])),...Object.fromEntries(SM_KPIS.map(([k,l])=>['n_'+k,cfg.nomes[k]||l])),diasGuia:cfg.diasGuia,diasParto:cfg.diasParto},v=>{
+      db.escritorio.smKpis={ocultos:SM_KPIS.filter(([k])=>!v['v_'+k]).map(([k])=>k),nomes:Object.fromEntries(SM_KPIS.filter(([k,l])=>v['n_'+k]&&v['n_'+k]!==l).map(([k])=>[k,v['n_'+k]])),
+        diasGuia:Math.max(1,Math.round(+v.diasGuia||7)),diasParto:Math.max(1,Math.round(+v.diasParto||30))};toast('Indicadores salvos ✓');});},
   tabSm:k=>{ui.tabSm=k;render();},novoSm:()=>editSm(),novoSmCli:id=>editSm(null,{clienteId:id}),editSm:id=>editSm(id),
   setSmStatus:k=>{const i=k.indexOf('|');smPedirMover(k.slice(0,i),k.slice(i+1));},
   smFiltro:k=>{const f=ui.f.sm||(ui.f.sm={});if(k==='receber'){ui.tabSm='receber';f.filtro='';}else if(k==='recebido'){ui.tabSm='receber';f.filtro='';}

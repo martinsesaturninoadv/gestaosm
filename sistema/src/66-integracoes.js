@@ -28,6 +28,8 @@ function cardIntegracoes(){
       <label class="chk small full"><input type="checkbox" id="sg_asaasSandbox"${I.asaasSandbox?' checked':''}> Asaas em modo de teste (sandbox)</label>
       ${campo('escavadorToken','⚖️ Escavador — token da API',`api.escavador.com → Tokens de acesso (serviço pago por consulta). ${I.escavador?'✅ ativo':''}`)}
       ${campo('anthropicKey','🤖 IA (Claude) — chave da API',`console.anthropic.com → API Keys (cobrança por uso). ${I.ia?'✅ ativa':''}`)}
+      ${campo('metaToken','📣 Meta Ads — token de acesso (Gerenciador de Anúncios)',`business.facebook.com → Configurações do negócio → Usuários do sistema → Gerar token (permissão <b>ads_read</b>). O sistema busca o investimento por dia sozinho, a cada 6 horas. ${I.meta?'✅ ativo':''}${I.metaEstado?.ultima?' · última busca '+new Date(I.metaEstado.ultima).toLocaleString('pt-BR'):''}${I.metaEstado?.erro?' · <b style="color:var(--red)">'+esc(I.metaEstado.erro)+'</b>':''}`)}
+      <label class="full">Meta Ads — IDs das contas de anúncio (as duas, separadas por vírgula)<input id="sg_metaContas" value="${esc(m.metaContas||'')}" placeholder="ex.: 1234567890123456, 9876543210987654"><span class="small muted" style="font-weight:400">Gerenciador de Anúncios → menu de contas: o número "ID da conta" de cada uma.</span></label>
     </div>
     ${I.webhooks?`<div class="small" style="margin-top:10px;line-height:1.7"><b>Endereços para colar nos serviços (webhooks):</b><br>Asaas: <code style="word-break:break-all">${esc(I.webhooks.asaas)}</code><br>ZapSign: <code style="word-break:break-all">${esc(I.webhooks.zapsign)}</code></div>`:''}
     <div class="mfoot"><button class="btn btn-brand" data-act="sgSalvar">Salvar integrações</button></div></div>`;
@@ -132,7 +134,7 @@ async function gerarPecaIA(){
 }
 
 const INTEG_ACOES={
-  sgSalvar:async()=>{const b={};['zapsignToken','asaasToken','asaasWebhookToken','escavadorToken','anthropicKey'].forEach(k=>b[k]=$('#sg_'+k).value.trim());
+  sgSalvar:async()=>{const b={};['zapsignToken','asaasToken','asaasWebhookToken','escavadorToken','anthropicKey','metaToken','metaContas'].forEach(k=>b[k]=$('#sg_'+k).value.trim());
     b.zapsignSandbox=$('#sg_zapsignSandbox').checked;b.asaasSandbox=$('#sg_asaasSandbox').checked;
     if(precisaServidor())return;
     try{await api('segredos',b);await carregarIntegracoes();render();toast('Integrações salvas ✓');}catch(e){toast(e.msg||'Não foi possível salvar',1);}},

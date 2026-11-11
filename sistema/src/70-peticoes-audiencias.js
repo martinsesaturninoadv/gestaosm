@@ -14,8 +14,10 @@ function sincronizarAgendaPeticao(pt){
   if(dados.feito&&!(e&&e.feito)){dados.feitoEm=today();dados.feitoPor=db.usuarioAtual;}
   if(e)Object.assign(e,dados);else{e={id:uid(),...dados};db.eventos.push(e);pt.eventoId=e.id;}
 }
+/* quem confere: a outra advogada/sócia (Joyce ↔ Vitória); ela recebe o aviso no celular quando a petição vai para "A conferir" */
+function conferentePadrao(autor){const c=db.escritorio.conferentes?.[autor];if(c)return c;return (db.usuarios.find(u=>u.id!==autor&&/s[oó]ci|advog/i.test(u.papel||''))||{}).id||'';}
 function editPeticao(id,pre){
-  const pt=id?db.peticoes.find(x=>x.id===id):{status:'A conferir',tipo:'Manifestação',autorId:db.usuarioAtual,prazo:addDays(2),...pre};
+  const pt=id?db.peticoes.find(x=>x.id===id):{status:'A conferir',tipo:'Manifestação',autorId:db.usuarioAtual,conferenteId:conferentePadrao(db.usuarioAtual),prazo:addDays(2),...pre};
   form(id?'Editar petição':'Nova petição para conferir',[
     {k:'titulo',l:'Petição / peça',req:1,full:1,ph:'Ex.: Réplica — Maria Souza x Banco X'},{k:'tipo',l:'Tipo',t:'select',o:PET_TIPOS},{k:'status',l:'Situação',t:'select',o:PET_STATUS,req:1},
     {k:'clienteId',l:'Cliente',t:'select',o:O.clientes},{k:'processoId',l:'Processo',t:'select',o:O.processos},

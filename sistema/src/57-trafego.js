@@ -140,6 +140,30 @@ function sugestoesTrafego(r,ant){
 }
 
 /* ---------- página ---------- */
+/* orgânico x pago, investimento e retorno por período (dia, semana, quinzena, mês) */
+const ehPagoOrig=o=>/facebook|instagram|meta|google ads|an[uú]ncio|tr[aá]fego/i.test(o||'');
+function chavePer(d,ag){if(ag==='dia')return d;if(ag==='semana'){const x=new Date(d+'T12:00');const w=(x.getDay()+6)%7;return addDays(-w,d);}if(ag==='quinzena')return d.slice(0,8)+(+d.slice(8)<=15?'01':'16');return d.slice(0,7);}
+function rotPer(k,ag){if(ag==='mes')return MESES_L[+k.slice(5)-1]+'/'+k.slice(2,4);if(ag==='semana')return 'sem. '+fd(k).slice(0,5);if(ag==='quinzena')return (k.slice(8)==='01'?'1ª':'2ª')+' quinz. '+MESES[+k.slice(5,7)-1];return fd(k).slice(0,5);}
+function origemPorPeriodo(de,ate,ag){
+  const P={};const z=()=>({leads:0,pagos:0,org:0,inv:0,contas:{},ctr:0,ctrPagos:0,valor:0,valorPagos:0});const G=k=>P[k]||(P[k]=z());
+  db.leads.forEach(l=>{const d=l.primeiroContato||l.criado||'';if(d<de||d>ate)return;const x=G(chavePer(d,ag));x.leads++;ehPagoOrig(l.origem)?x.pagos++:x.org++;});
+  db.trafego.forEach(t=>{const n=diasEntre(t.inicio,t.fim)+1;for(let i=0;i<n;i++){const d=addDays(i,t.inicio);if(d<de||d>ate)continue;const x=G(chavePer(d,ag)),v=(+t.gasto||0)/n;x.inv+=v;const c=t.conta||'—';x.contas[c]=(x.contas[c]||0)+v;}});
+  db.contratos.forEach(k=>{if(k.data<de||k.data>ate)return;const c=cli(k.clienteId)||{};const l=c.leadId?db.leads.find(x=>x.id===c.leadId):null;const x=G(chavePer(k.data,ag));
+    x.ctr++;x.valor+=+k.valorTotal||0;if(ehPagoOrig(c.origem||l?.origem)){x.ctrPagos++;x.valorPagos+=+k.valorTotal||0;}});
+  return Object.entries(P).sort((a,b)=>a[0].localeCompare(b[0]));
+}
+function htmlOrigemPeriodo(f){
+  const ag=ui.trafAg||'semana';const ps=origemPorPeriodo(f.de,f.ate,ag);const T=ps.reduce((a,[,x])=>{['leads','pagos','org','inv','ctr','ctrPagos','valor','valorPagos'].forEach(k=>a[k]+=x[k]);Object.entries(x.contas).forEach(([c,v])=>a.contas[c]=(a.contas[c]||0)+v);return a;},{leads:0,pagos:0,org:0,inv:0,contas:{},ctr:0,ctrPagos:0,valor:0,valorPagos:0});
+  const pc=(a,b)=>b?Math.round(a/b*100)+'%':'—';const dias=diasEntre(f.de,f.ate)+1;const contas=Object.keys(T.contas);
+  const lin=(rot,x,cls)=>`<tr class="${cls||''}"><td class="strong">${rot}</td><td class="num">${x.leads}</td><td class="num">${x.pagos} <span class="small muted">${pc(x.pagos,x.leads)}</span></td><td class="num">${x.org} <span class="small muted">${pc(x.org,x.leads)}</span></td>
+    <td class="num">${brl(x.inv)}</td>${contas.length>1?contas.map(c=>`<td class="num small">${brl(x.contas[c]||0)}</td>`).join(''):''}<td class="num">${x.pagos&&x.inv?brl(x.inv/x.pagos):'—'}</td><td class="num">${x.ctrPagos}/${x.ctr}</td><td class="num">${brl(x.valorPagos)}</td>
+    <td class="num strong" style="color:${!x.inv?'inherit':x.valorPagos>=x.inv?'var(--green)':'var(--red)'}">${x.inv?num(x.valorPagos/x.inv,1)+'×':'—'}</td></tr>`;
+  return `<div class="card" style="margin-bottom:14px"><h3>Orgânico × anúncio e retorno <span class="tabs" style="margin:0;border:none">${[['dia','Diário'],['semana','Semanal'],['quinzena','Quinzenal'],['mes','Mensal']].map(([k,l])=>`<button class="tab ${ag===k?'active':''}" data-act="trafAg" data-id="${k}">${l}</button>`).join('')}</span></h3>
+    <div class="grid g-kpi" style="margin-bottom:10px">${kpi('Leads de anúncio',pc(T.pagos,T.leads),T.pagos+' de '+T.leads+' leads')}${kpi('Leads orgânicos',pc(T.org,T.leads),T.org+' leads')}${kpi('Investimento por dia',brl(T.inv/dias),brl(T.inv)+' no período'+(contas.length>1?' · '+contas.map(c=>esc(c)+': '+brl(T.contas[c])).join(' · '):''))}${kpi('Voltou em contratos (anúncio)',brl(T.valorPagos),T.inv?num(T.valorPagos/T.inv,1)+'× o investido · '+T.ctrPagos+' contrato(s)':'',T.inv?(T.valorPagos>=T.inv?'good':'bad'):'')}</div>
+    <div class="tbl"><table><thead><tr><th>Período</th><th class="num">Leads</th><th class="num">De anúncio</th><th class="num">Orgânicos</th><th class="num">Investido</th>${contas.length>1?contas.map(c=>`<th class="num small">${esc(c)}</th>`).join(''):''}<th class="num">Custo/lead</th><th class="num" title="contratos de anúncio / total">Contratos</th><th class="num">Valor (anúncio)</th><th class="num">Retorno</th></tr></thead>
+    <tbody>${ps.map(([k,x])=>lin(rotPer(k,ag),x)).join('')||'<tr><td colspan="9" class="empty">Sem dados no período</td></tr>'}${ps.length>1?lin('Total',T,'tot'):''}</tbody></table></div>
+    <div class="small muted" style="margin-top:6px">Lead "de anúncio": origem Facebook/Instagram/Google Ads (pelo código do anúncio, pelo WaSpeed ou quando o Claude informa que a conversa veio de anúncio). Contrato de anúncio: cliente com essa origem.</div></div>`;
+}
 V.trafego=()=>{
   if(!podeFin())return semPermissao();
   const f=filtroTrafego();if(f.de>f.ate)[f.de,f.ate]=[f.ate,f.de];
@@ -153,13 +177,13 @@ V.trafego=()=>{
     <div class="tabs" style="margin:0;border:none">${atalhos.map(([k,l])=>`<button class="tab" data-act="trafPer" data-id="${k}">${l}</button>`).join('')}</div>
     <select data-f="traf.status"><option value="">Todas as campanhas</option><option value="ativas"${f.status==='ativas'?' selected':''}>🟢 Só ativas</option><option value="inativas"${f.status==='inativas'?' selected':''}>⚪ Só inativas</option></select>
     <select data-f="traf.tipoCamp"><option value="">Teste e escala</option><option value="Teste"${f.tipoCamp==='Teste'?' selected':''}>🧪 Só testes</option><option value="Escala"${f.tipoCamp==='Escala'?' selected':''}>🚀 Só escala</option><option value="sem"${f.tipoCamp==='sem'?' selected':''}>Sem tipo</option></select>
-    <span class="grow"></span><button class="btn btn-ghost" data-act="trafIA">🤖 Análise para o Claude</button>${r.gasto&&mesInteiro?`<button class="btn btn-ghost" data-act="trafLancar">Lançar no financeiro</button>`:''}<button class="btn btn-gold" data-act="trafImportar">⇪ Importar do Meta Ads</button></div>`;
-  if(!db.trafego.length)return toolbar+`<div class="card"><h3>📣 Comece importando o relatório do Meta Ads</h3><ol class="small" style="line-height:1.8;margin:0;padding-left:18px">
+    <span class="grow"></span><button class="btn btn-ghost" data-act="trafIA">🤖 Análise para o Claude</button>${r.gasto&&mesInteiro?`<button class="btn btn-ghost" data-act="trafLancar">Lançar no financeiro</button>`:''}${INTEG?.meta?`<button class="btn btn-ghost" data-act="trafMetaAgora" title="${INTEG.metaEstado?.ultima?'Última busca: '+new Date(INTEG.metaEstado.ultima).toLocaleString('pt-BR'):''}">🔄 Buscar do Meta agora</button>`:`<a class="btn btn-ghost" style="text-decoration:none" href="#config" title="Configurações → Integrações: token do Meta Ads">🔌 Conectar Meta Ads</a>`}<button class="btn btn-gold" data-act="trafImportar">⇪ Importar planilha</button></div>`;
+  if(!db.trafego.length)return toolbar+htmlOrigemPeriodo(f)+`<div class="card"><h3>📣 Traga o investimento dos anúncios</h3><p class="small"><b>Automático (recomendado):</b> em <a href="#config">Configurações → Integrações</a>, cole o token do Meta Ads e os IDs das duas contas. O sistema busca o gasto de cada dia sozinho. <b>Pelo Claude:</b> peça "registre o investimento dos anúncios" mandando o print ou os números do Gerenciador. <b>Ou pela planilha:</b></p><ol class="small" style="line-height:1.8;margin:0;padding-left:18px">
     <li>Abra o <b>Gerenciador de Anúncios</b> (adsmanager.facebook.com) na aba <b>Campanhas</b>.</li><li>Escolha o período e, em <b>Detalhamento → Por tempo</b>, marque <b>Dia</b> (para o cálculo dia a dia).</li>
-    <li>Clique em <b>Relatórios → Exportar dados da tabela</b> (.csv ou .xlsx).</li><li>Aqui, clique em <b>⇪ Importar do Meta Ads</b>.</li></ol>
+    <li>Clique em <b>Relatórios → Exportar dados da tabela</b> (.csv ou .xlsx).</li><li>Aqui, clique em <b>⇪ Importar planilha</b>.</li></ol>
     <p class="small muted" style="margin-top:10px">Os fechamentos vêm do <b>CRM</b>: atendimentos com origem <b>Facebook / Instagram Ads</b> que você marcar como <b>Fechado</b>, na data de fechamento, com o valor dos honorários.</p></div>`;
   const filtrando=f.status||f.tipoCamp;
-  return toolbar+`${filtrando?`<div class="hint">Filtro aplicado: no CRM entram só os atendimentos com a <b>campanha</b> marcada (${r.chegaram.length} no período).</div>`:''}
+  return toolbar+htmlOrigemPeriodo(f)+`${filtrando?`<div class="hint">Filtro aplicado: no CRM entram só os atendimentos com a <b>campanha</b> marcada (${r.chegaram.length} no período).</div>`:''}
   <div class="grid g-kpi">${kpi('Investimento',brl(r.gasto)+var_(r.gasto,ant.gasto),`${fd(f.de)} a ${fd(f.ate)} · ${dur} dia(s)`)}
     ${kpi('Conversas / resultados (Meta)',num(r.res,0)+var_(r.res,ant.res),r.cpr!=null?brl(r.cpr)+' por resultado':'—')}
     ${kpi('Leads qualificados',num(r.qual,0)+var_(r.qual,ant.qual),r.cpq!=null?brl(r.cpq)+' por qualificado':'informe nos lançamentos (✏️)')}
@@ -220,6 +244,10 @@ function editTrafego(id){
     id&&(()=>{db.trafego=db.trafego.filter(x=>x.id!==id);}));
 }
 const TRAF_ACOES={
+  trafAg:k=>{ui.trafAg=k;render();},
+  trafMetaAgora:async()=>{if(precisaServidor())return;toast('Buscando no Meta Ads…');const f=filtroTrafego();
+    try{const r=await api('metaAds',{desde:f.de<addDays(-89)?addDays(-89):f.de,ate:today()});await puxar(false);await carregarIntegracoes();render();toast('Meta Ads: '+r.contas.map(c=>c.conta+' '+brl(c.investido)).join(' · ')+' ✓');}
+    catch(e){toast(e.msg||e.message||'Falha ao buscar no Meta',1);}},
   trafEditar:id=>editTrafego(id),trafNovo:()=>editTrafego(),
   trafImportar:()=>$('#file-trafego').click(),
   trafPer:k=>{const f=filtroTrafego(),h=today();

@@ -7,6 +7,7 @@
    ========================================================= */
 const CANAIS=['WhatsApp — Geral','WhatsApp — Salário-maternidade'];
 const ehCanalSm=c=>/matern/i.test(c||'');
+const canaisWhats=()=>CANAIS;
 /* chave do telefone: DDD + 8 últimos dígitos (ignora +55 e o 9º dígito) */
 function chaveTel(v){let d=digits(String(v??'').split('@')[0]);if(d.startsWith('55')&&d.length>=12)d=d.slice(2);if(d.startsWith('0'))d=d.slice(1);return d.length>=10?d.slice(0,2)+d.slice(-8):'';}
 function lerContatosWa(rows){
